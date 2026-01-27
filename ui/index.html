@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lion Launcher</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="logo">🦁 Lion Launcher</div>
+            <div class="nav-item active" data-page="profiles">Profiles</div>
+            <div class="nav-item" data-page="mods">Mod Browser</div>
+            <div class="nav-item" data-page="skins">Skins</div>
+            <div class="nav-item" data-page="settings">Settings</div>
+            <div style="flex: 1;"></div>
+            
+            <!-- Account Display -->
+            <div id="account-display" onclick="switchPage('settings')" 
+                 style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-light); border-radius: 8px; cursor: pointer; transition: all 0.3s; margin-top: 10px;">
+                <img id="account-head" src="https://mc-heads.net/avatar/MHF_Steve/40" 
+                     alt="Skin" style="width: 40px; height: 40px; border-radius: 4px; image-rendering: pixelated;">
+                <div style="flex: 1; min-width: 0;">
+                    <div id="account-name" style="font-weight: bold; color: var(--text-primary); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        Nicht angemeldet
+                    </div>
+                    <div id="account-type" style="font-size: 11px; color: var(--text-secondary);">
+                        Klicke zum Anmelden
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Profiles Page -->
+            <div id="page-profiles" class="page">
+                <div class="header">
+                    <h1>My Profiles</h1>
+                    <button class="btn" id="create-profile-btn">+ Create Profile</button>
+                </div>
+                <div class="content">
+                    <div class="profiles-grid" id="profiles-grid">
+                        <div class="loading">Loading profiles...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mod Browser Page -->
+            <div id="page-mods" class="page hidden">
+                <div class="header">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <button id="back-to-profile-btn" class="btn btn-secondary" onclick="backToProfileFromModBrowser()"
+                                style="display: none; padding: 10px 20px;">
+                            ← Back to Profile
+                        </button>
+                        <h1>Mod Browser</h1>
+                    </div>
+                </div>
+                <div class="content">
+                    <input type="text" class="search-bar" id="mod-search" placeholder="Search mods...">
+                    <div class="mod-browser">
+                        <div class="mod-list" id="mod-list">
+                            <div class="loading">Search for mods to get started</div>
+                        </div>
+                        <div class="filters">
+                            <div class="filter-section">
+                                <h3>Minecraft Version</h3>
+                                <select id="filter-version" class="filter-option" style="width: 100%; border: none;">
+                                    <option value="">All Versions</option>
+                                </select>
+                                <label style="display: block; margin-top: 10px; font-size: 12px; cursor: pointer;">
+                                    <input type="checkbox" id="show-snapshots" style="margin-right: 5px;">
+                                    Show Snapshots
+                                </label>
+                            </div>
+                            <div class="filter-section">
+                                <h3>Mod Loader</h3>
+                                <div class="filter-option" data-loader="fabric">Fabric</div>
+                                <div class="filter-option" data-loader="forge">Forge</div>
+                                <div class="filter-option" data-loader="neoforge">NeoForge</div>
+                                <div class="filter-option" data-loader="quilt">Quilt</div>
+                            </div>
+                            <div class="filter-section">
+                                <h3>Sort By</h3>
+                                <div class="filter-option active" data-sort="relevance">Relevance</div>
+                                <div class="filter-option" data-sort="downloads">Downloads</div>
+                                <div class="filter-option" data-sort="updated">Recently Updated</div>
+                                <div class="filter-option" data-sort="newest">Newest</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Skins Page -->
+            <div id="page-skins" class="page hidden">
+                <div class="header">
+                    <h1>Skins</h1>
+                </div>
+                <div class="content">
+                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 30px; height: calc(100vh - 180px);">
+                        <!-- 3D Skin Viewer -->
+                        <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; display: flex; flex-direction: column; align-items: center;">
+                            <h3 style="color: var(--gold); margin: 0 0 20px 0;">Dein Skin</h3>
+                            <div id="skin-viewer" style="flex: 1; width: 100%; display: flex; align-items: center; justify-content: center;">
+                                <img id="skin-3d-render" src="https://mc-heads.net/body/MHF_Steve/150" 
+                                     alt="3D Skin" style="max-height: 400px; image-rendering: pixelated;">
+                            </div>
+                            <div style="margin-top: 20px; text-align: center;">
+                                <p id="skin-player-name" style="color: var(--text-primary); font-size: 18px; font-weight: bold;">Steve</p>
+                                <p style="color: var(--text-secondary); font-size: 12px;">Klicke auf einen Skin um ihn anzuzeigen</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Skin Liste / Optionen -->
+                        <div style="display: flex; flex-direction: column; gap: 20px;">
+                            <!-- Aktueller Account Skin -->
+                            <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px;">
+                                <h3 style="color: var(--gold); margin: 0 0 15px 0;">Aktueller Skin</h3>
+                                <div id="current-skin-info" style="display: flex; align-items: center; gap: 15px;">
+                                    <img id="current-skin-head" src="https://mc-heads.net/avatar/MHF_Steve/64" 
+                                         style="width: 64px; height: 64px; border-radius: 8px; image-rendering: pixelated;">
+                                    <div>
+                                        <p id="current-skin-name" style="color: var(--text-primary); font-weight: bold;">Nicht angemeldet</p>
+                                        <p style="color: var(--text-secondary); font-size: 12px;">Melde dich mit deinem Microsoft-Account an um deinen Skin zu sehen</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Skin Suche -->
+                            <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; flex: 1; overflow: hidden; display: flex; flex-direction: column;">
+                                <h3 style="color: var(--gold); margin: 0 0 15px 0;">Spieler-Skin anzeigen</h3>
+                                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                                    <input type="text" id="skin-search-input" placeholder="Spielername eingeben..." 
+                                           style="flex: 1; padding: 12px; background: var(--bg-dark); border: 2px solid var(--bg-light); border-radius: 8px; color: var(--text-primary);">
+                                    <button class="btn" onclick="searchPlayerSkin()">Anzeigen</button>
+                                </div>
+                                
+                                <!-- Zuletzt angesehene Skins -->
+                                <h4 style="color: var(--text-secondary); margin: 15px 0 10px 0; font-size: 14px;">Zuletzt angesehen</h4>
+                                <div id="recent-skins" style="display: flex; flex-wrap: wrap; gap: 10px; overflow-y: auto;">
+                                    <p style="color: var(--text-secondary); font-size: 12px;">Noch keine Skins angesehen</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Page -->
+            <div id="page-settings" class="page hidden">
+                <div class="header">
+                    <h1>Settings</h1>
+                </div>
+                <div class="content" style="max-height: calc(100vh - 120px); overflow-y: auto;">
+                    
+                    <!-- Account Settings -->
+                    <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                        <h3 style="color: var(--gold); margin: 0 0 20px 0;">👤 Minecraft Account</h3>
+                        
+                        <!-- Aktiver Account -->
+                        <div id="active-account-display" style="background: var(--bg-light); border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+                            <div style="text-align: center; color: var(--text-secondary);">
+                                Kein Account angemeldet
+                            </div>
+                        </div>
+                        
+                        <!-- Account Buttons -->
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <button class="btn" onclick="startMicrosoftLogin()" style="flex: 1; min-width: 150px;">
+                                🔐 Microsoft Login
+                            </button>
+                            <button class="btn btn-secondary" onclick="showOfflineAccountModal()" style="flex: 1; min-width: 150px;">
+                                👤 Offline Account
+                            </button>
+                        </div>
+                        
+                        <!-- Account Liste -->
+                        <div id="accounts-list" style="margin-top: 20px;"></div>
+                    </div>
+                    
+                    <!-- Theme Settings -->
+                    <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                        <h3 style="color: var(--gold); margin: 0 0 20px 0;">🎨 Erscheinungsbild</h3>
+
+                        <!-- Dark/Light Mode -->
+                        <div class="form-group" style="margin-bottom: 20px;">
+                            <label style="margin-bottom: 10px; display: block;">Theme</label>
+                            <div style="display: flex; gap: 15px;">
+                                <button id="theme-dark-btn" class="theme-btn active" onclick="setTheme('dark')"
+                                        style="flex: 1; padding: 15px; background: #1a1a1a; border: 2px solid var(--gold); border-radius: 8px; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px;">
+                                    🌙 Dark
+                                </button>
+                                <button id="theme-light-btn" class="theme-btn" onclick="setTheme('light')"
+                                        style="flex: 1; padding: 15px; background: #f5f5f5; border: 2px solid transparent; border-radius: 8px; color: #1a1a1a; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px;">
+                                    ☀️ Light
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Accent Color -->
+                        <div class="form-group">
+                            <label style="margin-bottom: 10px; display: block;">Akzentfarbe</label>
+                            <div id="color-palette" style="display: flex; flex-wrap: wrap; gap: 10px;">
+                                <div class="color-option active" data-color="gold" onclick="setAccentColor('gold')"
+                                     style="width: 45px; height: 45px; background: #FFD700; border-radius: 8px; cursor: pointer; border: 3px solid var(--gold);"></div>
+                                <div class="color-option" data-color="blue" onclick="setAccentColor('blue')"
+                                     style="width: 45px; height: 45px; background: #4A90D9; border-radius: 8px; cursor: pointer; border: 3px solid transparent;"></div>
+                                <div class="color-option" data-color="green" onclick="setAccentColor('green')"
+                                     style="width: 45px; height: 45px; background: #4CAF50; border-radius: 8px; cursor: pointer; border: 3px solid transparent;"></div>
+                                <div class="color-option" data-color="purple" onclick="setAccentColor('purple')"
+                                     style="width: 45px; height: 45px; background: #9C27B0; border-radius: 8px; cursor: pointer; border: 3px solid transparent;"></div>
+                                <div class="color-option" data-color="red" onclick="setAccentColor('red')"
+                                     style="width: 45px; height: 45px; background: #F44336; border-radius: 8px; cursor: pointer; border: 3px solid transparent;"></div>
+                                <div class="color-option" data-color="orange" onclick="setAccentColor('orange')"
+                                     style="width: 45px; height: 45px; background: #FF9800; border-radius: 8px; cursor: pointer; border: 3px solid transparent;"></div>
+                                <div class="color-option" data-color="pink" onclick="setAccentColor('pink')"
+                                     style="width: 45px; height: 45px; background: #E91E63; border-radius: 8px; cursor: pointer; border: 3px solid transparent;"></div>
+                                <div class="color-option" data-color="cyan" onclick="setAccentColor('cyan')"
+                                     style="width: 45px; height: 45px; background: #00BCD4; border-radius: 8px; cursor: pointer; border: 3px solid transparent;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- General Settings -->
+                    <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px;">
+                        <h3 style="color: var(--gold); margin: 0 0 20px 0;">⚙️ Allgemein</h3>
+                        <div class="form-group">
+                            <label>Memory (MB)</label>
+                            <input type="number" id="settings-memory" placeholder="4096">
+                        </div>
+                        <div class="form-group">
+                            <label>Java Path (Optional)</label>
+                            <input type="text" id="settings-java" placeholder="Leave empty to auto-detect">
+                        </div>
+                        <button class="btn" id="save-settings-btn">Save Settings</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Profile Modal -->
+    <div id="create-profile-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Create New Profile</div>
+            <div class="form-group">
+                <label>Profile Name</label>
+                <input type="text" id="profile-name" placeholder="My Profile">
+            </div>
+            <div class="form-group">
+                <label>Minecraft Version</label>
+                <select id="profile-mc-version" style="font-weight: 600; color: #999;">
+                    <option value="">Loading versions...</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Mod Loader</label>
+                <select id="profile-loader" style="font-weight: 600; color: #999;">
+                    <option value="vanilla">Vanilla (No Mods)</option>
+                    <option value="fabric" selected>Fabric (Recommended)</option>
+                    <option value="forge">Forge (Popular)</option>
+                    <option value="neoforge">NeoForge (Modern Forge)</option>
+                    <option value="quilt">Quilt (Fabric Fork)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Loader Version</label>
+                <select id="profile-loader-version" style="font-weight: 600; color: #999;">
+                    <option value="latest">Latest</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancel-profile-btn">Cancel</button>
+                <button class="btn" id="save-profile-btn">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
