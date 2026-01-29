@@ -45,6 +45,13 @@ Ein minimalistischer Minecraft Launcher für Linux und Windows, geschrieben in R
 
 ## Installation
 
+### Vorgebaute Releases (Einfachst)
+
+Lade die neueste Version von den [Releases](https://github.com/yourusername/Lion-Launcher/releases):
+
+- **Linux**: `lion-launcher_*.AppImage` oder `.deb`
+- **Windows**: `Lion-Launcher_*_setup.exe` oder `.msi`
+
 ### Aus Source bauen
 
 ```bash
@@ -52,12 +59,23 @@ Ein minimalistischer Minecraft Launcher für Linux und Windows, geschrieben in R
 git clone https://github.com/yourusername/Lion-Launcher.git
 cd Lion-Launcher
 
-# Build
-cargo build --release
+# Tauri CLI installieren
+cargo install tauri-cli --version "^2.0.0"
 
-# Starten
-./target/release/Lion-Launcher
+# Linux: Dependencies installieren
+sudo apt install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+    libayatana-appindicator3-dev librsvg2-dev patchelf
+
+# Release Build erstellen
+cargo tauri build --bundles appimage,deb
+
+# Oder verwende das Build-Skript
+./build-release.sh
 ```
+
+**Ausgabe:** `target/release/bundle/appimage/*.AppImage`
+
+**Detaillierte Build-Anleitung:** Siehe [BUILD.md](BUILD.md) oder [QUICKBUILD.md](QUICKBUILD.md)
 
 ### Linux Dependencies (Ubuntu/Debian)
 

@@ -450,3 +450,445 @@ async fn search_modrinth_by_name(name: &str) -> Result<Option<ModrinthSearchResu
     }
 }
 
+// ==================== RESOURCE PACKS ====================
+
+#[derive(serde::Serialize)]
+pub struct InstalledResourcePack {
+    pub name: String,
+    pub icon_path: Option<String>,
+    pub is_folder: bool,
+    pub size: u64,
+}
+
+#[tauri::command]
+pub async fn get_installed_resourcepacks(profile_id: String) -> Result<Vec<InstalledResourcePack>, String> {
+    use crate::core::profiles::ProfileManager;
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    let rp_dir = profile.game_dir.join("resourcepacks");
+
+    if !rp_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut packs = Vec::new();
+
+    let entries = std::fs::read_dir(&rp_dir).map_err(|e| e.to_string())?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        let name = path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let is_folder = path.is_dir();
+        let size = if !is_folder {
+            std::fs::metadata(&path)
+                .ok()
+                .map(|m| m.len())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        // Suche nach pack.png Icon
+        let icon_path = if is_folder {
+            let icon = path.join("pack.png");
+            if icon.exists() {
+                Some(icon.to_string_lossy().to_string())
+            } else {
+                None
+            }
+        } else if name.ends_with(".zip") {
+            // Für ZIP-Dateien könnten wir das Icon extrahieren, aber das ist aufwendig
+            // Verwende Placeholder
+            None
+        } else {
+            None
+        };
+
+        packs.push(InstalledResourcePack {
+            name,
+            icon_path,
+            is_folder,
+            size,
+        });
+    }
+
+    // Sortiere alphabetisch
+    packs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+    Ok(packs)
+}
+
+// ==================== SHADER PACKS ====================
+
+#[tauri::command]
+pub async fn get_installed_shaderpacks(profile_id: String) -> Result<Vec<InstalledResourcePack>, String> {
+    use crate::core::profiles::ProfileManager;
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    let shader_dir = profile.game_dir.join("shaderpacks");
+
+    if !shader_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut packs = Vec::new();
+
+    let entries = std::fs::read_dir(&shader_dir).map_err(|e| e.to_string())?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        let name = path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let is_folder = path.is_dir();
+        let size = if !is_folder {
+            std::fs::metadata(&path)
+                .ok()
+                .map(|m| m.len())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        packs.push(InstalledResourcePack {
+            name,
+            icon_path: None,
+            is_folder,
+            size,
+        });
+    }
+
+    packs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+    Ok(packs)
+}
+
+// ==================== SETTINGS SYNC ====================
+
+/// Synchronisiert die Minecraft-Einstellungen (options.txt) zwischen Profilen
+/// und einer globalen shared_options.txt
+
+#[tauri::command]
+pub async fn sync_settings_to_profile(profile_id: String) -> Result<(), String> {
+    use crate::core::profiles::ProfileManager;
+    use crate::config::defaults::shared_settings_file;
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    if !profile.settings_sync {
+        return Ok(()); // Sync ist für dieses Profil deaktiviert
+    }
+
+    let shared_file = shared_settings_file();
+    let profile_options = profile.game_dir.join("options.txt");
+
+    // Wenn shared_options.txt existiert, merge sie ins Profil
+    if shared_file.exists() {
+        let shared_content = tokio::fs::read_to_string(&shared_file)
+            .await
+            .map_err(|e| format!("Konnte shared_options.txt nicht lesen: {}", e))?;
+
+        // Stelle sicher, dass das Verzeichnis existiert
+        if let Some(parent) = profile_options.parent() {
+            tokio::fs::create_dir_all(parent).await.ok();
+        }
+
+        // Wenn Profil bereits options.txt hat, merge
+        let final_content = if profile_options.exists() {
+            let existing_content = tokio::fs::read_to_string(&profile_options)
+                .await
+                .map_err(|e| format!("Konnte existierende options.txt nicht lesen: {}", e))?;
+
+            // Merge: Existing bleibt Basis, shared wird darüber gelegt (aber nicht Blacklist)
+            merge_options_content(&existing_content, &shared_content)
+        } else {
+            // Keine existierende options.txt - einfach shared nehmen
+            shared_content
+        };
+
+        tokio::fs::write(&profile_options, &final_content)
+            .await
+            .map_err(|e| format!("Konnte options.txt nicht schreiben: {}", e))?;
+
+        tracing::info!("Settings synced to profile: {} (merged with existing)", profile_id);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn sync_settings_from_profile(_profile_id: String) -> Result<(), String> {
+    // Rufe die automatische Sync-Funktion auf
+    auto_sync_all_settings().await
+}
+
+/// Automatische Settings-Synchronisation:
+/// Sammelt alle options.txt von allen Profilen, sortiert nach Änderungszeit,
+/// und merged sie zusammen. Die neueste hat Vorrang (außer Blacklist-Keys).
+/// Dann werden alle Profile mit Sync aktualisiert.
+pub async fn auto_sync_all_settings() -> Result<(), String> {
+    use crate::core::profiles::ProfileManager;
+    use crate::config::defaults::shared_settings_file;
+    use std::time::SystemTime;
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    // Sammle alle options.txt Pfade mit ihrer Änderungszeit
+    let mut options_files: Vec<(SystemTime, std::path::PathBuf, String)> = Vec::new();
+
+    for profile in &profiles.profiles {
+        // Nur Profile mit aktiviertem Sync
+        if !profile.settings_sync {
+            continue;
+        }
+
+        let options_path = profile.game_dir.join("options.txt");
+        if options_path.exists() {
+            if let Ok(metadata) = std::fs::metadata(&options_path) {
+                let mut time = SystemTime::UNIX_EPOCH;
+
+                if let Ok(modified) = metadata.modified() {
+                    time = time.max(modified);
+                }
+                if let Ok(created) = metadata.created() {
+                    time = time.max(created);
+                }
+
+                options_files.push((time, options_path, profile.id.clone()));
+            }
+        }
+    }
+
+    if options_files.is_empty() {
+        tracing::info!("No options.txt files found for sync");
+        return Ok(());
+    }
+
+    // Sortiere nach Zeit (älteste zuerst, damit neueste überschreibt)
+    options_files.sort_by_key(|(time, _, _)| *time);
+
+    tracing::info!("Found {} options.txt files for sync", options_files.len());
+
+    // Starte mit leerer HashMap
+    let mut combined_values: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
+    // Lese shared_options.txt als Basis (falls vorhanden)
+    let shared_file = shared_settings_file();
+    if shared_file.exists() {
+        if let Ok(content) = std::fs::read_to_string(&shared_file) {
+            for (key, value) in parse_options_txt(&content) {
+                combined_values.insert(key, value);
+            }
+        }
+    }
+
+    // Merge alle options.txt (sortiert nach Zeit, neueste zuletzt = überschreibt)
+    for (_, path, _profile_id) in &options_files {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            for (key, value) in parse_options_txt(&content) {
+                // Blacklist-Keys werden nur hinzugefügt wenn sie noch nicht existieren
+                if !is_blacklisted_key(&key) {
+                    combined_values.insert(key, value);
+                } else if !combined_values.contains_key(&key) {
+                    combined_values.insert(key, value);
+                }
+            }
+        }
+    }
+
+    // Erstelle den kombinierten options.txt String
+    let combined_content = create_options_txt_string(&combined_values);
+
+    // Speichere in shared_options.txt
+    if let Some(parent) = shared_file.parent() {
+        tokio::fs::create_dir_all(parent).await.ok();
+    }
+    tokio::fs::write(&shared_file, &combined_content)
+        .await
+        .map_err(|e| format!("Konnte shared_options.txt nicht schreiben: {}", e))?;
+
+    tracing::info!("Created combined shared_options.txt with {} settings", combined_values.len());
+
+    // Jetzt alle Profile mit Sync aktualisieren
+    let mut synced_count = 0;
+    for profile in &profiles.profiles {
+        if !profile.settings_sync {
+            continue;
+        }
+
+        let profile_options = profile.game_dir.join("options.txt");
+
+        // Merge: Behalte profil-spezifische Keys (Blacklist)
+        let final_content = if profile_options.exists() {
+            if let Ok(existing) = std::fs::read_to_string(&profile_options) {
+                merge_options_content(&existing, &combined_content)
+            } else {
+                combined_content.clone()
+            }
+        } else {
+            // Erstelle Verzeichnis falls nötig
+            if let Some(parent) = profile_options.parent() {
+                tokio::fs::create_dir_all(parent).await.ok();
+            }
+            combined_content.clone()
+        };
+
+        if let Err(e) = tokio::fs::write(&profile_options, &final_content).await {
+            tracing::error!("Failed to sync to profile {}: {}", profile.name, e);
+        } else {
+            synced_count += 1;
+        }
+    }
+
+    tracing::info!("Auto-synced settings to {} profiles", synced_count);
+    Ok(())
+}
+
+/// Parst eine options.txt in Key-Value Paare
+fn parse_options_txt(content: &str) -> Vec<(String, String)> {
+    let mut values = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if let Some((key, value)) = line.split_once(':') {
+            values.push((key.to_string(), value.to_string()));
+        }
+    }
+    values
+}
+
+/// Erstellt einen options.txt String aus einer HashMap
+fn create_options_txt_string(values: &std::collections::HashMap<String, String>) -> String {
+    let mut lines: Vec<String> = values
+        .iter()
+        .map(|(k, v)| format!("{}:{}", k, v))
+        .collect();
+    lines.sort(); // Sortiere für konsistente Reihenfolge
+    lines.join("\n")
+}
+
+/// Prüft ob ein Key in der Blacklist ist (nicht synchronisiert werden soll)
+fn is_blacklisted_key(key: &str) -> bool {
+    // Nur version bleibt profil-spezifisch
+    matches!(key, "version")
+}
+
+#[tauri::command]
+pub async fn toggle_settings_sync(profile_id: String, enabled: bool) -> Result<(), String> {
+    use crate::core::profiles::ProfileManager;
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let mut profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    if let Some(profile) = profiles.get_profile_mut(&profile_id) {
+        profile.settings_sync = enabled;
+        profile_manager.save_profiles(&profiles).await.map_err(|e| e.to_string())?;
+
+        // Wenn aktiviert, synchronisiere sofort
+        if enabled {
+            // Kopiere shared settings ins Profil (wenn vorhanden)
+            sync_settings_to_profile(profile_id).await?;
+        }
+
+        tracing::info!("Settings sync {} for profile", if enabled { "enabled" } else { "disabled" });
+    } else {
+        return Err("Profile not found".to_string());
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_settings_sync_status(profile_id: String) -> Result<bool, String> {
+    use crate::core::profiles::ProfileManager;
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    Ok(profile.settings_sync)
+}
+
+
+/// Interne Merge-Funktion
+fn merge_options_content(existing: &str, new_content: &str) -> String {
+    use std::collections::HashMap;
+
+    // Keys die NICHT synchronisiert werden sollen (version-spezifisch)
+    let blacklist: Vec<&str> = vec![
+        "version",           // Minecraft version number - bleibt profil-spezifisch
+    ];
+
+    // Parse beide in key-value Maps
+    let mut settings: HashMap<String, String> = HashMap::new();
+
+    // Parse existierende Settings und behalte sie
+    for line in existing.lines() {
+        if let Some((key, value)) = parse_option_line(line) {
+            settings.insert(key, value);
+        }
+    }
+
+    // Merge neue Settings (überschreibt existierende, außer Blacklist)
+    for line in new_content.lines() {
+        if let Some((key, value)) = parse_option_line(line) {
+            // Überspringe Keys in der Blacklist
+            if !blacklist.contains(&key.as_str()) {
+                settings.insert(key, value);
+            } else {
+                // Wenn Key in Blacklist ist und noch nicht existiert, füge ihn hinzu
+                // (für neue Profile)
+                if !settings.contains_key(&key) {
+                    settings.insert(key, value);
+                }
+            }
+        }
+    }
+
+    // Sortiere und schreibe zurück
+    let mut lines: Vec<String> = settings
+        .into_iter()
+        .map(|(k, v)| format!("{}:{}", k, v))
+        .collect();
+    lines.sort();
+
+    lines.join("\n")
+}
+
+fn parse_option_line(line: &str) -> Option<(String, String)> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+
+    if let Some(colon_pos) = line.find(':') {
+        let key = line[..colon_pos].to_string();
+        let value = line[colon_pos + 1..].to_string();
+        Some((key, value))
+    } else {
+        None
+    }
+}
+

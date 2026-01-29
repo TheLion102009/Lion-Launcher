@@ -11,9 +11,8 @@
 
         <!-- Sidebar -->
         <div class="sidebar">
-            <div class="logo">🦁 Lion Launcher</div>
             <div class="nav-item active" data-page="profiles">Profiles</div>
-            <div class="nav-item" data-page="mods">Mod Browser</div>
+            <div class="nav-item" data-page="mods">Content Browser</div>
             <div class="nav-item" data-page="skins">Skins</div>
             <div class="nav-item" data-page="settings">Settings</div>
             <div style="flex: 1;"></div>
@@ -39,8 +38,9 @@
             <!-- Profiles Page -->
             <div id="page-profiles" class="page">
                 <div class="header">
-                    <h1>My Profiles</h1>
-                    <button class="btn" id="create-profile-btn">+ Create Profile</button>
+                    <h1 style="display: flex; align-items: center; gap: 15px; font-size: 32px;">
+                        🦁 Lion Launcher
+                    </h1>
                 </div>
                 <div class="content">
                     <div class="profiles-grid" id="profiles-grid">
@@ -49,7 +49,7 @@
                 </div>
             </div>
 
-            <!-- Mod Browser Page -->
+            <!-- Content Browser Page -->
             <div id="page-mods" class="page hidden">
                 <div class="header">
                     <div style="display: flex; align-items: center; gap: 15px;">
@@ -57,14 +57,40 @@
                                 style="display: none; padding: 10px 20px;">
                             ← Back to Profile
                         </button>
-                        <h1>Mod Browser</h1>
+                        <h1>Content Browser</h1>
+                        <span id="mod-browser-profile-name" style="color: var(--text-secondary); font-size: 14px;"></span>
                     </div>
                 </div>
                 <div class="content">
-                    <input type="text" class="search-bar" id="mod-search" placeholder="Search mods...">
+                    <input type="text" class="search-bar" id="mod-search" placeholder="Search content...">
+
+                    <!-- Content Categories -->
+                    <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                        <button class="btn btn-secondary active" data-content-type="mods"
+                                onclick="switchContentType('mods')"
+                                style="padding: 8px 20px; font-size: 14px;">
+                            📦 Mods
+                        </button>
+                        <button class="btn btn-secondary" data-content-type="resourcepacks"
+                                onclick="switchContentType('resourcepacks')"
+                                style="padding: 8px 20px; font-size: 14px;">
+                            🎨 Resource Packs
+                        </button>
+                        <button class="btn btn-secondary" data-content-type="shaderpacks"
+                                onclick="switchContentType('shaderpacks')"
+                                style="padding: 8px 20px; font-size: 14px;">
+                            ✨ Shader Packs
+                        </button>
+                        <button class="btn btn-secondary" data-content-type="modpacks"
+                                onclick="switchContentType('modpacks')"
+                                style="padding: 8px 20px; font-size: 14px;">
+                            📚 Modpacks
+                        </button>
+                    </div>
+
                     <div class="mod-browser">
                         <div class="mod-list" id="mod-list">
-                            <div class="loading">Search for mods to get started</div>
+                            <div class="loading">Search for content to get started</div>
                         </div>
                         <div class="filters">
                             <div class="filter-section">
@@ -77,7 +103,7 @@
                                     Show Snapshots
                                 </label>
                             </div>
-                            <div class="filter-section">
+                            <div class="filter-section" id="loader-filter-section">
                                 <h3>Mod Loader</h3>
                                 <div class="filter-option" data-loader="fabric">Fabric</div>
                                 <div class="filter-option" data-loader="forge">Forge</div>

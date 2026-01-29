@@ -48,6 +48,7 @@ let selectedFilters = {
 let currentModSearchQuery = '';
 let currentModPage = 0;
 const MODS_PER_PAGE = 20;
+let currentContentType = 'mods'; // mods, resourcepacks, shaderpacks, modpacks
 
 // Theme State
 let currentTheme = 'dark';
@@ -215,8 +216,41 @@ function switchPage(page) {
         }
     }
 
+    // Aktualisiere Profilname im Mod-Browser
+    const profileNameSpan = document.getElementById('mod-browser-profile-name');
+    if (profileNameSpan) {
+        if (page === 'mods' && currentProfile) {
+            profileNameSpan.textContent = `für "${currentProfile.name}" (${currentProfile.minecraft_version} ${currentProfile.loader.loader})`;
+            profileNameSpan.style.display = 'inline';
+        } else {
+            profileNameSpan.textContent = '';
+            profileNameSpan.style.display = 'none';
+        }
+    }
+
+    // Zeige/Verstecke Modpacks Button je nach Kontext
+    const modpacksBtn = document.querySelector('[data-content-type="modpacks"]');
+    if (modpacksBtn) {
+        if (page === 'mods' && currentProfile) {
+            // Aus Profil geöffnet - verstecke Modpacks
+            modpacksBtn.style.display = 'none';
+        } else if (page === 'mods') {
+            // Normal geöffnet - zeige Modpacks
+            modpacksBtn.style.display = '';
+        }
+    }
+
     // Aktualisiere Cache wenn Mod-Browser geöffnet wird und rendere neu
     if (page === 'mods') {
+        if (!currentProfile) {
+            debugLog('Warning: No profile selected when opening mod browser', 'warn');
+        } else {
+            debugLog('Opening mod browser for profile: ' + currentProfile.name, 'info');
+
+            // Setze Filter automatisch basierend auf Profil
+            applyProfileFilters(currentProfile);
+        }
+
         loadInstalledModIds().then(() => {
             // Lade Mods neu mit aktuellem Cache
             if (currentModSearchQuery) {
@@ -225,6 +259,36 @@ function switchPage(page) {
                 loadPopularMods(currentModPage);
             }
         });
+    }
+}
+
+// Wendet die Filter basierend auf dem Profil an
+function applyProfileFilters(profile) {
+    // Setze Minecraft Version Filter
+    const versionFilter = document.getElementById('filter-version');
+    if (versionFilter && profile.minecraft_version) {
+        versionFilter.value = profile.minecraft_version;
+        selectedFilters.version = profile.minecraft_version;
+        debugLog('Set version filter to: ' + profile.minecraft_version, 'info');
+    }
+
+    // Setze Mod Loader Filter
+    const loaderName = profile.loader.loader;
+    if (loaderName && loaderName !== 'vanilla') {
+        // Finde den Button für den Loader
+        const loaderBtn = document.querySelector(`[data-loader="${loaderName}"]`);
+        if (loaderBtn) {
+            // Entferne active von allen Loader-Buttons
+            document.querySelectorAll('[data-loader]').forEach(b => b.classList.remove('active'));
+            // Setze den richtigen als active
+            loaderBtn.classList.add('active');
+            selectedFilters.loader = loaderName;
+            debugLog('Set loader filter to: ' + loaderName, 'info');
+        }
+    } else {
+        // Vanilla = kein Loader-Filter
+        document.querySelectorAll('[data-loader]').forEach(b => b.classList.remove('active'));
+        selectedFilters.loader = '';
     }
 }
 
@@ -274,40 +338,56 @@ function renderProfiles() {
     if (!grid) return;
 
     if (profiles.length === 0) {
+        // Wenn keine Profile: Nur Create-Card anzeigen
         grid.innerHTML = `
-            <div style="grid-column: 1 / -1; text-align: center; padding: 60px 20px;">
-                <div style="font-size: 48px; margin-bottom: 20px;">📦</div>
-                <h2 style="color: var(--gold); margin-bottom: 15px;">Noch keine Profile erstellt</h2>
-                <p style="color: var(--text-secondary); margin-bottom: 30px;">
-                    Erstelle dein erstes Profil, um Minecraft zu spielen!
-                </p>
-                <button class="btn" onclick="document.getElementById('create-profile-btn').click()" 
-                        style="font-size: 18px; padding: 15px 40px;">
-                    + Profil erstellen
-                </button>
+            <div class="profile-card" onclick="openCreateProfileModal()" 
+                 style="cursor: pointer; background: var(--bg-light); border: 2px dashed var(--gold); display: flex; flex-direction: column; align-items: center; justify-content: center; transition: all 0.3s;"
+                 onmouseover="this.style.background='var(--bg-dark)'; this.style.transform='scale(1.02)';"
+                 onmouseout="this.style.background='var(--bg-light)'; this.style.transform='scale(1)';">
+                <div style="font-size: 64px; color: var(--gold); margin-bottom: 15px;">+</div>
+                <div style="color: var(--gold); font-weight: 600; font-size: 16px;">Profil erstellen</div>
             </div>
         `;
         return;
     }
 
-    grid.innerHTML = profiles.map(profile => {
+    // Profile-Cards + Create-Card am Ende
+    const profileCards = profiles.map(profile => {
         // Modloader-Name formatieren (erster Buchstabe groß)
         const loaderName = profile.loader.loader.charAt(0).toUpperCase() + profile.loader.loader.slice(1);
         const loaderDisplay = profile.loader.loader === 'vanilla' ? 'Vanilla' : loaderName;
+
+        // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst Emoji
+        const iconHTML = profile.icon_path
+            ? `<img src="${profile.icon_path}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;" onerror="this.style.display='none'; this.parentElement.innerHTML='🎮';">`
+            : '🎮';
 
         return `
         <div class="profile-card" data-context-menu="profile" data-profile-id="${profile.id}"
              onclick="showProfileDetails('${profile.id}')"
              oncontextmenu="showProfileContextMenu(event, '${profile.id}')">
             <div class="profile-icon" style="font-size: 48px;">
-                ${profile.icon_path ? '🎮' : '📦'}
+                ${iconHTML}
             </div>
             <div class="profile-name">${profile.name}</div>
             <div class="profile-info">${loaderDisplay} ${profile.minecraft_version}</div>
             <button class="btn" onclick="event.stopPropagation(); launchProfile('${profile.id}')" 
                     style="width: 100%; margin-top: 15px; font-size: 14px; padding: 12px;">▶ Play</button>
         </div>
-    `}).join('');
+    `});
+
+    // Create-Card am Ende hinzufügen
+    const createCard = `
+        <div class="profile-card" onclick="openCreateProfileModal()" 
+             style="cursor: pointer; background: var(--bg-light); border: 2px dashed var(--gold); display: flex; flex-direction: column; align-items: center; justify-content: center; transition: all 0.3s;"
+             onmouseover="this.style.background='var(--bg-dark)'; this.style.transform='scale(1.02)';"
+             onmouseout="this.style.background='var(--bg-light)'; this.style.transform='scale(1)';">
+            <div style="font-size: 64px; color: var(--gold); margin-bottom: 15px;">+</div>
+            <div style="color: var(--gold); font-weight: 600; font-size: 16px;">Profil erstellen</div>
+        </div>
+    `;
+
+    grid.innerHTML = profileCards.join('') + createCard;
 }
 
 // Profil-Kontextmenü bei Rechtsklick
@@ -490,6 +570,24 @@ function openProfileSettings(profileId) {
                         </button>
                     </div>
                 </div>
+                
+                <!-- Settings Sync -->
+                <div style="margin-bottom: 15px; background: var(--bg-light); padding: 15px; border-radius: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="flex: 1;">
+                            <label style="display: block; color: var(--text-primary); font-size: 14px; font-weight: 500;">🔄 Settings synchronisieren</label>
+                            <span style="color: var(--text-secondary); font-size: 11px; display: block; margin-top: 5px;">
+                                Synchronisiert Keybinds und Einstellungen automatisch zwischen allen Profilen.
+                                Die neueste Änderung hat Vorrang.
+                            </span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="edit-settings-sync" ${profile.settings_sync !== false ? 'checked' : ''} 
+                                   onchange="toggleSettingsSync('${profile.id}', this.checked)">
+                            <span class="settings-sync-slider"></span>
+                        </label>
+                    </div>
+                </div>
             </div>
             
             <!-- Footer -->
@@ -528,6 +626,48 @@ function closeProfileSettingsModal() {
     const modal = document.getElementById('profile-settings-modal');
     if (modal) modal.remove();
     selectedProfileIcon = null;
+}
+
+// ==================== SETTINGS SYNC ====================
+
+async function toggleSettingsSync(profileId, enabled) {
+    try {
+        await invoke('toggle_settings_sync', { profileId, enabled });
+
+        // Aktualisiere Slider-Farbe
+        const slider = document.querySelector('.settings-sync-slider');
+        if (slider) {
+            slider.style.backgroundColor = enabled ? 'var(--gold)' : 'var(--bg-medium)';
+        }
+
+        showToast(enabled ? 'Settings-Sync aktiviert' : 'Settings-Sync deaktiviert', 'success', 2000);
+        debugLog(`Settings sync ${enabled ? 'enabled' : 'disabled'} for profile ${profileId}`);
+    } catch (error) {
+        debugLog('Failed to toggle settings sync: ' + error, 'error');
+        showToast('Fehler: ' + error, 'error', 3000);
+    }
+}
+
+async function syncSettingsFromProfile(profileId) {
+    try {
+        await invoke('sync_settings_from_profile', { profileId });
+        showToast('Settings wurden zu allen Profilen mit Sync synchronisiert!', 'success', 3000);
+        debugLog('Settings synced from profile ' + profileId + ' to all other profiles');
+    } catch (error) {
+        debugLog('Failed to sync settings from profile: ' + error, 'error');
+        showToast('Fehler: ' + error, 'error', 3000);
+    }
+}
+
+async function syncSettingsToProfile(profileId) {
+    try {
+        await invoke('sync_settings_to_profile', { profileId });
+        showToast('Standard-Einstellungen auf Profil angewendet', 'success', 3000);
+        debugLog('Settings synced to profile ' + profileId);
+    } catch (error) {
+        debugLog('Failed to sync settings to profile: ' + error, 'error');
+        showToast('Fehler: ' + error, 'error', 3000);
+    }
 }
 
 async function saveProfileSettingsFromModal(profileId) {
@@ -739,6 +879,11 @@ function showProfileDetails(profileId) {
     const grid = document.getElementById('profiles-grid');
     if (!grid) return;
 
+    // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst Emoji
+    const iconHTML = profile.icon_path
+        ? `<img src="${profile.icon_path}" style="width: 64px; height: 64px; object-fit: cover; border-radius: 8px;" onerror="this.style.display='none'; this.parentElement.innerHTML='🎮';">`
+        : '🎮';
+
     grid.innerHTML = `
         <div style="grid-column: 1 / -1;">
             <!-- Header mit zurück Button -->
@@ -747,8 +892,8 @@ function showProfileDetails(profileId) {
                     ← Zurück
                 </button>
                 <div style="display: flex; align-items: center; gap: 15px; flex: 1;">
-                    <div style="font-size: 64px;">
-                        ${profile.icon_path ? '🎮' : '📦'}
+                    <div style="width: 64px; height: 64px; font-size: 64px; display: flex; align-items: center; justify-content: center;">
+                        ${iconHTML}
                     </div>
                     <div>
                         <h2 style="color: var(--gold); margin: 0 0 5px 0;">${profile.name}</h2>
@@ -763,7 +908,7 @@ function showProfileDetails(profileId) {
             </div>
             
             <!-- Tab Navigation -->
-            <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid var(--bg-light);">
+            <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid var(--bg-light); align-items: center;">
                 <button class="profile-tab active" data-tab="mods" onclick="switchProfileTab('mods')" 
                         style="padding: 10px 20px; background: none; border: none; color: var(--text-primary); cursor: pointer; border-bottom: 3px solid var(--gold);">
                     📦 Mods
@@ -779,6 +924,15 @@ function showProfileDetails(profileId) {
                 <button class="profile-tab" data-tab="logs" onclick="switchProfileTab('logs')" 
                         style="padding: 10px 20px; background: none; border: none; color: var(--text-secondary); cursor: pointer; border-bottom: 3px solid transparent;">
                     📋 Logs
+                </button>
+                <div style="flex: 1;"></div>
+                <button onclick="openContentBrowser('${profile.id}')" 
+                        style="padding: 6px 14px; font-size: 12px; background: var(--bg-light); color: var(--gold); 
+                               border: 1px solid var(--bg-light); border-radius: 4px; cursor: pointer; font-weight: 500;
+                               transition: all 0.2s ease; margin-bottom: 8px;"
+                        onmouseover="this.style.background='var(--bg-dark)'; this.style.borderColor='var(--gold)';"
+                        onmouseout="this.style.background='var(--bg-light)'; this.style.borderColor='var(--bg-light)';">
+                    + Add Content
                 </button>
             </div>
             
@@ -823,6 +977,10 @@ function switchProfileTab(tabName) {
             startModsWatcher(currentProfile.id);
         } else if (tabName === 'logs') {
             loadLogs(currentProfile.id);
+        } else if (tabName === 'resourcepacks') {
+            loadInstalledResourcePacks(currentProfile.id);
+        } else if (tabName === 'shaderpacks') {
+            loadInstalledShaderPacks(currentProfile.id);
         }
     }
 }
@@ -842,9 +1000,6 @@ function renderProfileTabContent(tabName, profile) {
                         </button>
                         <button class="btn btn-secondary" onclick="openModsFolder('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
                             📁
-                        </button>
-                        <button class="btn" onclick="switchPage('mods')" style="padding: 8px 15px; font-size: 12px;">
-                            + Mod
                         </button>
                     </div>
                 </div>
@@ -867,7 +1022,7 @@ function renderProfileTabContent(tabName, profile) {
                     </button>
                 </div>
                 
-                <div id="profile-mods-list" style="display: grid; gap: 8px;">
+                <div id="profile-mods-list" style="display: grid; gap: 8px; max-height: 500px; overflow-y: auto; padding-right: 5px;">
                     <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                         <div class="spinner" style="margin: 0 auto 15px;"></div>
                         <p>Lade installierte Mods...</p>
@@ -879,37 +1034,46 @@ function renderProfileTabContent(tabName, profile) {
             // Stoppe Mods-Watcher wenn Tab gewechselt wird
             stopModsWatcher();
             return `
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <h3 style="color: var(--gold); margin: 0;">Resource Packs</h3>
-                    <button class="btn" onclick="openResourcePacksFolder('${profile.id}')" style="padding: 8px 20px;">
-                        📁 Ordner öffnen
-                    </button>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary" onclick="refreshResourcePacks('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
+                            🔄
+                        </button>
+                        <button class="btn btn-secondary" onclick="openResourcePacksFolder('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
+                            📁
+                        </button>
+                    </div>
                 </div>
-                <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
-                    <div style="font-size: 48px; margin-bottom: 15px;">🎨</div>
-                    <p>Keine Resource Packs installiert</p>
-                    <p style="font-size: 14px; margin-top: 10px;">
-                        Lade Resource Packs herunter und ziehe sie in den Ordner
-                    </p>
+                
+                <div id="profile-resourcepacks-list" style="display: grid; gap: 8px; max-height: 500px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
+                    <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        <div class="spinner" style="margin: 0 auto 15px;"></div>
+                        <p>Lade Resource Packs...</p>
+                    </div>
                 </div>
             `;
 
         case 'shaderpacks':
             stopModsWatcher();
             return `
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <h3 style="color: var(--gold); margin: 0;">Shader Packs</h3>
-                    <button class="btn" onclick="openShaderPacksFolder('${profile.id}')" style="padding: 8px 20px;">
-                        📁 Ordner öffnen
-                    </button>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary" onclick="refreshShaderPacks('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
+                            🔄
+                        </button>
+                        <button class="btn btn-secondary" onclick="openShaderPacksFolder('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
+                            📁
+                        </button>
+                    </div>
                 </div>
-                <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
-                    <div style="font-size: 48px; margin-bottom: 15px;">✨</div>
-                    <p>Keine Shader Packs installiert</p>
-                    <p style="font-size: 14px; margin-top: 10px;">
-                        Benötigt Optifine oder Iris + Sodium<br>
-                        Lade Shader Packs herunter und ziehe sie in den Ordner
-                    </p>
+                
+                <div id="profile-shaderpacks-list" style="display: grid; gap: 8px; max-height: 500px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
+                    <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        <div class="spinner" style="margin: 0 auto 15px;"></div>
+                        <p>Lade Shader Packs...</p>
+                    </div>
                 </div>
             `;
 
@@ -1495,6 +1659,126 @@ async function openResourcePacksFolder(profileId) {
     }
 }
 
+// ==================== RESOURCE PACKS ====================
+
+async function loadInstalledResourcePacks(profileId) {
+    const list = document.getElementById('profile-resourcepacks-list');
+    if (!list) return;
+
+    try {
+        const packs = await invoke('get_installed_resourcepacks', { profileId });
+
+        if (packs.length === 0) {
+            list.innerHTML = `
+                <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
+                    <div style="font-size: 48px; margin-bottom: 15px;">🎨</div>
+                    <p>Keine Resource Packs installiert</p>
+                    <p style="font-size: 14px; margin-top: 10px;">
+                        Klicke auf "+ Resource Pack" um Packs zu durchsuchen
+                    </p>
+                </div>
+            `;
+            return;
+        }
+
+        const packsHTML = packs.map(pack => {
+            const sizeStr = pack.size > 0 ? `${(pack.size / 1024 / 1024).toFixed(2)} MB` : '';
+            const iconHTML = pack.icon_path
+                ? `<img src="file://${pack.icon_path}" style="width: 48px; height: 48px; border-radius: 4px;" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                   <div style="display: none; font-size: 32px;">🎨</div>`
+                : `<div style="font-size: 32px;">🎨</div>`;
+
+            return `
+                <div style="background: var(--bg-light); padding: 12px; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
+                    <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                        ${iconHTML}
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="color: var(--text-primary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            ${pack.name}
+                        </div>
+                        <div style="color: var(--text-secondary); font-size: 11px;">
+                            ${pack.is_folder ? '📁 Ordner' : '📦 ' + sizeStr}
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary" onclick="deleteResourcePack('${profileId}', '${pack.name.replace(/'/g, "\\'")}', ${pack.is_folder})" 
+                            style="padding: 6px 12px; font-size: 11px; color: #f44336;">
+                        🗑️
+                    </button>
+                </div>
+            `;
+        }).join('');
+
+        list.innerHTML = packsHTML;
+
+    } catch (error) {
+        debugLog('Failed to load resource packs: ' + error, 'error');
+        list.innerHTML = `
+            <div style="text-align: center; padding: 40px; color: #f44336;">
+                Fehler beim Laden: ${error}
+            </div>
+        `;
+    }
+}
+
+async function refreshResourcePacks(profileId) {
+    await loadInstalledResourcePacks(profileId);
+    showToast('Resource Packs aktualisiert', 'success', 2000);
+}
+
+async function deleteResourcePack(profileId, name, isFolder) {
+    if (!confirm(`Resource Pack "${name}" wirklich löschen?`)) {
+        return;
+    }
+
+    try {
+        const profile = profiles.find(p => p.id === profileId);
+        if (!profile) return;
+
+        const rpPath = `${profile.game_dir}/resourcepacks/${name}`;
+
+        // TODO: Backend-Command für Löschen hinzufügen
+        // Für jetzt zeige nur Nachricht
+        showToast('Löschfunktion wird implementiert...', 'info', 2000);
+
+    } catch (error) {
+        debugLog('Failed to delete resource pack: ' + error, 'error');
+        showToast('Fehler beim Löschen: ' + error, 'error', 3000);
+    }
+}
+
+function browseResourcePacks(profileId) {
+    // Speichere aktuelles Profil und wechsle zum Content Browser
+    const profile = profiles.find(p => p.id === profileId);
+    if (profile) {
+        currentProfile = profile;
+    }
+
+    // Wechsle zu Resource Packs
+    switchPage('mods');
+    switchContentType('resourcepacks');
+}
+
+function openContentBrowser(profileId) {
+    // Speichere aktuelles Profil und wechsle zum Content Browser
+    const profile = profiles.find(p => p.id === profileId);
+    if (profile) {
+        currentProfile = profile;
+    }
+
+    // Wechsle zum Content Browser (default: Mods)
+    switchPage('mods');
+    switchContentType('mods');
+
+    // Verstecke Modpacks Button wenn aus Profil geöffnet
+    setTimeout(() => {
+        const modpacksBtn = document.querySelector('[data-content-type="modpacks"]');
+        if (modpacksBtn && currentProfile) {
+            modpacksBtn.style.display = 'none';
+        }
+    }, 50);
+}
+
 async function openShaderPacksFolder(profileId) {
     debugLog('Opening shaderpacks folder', 'info');
     try {
@@ -1502,6 +1786,77 @@ async function openShaderPacksFolder(profileId) {
     } catch (error) {
         debugLog('Failed to open folder: ' + error, 'error');
     }
+}
+
+// ==================== SHADER PACKS (Profil) ====================
+
+async function loadInstalledShaderPacks(profileId) {
+    const list = document.getElementById('profile-shaderpacks-list');
+    if (!list) return;
+
+    try {
+        const packs = await invoke('get_installed_shaderpacks', { profileId });
+
+        if (packs.length === 0) {
+            list.innerHTML = `
+                <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
+                    <div style="font-size: 48px; margin-bottom: 15px;">✨</div>
+                    <p>Keine Shader Packs installiert</p>
+                    <p style="font-size: 14px; margin-top: 10px;">
+                        Benötigt Iris oder OptiFine<br>
+                        Klicke auf "+ Add Content" um Shader zu durchsuchen
+                    </p>
+                </div>
+            `;
+            return;
+        }
+
+        const packsHTML = packs.map(pack => {
+            const sizeStr = pack.size > 0 ? `${(pack.size / 1024 / 1024).toFixed(2)} MB` : '';
+
+            return `
+                <div style="background: var(--bg-light); padding: 12px; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
+                    <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 32px;">
+                        ✨
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="color: var(--text-primary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            ${pack.name}
+                        </div>
+                        <div style="color: var(--text-secondary); font-size: 11px;">
+                            ${pack.is_folder ? '📁 Ordner' : '📦 ' + sizeStr}
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary" onclick="deleteShaderPack('${profileId}', '${pack.name.replace(/'/g, "\\'")}')" 
+                            style="padding: 6px 12px; font-size: 11px; color: #f44336;">
+                        🗑️
+                    </button>
+                </div>
+            `;
+        }).join('');
+
+        list.innerHTML = packsHTML;
+
+    } catch (error) {
+        debugLog('Failed to load shader packs: ' + error, 'error');
+        list.innerHTML = `
+            <div style="text-align: center; padding: 40px; color: #f44336;">
+                Fehler beim Laden: ${error}
+            </div>
+        `;
+    }
+}
+
+async function refreshShaderPacks(profileId) {
+    await loadInstalledShaderPacks(profileId);
+    showToast('Shader Packs aktualisiert', 'success', 2000);
+}
+
+async function deleteShaderPack(profileId, name) {
+    if (!confirm(`Shader Pack "${name}" wirklich löschen?`)) {
+        return;
+    }
+    showToast('Löschfunktion wird implementiert...', 'info', 2000);
 }
 
 // Profil-Bild Vorschau
@@ -1648,23 +2003,24 @@ async function saveProfileSettings(profileId) {
 }
 
 // Modals
+function openCreateProfileModal() {
+    const modal = document.getElementById('create-profile-modal');
+    if (modal) {
+        modal.classList.add('active');
+        updateVersionSelects();
+    }
+}
+
 function setupModals() {
     const createBtn = document.getElementById('create-profile-btn');
+    if (createBtn) {
+        createBtn.addEventListener('click', openCreateProfileModal);
+    }
+
     const cancelBtn = document.getElementById('cancel-profile-btn');
     const saveBtn = document.getElementById('save-profile-btn');
     const loaderSelect = document.getElementById('profile-loader');
 
-    if (createBtn) {
-        createBtn.addEventListener('click', () => {
-            debugLog('Create profile button clicked', 'info');
-            const modal = document.getElementById('create-profile-modal');
-            if (modal) {
-                modal.classList.add('active');
-                // Versionen nochmal aktualisieren wenn Modal geöffnet wird
-                updateVersionSelects();
-            }
-        });
-    }
 
     if (cancelBtn) {
         cancelBtn.addEventListener('click', () => {
@@ -1811,6 +2167,8 @@ async function createProfile() {
 
 // Mod Browser
 let installedModIds = new Set(); // Cache für installierte Mod-IDs
+let installedResourcePackNames = new Set(); // Cache für installierte Resource Packs
+let installedShaderPackNames = new Set(); // Cache für installierte Shader Packs
 
 function setupSearch() {
     const searchInput = document.getElementById('mod-search');
@@ -1820,7 +2178,16 @@ function setupSearch() {
     searchInput.addEventListener('input', (e) => {
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(() => {
-            searchMods(e.target.value);
+            const query = e.target.value;
+            if (currentContentType === 'mods') {
+                searchMods(query);
+            } else if (currentContentType === 'resourcepacks') {
+                searchResourcePacks(query);
+            } else if (currentContentType === 'shaderpacks') {
+                searchShaderPacks(query);
+            } else if (currentContentType === 'modpacks') {
+                searchModpacks(query);
+            }
         }, 500);
     });
 
@@ -1838,7 +2205,16 @@ function setupSearch() {
             document.querySelectorAll('[data-sort]').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             selectedFilters.sort = btn.dataset.sort;
-            searchMods(searchInput.value);
+            const query = searchInput.value;
+            if (currentContentType === 'mods') {
+                searchMods(query);
+            } else if (currentContentType === 'resourcepacks') {
+                searchResourcePacks(query);
+            } else if (currentContentType === 'shaderpacks') {
+                searchShaderPacks(query);
+            } else if (currentContentType === 'modpacks') {
+                searchModpacks(query);
+            }
         });
     });
 
@@ -1846,12 +2222,378 @@ function setupSearch() {
     if (versionFilter) {
         versionFilter.addEventListener('change', (e) => {
             selectedFilters.version = e.target.value;
-            searchMods(searchInput.value);
+            const query = searchInput.value;
+            if (currentContentType === 'mods') {
+                searchMods(query);
+            } else if (currentContentType === 'resourcepacks') {
+                searchResourcePacks(query);
+            } else if (currentContentType === 'shaderpacks') {
+                searchShaderPacks(query);
+            } else if (currentContentType === 'modpacks') {
+                searchModpacks(query);
+            }
         });
     }
 
-    // Lade automatisch beliebte Mods beim Start
-    loadPopularMods();
+    // Lade automatisch beliebte Inhalte beim Start
+    loadPopularContent();
+}
+
+// Content Type Switching
+function switchContentType(type) {
+    currentContentType = type;
+    currentModPage = 0;
+    currentModSearchQuery = '';
+
+    // Update Button States
+    document.querySelectorAll('[data-content-type]').forEach(btn => {
+        if (btn.dataset.contentType === type) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+
+    // Show/Hide Mod Loader Filter (nur für Mods und Modpacks relevant)
+    const loaderSection = document.getElementById('loader-filter-section');
+    if (loaderSection) {
+        loaderSection.style.display = (type === 'mods' || type === 'modpacks') ? 'block' : 'none';
+    }
+
+    // Update Placeholder
+    const searchInput = document.getElementById('mod-search');
+    if (searchInput) {
+        const placeholders = {
+            mods: 'Search mods...',
+            resourcepacks: 'Search resource packs...',
+            shaderpacks: 'Search shader packs...',
+            modpacks: 'Search modpacks...'
+        };
+        searchInput.placeholder = placeholders[type] || 'Search content...';
+        searchInput.value = '';
+    }
+
+    // Lade Inhalte
+    loadPopularContent();
+}
+
+function loadPopularContent() {
+    if (currentContentType === 'mods') {
+        loadPopularMods();
+    } else if (currentContentType === 'resourcepacks') {
+        loadPopularResourcePacks();
+    } else if (currentContentType === 'shaderpacks') {
+        loadPopularShaderPacks();
+    } else if (currentContentType === 'modpacks') {
+        loadPopularModpacks();
+    }
+}
+
+// Lädt beliebte Resource Packs
+async function loadPopularResourcePacks(page = 0) {
+    const modList = document.getElementById('mod-list');
+    if (!modList) return;
+
+    currentModPage = page;
+    currentModSearchQuery = '';
+
+    modList.innerHTML = '<div class="loading"><div class="spinner" style="margin: 20px auto;"></div><p>Lade beliebte Resource Packs...</p></div>';
+
+    // Lade installierte Resource Packs für Markierung
+    await loadInstalledResourcePackNames();
+
+    try {
+        const packs = await invoke('search_resourcepacks', {
+            query: '',
+            gameVersion: selectedFilters.version || null,
+            sortBy: 'downloads',
+            offset: page * MODS_PER_PAGE,
+            limit: MODS_PER_PAGE
+        });
+
+        renderMods(packs, page);
+    } catch (error) {
+        debugLog('Failed to load resource packs: ' + error, 'error');
+        modList.innerHTML = `
+            <div class="loading" style="text-align: center; padding: 40px;">
+                <div style="font-size: 48px; margin-bottom: 15px;">🎨</div>
+                <p style="color: var(--gold); margin-bottom: 10px;">Beliebte Resource Packs</p>
+                <p style="color: var(--text-secondary);">Gib einen Suchbegriff ein oder versuche es später erneut</p>
+            </div>
+        `;
+    }
+}
+
+async function searchResourcePacks(query, page = 0) {
+    const modList = document.getElementById('mod-list');
+    if (!modList) return;
+
+    currentModSearchQuery = query || '';
+    currentModPage = page;
+
+    if (!query || query.length < 2) {
+        loadPopularResourcePacks(page);
+        return;
+    }
+
+    modList.innerHTML = '<div class="loading"><div class="spinner" style="margin: 20px auto;"></div><p>Suche...</p></div>';
+
+    // Lade installierte Resource Packs für Markierung
+    await loadInstalledResourcePackNames();
+
+    try {
+        const packs = await invoke('search_resourcepacks', {
+            query,
+            gameVersion: selectedFilters.version || null,
+            sortBy: selectedFilters.sort || 'relevance',
+            offset: page * MODS_PER_PAGE,
+            limit: MODS_PER_PAGE
+        });
+
+        renderMods(packs, page);
+    } catch (error) {
+        debugLog('Search failed: ' + error, 'error');
+        modList.innerHTML = '<div class="loading">Suche fehlgeschlagen: ' + error + '</div>';
+    }
+}
+
+async function installResourcePack(packId, source) {
+    let profile = currentProfile;
+
+    if (!profile) {
+        profile = await showProfileSelectDialog();
+        if (!profile) return;
+    }
+
+    debugLog('Installing resource pack ' + packId + ' to profile ' + profile.name, 'info');
+
+    // Markiere Button als "installierend"
+    const btn = event.target;
+    const originalText = btn.textContent;
+    btn.textContent = '...';
+    btn.disabled = true;
+
+    try {
+        await invoke('install_resourcepack', {
+            profileId: profile.id,
+            packId: packId,
+            versionId: null
+        });
+
+        debugLog('Resource pack installed successfully!', 'success');
+        showToast(`Resource Pack erfolgreich zu "${profile.name}" hinzugefügt!`, 'success', 3000);
+
+        // Button als installiert markieren mit korrektem Styling
+        btn.textContent = '✓ Installiert';
+        btn.disabled = true;
+        btn.style.background = 'var(--bg-light)';
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.opacity = '0.7';
+        btn.style.cursor = 'not-allowed';
+
+        // Cache aktualisieren
+        await loadInstalledResourcePackNames();
+
+    } catch (error) {
+        debugLog('Install failed: ' + error, 'error');
+        showToast('Resource Pack-Installation fehlgeschlagen: ' + error, 'error', 5000);
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+}
+
+// ==================== SHADER PACKS ====================
+
+async function loadPopularShaderPacks(page = 0) {
+    const modList = document.getElementById('mod-list');
+    if (!modList) return;
+
+    currentModPage = page;
+    currentModSearchQuery = '';
+
+    modList.innerHTML = '<div class="loading"><div class="spinner" style="margin: 20px auto;"></div><p>Lade beliebte Shader Packs...</p></div>';
+
+    // Lade installierte Shader für Markierung
+    await loadInstalledShaderPackNames();
+
+    try {
+        const packs = await invoke('search_shaderpacks', {
+            query: '',
+            gameVersion: selectedFilters.version || null,
+            sortBy: 'downloads',
+            offset: page * MODS_PER_PAGE,
+            limit: MODS_PER_PAGE
+        });
+
+        renderMods(packs, page);
+    } catch (error) {
+        debugLog('Failed to load shader packs: ' + error, 'error');
+        modList.innerHTML = `
+            <div class="loading" style="text-align: center; padding: 40px;">
+                <div style="font-size: 48px; margin-bottom: 15px;">✨</div>
+                <p style="color: var(--gold); margin-bottom: 10px;">Beliebte Shader Packs</p>
+                <p style="color: var(--text-secondary);">Gib einen Suchbegriff ein oder versuche es später erneut</p>
+            </div>
+        `;
+    }
+}
+
+async function searchShaderPacks(query, page = 0) {
+    const modList = document.getElementById('mod-list');
+    if (!modList) return;
+
+    currentModSearchQuery = query || '';
+    currentModPage = page;
+
+    if (!query || query.length < 2) {
+        loadPopularShaderPacks(page);
+        return;
+    }
+
+    modList.innerHTML = '<div class="loading"><div class="spinner" style="margin: 20px auto;"></div><p>Suche...</p></div>';
+
+    // Lade installierte Shader für Markierung
+    await loadInstalledShaderPackNames();
+
+    try {
+        const packs = await invoke('search_shaderpacks', {
+            query,
+            gameVersion: selectedFilters.version || null,
+            sortBy: selectedFilters.sort || 'relevance',
+            offset: page * MODS_PER_PAGE,
+            limit: MODS_PER_PAGE
+        });
+
+        renderMods(packs, page);
+    } catch (error) {
+        debugLog('Search failed: ' + error, 'error');
+        modList.innerHTML = '<div class="loading">Suche fehlgeschlagen: ' + error + '</div>';
+    }
+}
+
+async function installShaderPack(packId, source) {
+    let profile = currentProfile;
+
+    if (!profile) {
+        profile = await showProfileSelectDialog();
+        if (!profile) return;
+    }
+
+    debugLog('Installing shader pack ' + packId + ' to profile ' + profile.name, 'info');
+
+    // Markiere Button als "installierend"
+    const btn = event.target;
+    const originalText = btn.textContent;
+    btn.textContent = '...';
+    btn.disabled = true;
+
+    try {
+        await invoke('install_shaderpack', {
+            profileId: profile.id,
+            packId: packId,
+            versionId: null
+        });
+
+        debugLog('Shader pack installed successfully!', 'success');
+        showToast(`Shader Pack erfolgreich zu "${profile.name}" hinzugefügt!`, 'success', 3000);
+
+        // Button als installiert markieren mit korrektem Styling
+        btn.textContent = '✓ Installiert';
+        btn.disabled = true;
+        btn.style.background = 'var(--bg-light)';
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.opacity = '0.7';
+        btn.style.cursor = 'not-allowed';
+
+        // Cache aktualisieren
+        await loadInstalledShaderPackNames();
+
+    } catch (error) {
+        debugLog('Install failed: ' + error, 'error');
+        showToast('Shader Pack-Installation fehlgeschlagen: ' + error, 'error', 5000);
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+}
+
+// ==================== MODPACKS ====================
+
+async function loadPopularModpacks(page = 0) {
+    const modList = document.getElementById('mod-list');
+    if (!modList) return;
+
+    currentModPage = page;
+    currentModSearchQuery = '';
+
+    modList.innerHTML = '<div class="loading"><div class="spinner" style="margin: 20px auto;"></div><p>Lade beliebte Modpacks...</p></div>';
+
+    try {
+        const packs = await invoke('search_modpacks', {
+            query: '',
+            gameVersion: selectedFilters.version || null,
+            loader: selectedFilters.loader || null,
+            sortBy: 'downloads',
+            offset: page * MODS_PER_PAGE,
+            limit: MODS_PER_PAGE
+        });
+
+        renderMods(packs, page);
+    } catch (error) {
+        debugLog('Failed to load modpacks: ' + error, 'error');
+        modList.innerHTML = `
+            <div class="loading" style="text-align: center; padding: 40px;">
+                <div style="font-size: 48px; margin-bottom: 15px;">📚</div>
+                <p style="color: var(--gold); margin-bottom: 10px;">Beliebte Modpacks</p>
+                <p style="color: var(--text-secondary);">Gib einen Suchbegriff ein oder versuche es später erneut</p>
+            </div>
+        `;
+    }
+}
+
+async function searchModpacks(query, page = 0) {
+    const modList = document.getElementById('mod-list');
+    if (!modList) return;
+
+    currentModSearchQuery = query || '';
+    currentModPage = page;
+
+    if (!query || query.length < 2) {
+        loadPopularModpacks(page);
+        return;
+    }
+
+    modList.innerHTML = '<div class="loading"><div class="spinner" style="margin: 20px auto;"></div><p>Suche...</p></div>';
+
+    try {
+        const packs = await invoke('search_modpacks', {
+            query,
+            gameVersion: selectedFilters.version || null,
+            loader: selectedFilters.loader || null,
+            sortBy: selectedFilters.sort || 'relevance',
+            offset: page * MODS_PER_PAGE,
+            limit: MODS_PER_PAGE
+        });
+
+        renderMods(packs, page);
+    } catch (error) {
+        debugLog('Search failed: ' + error, 'error');
+        modList.innerHTML = '<div class="loading">Suche fehlgeschlagen: ' + error + '</div>';
+    }
+}
+
+async function installModpack(packId, source) {
+    // Modpacks können nicht direkt installiert werden - öffne Modrinth Seite
+    const url = `https://modrinth.com/modpack/${packId}`;
+
+    // Zeige Info-Dialog
+    showToast('Modpacks müssen manuell heruntergeladen werden. Öffne Modrinth...', 'info', 3000);
+
+    // Öffne im Browser
+    try {
+        await invoke('open_auth_url', { url });
+    } catch (e) {
+        window.open(url, '_blank');
+    }
 }
 
 // Lädt beliebte Mods (ohne Suchbegriff, sortiert nach Downloads)
@@ -1895,13 +2637,17 @@ async function loadPopularMods(page = 0) {
 async function loadInstalledModIds() {
     installedModIds.clear();
 
-    if (profiles.length === 0) return;
+    // NUR das aktuell ausgewählte Profil verwenden - kein Fallback!
+    const profile = currentProfile;
 
-    const profile = profiles[0]; // Erstes Profil
+    if (!profile) {
+        debugLog('No profile selected - mods will not be marked as installed', 'info');
+        return;
+    }
 
     try {
         const mods = await invoke('get_installed_mods', { profileId: profile.id });
-        debugLog('Loading installed mod IDs from ' + mods.length + ' mods', 'info');
+        debugLog('Loading installed mod IDs from ' + mods.length + ' mods for profile: ' + profile.name, 'info');
 
         mods.forEach(mod => {
             // Die mod_id aus der Metadaten-Datei (Modrinth ID wie "AANobbMI")
@@ -1938,6 +2684,56 @@ async function loadInstalledModIds() {
         debugLog('Total installed mod IDs cached: ' + installedModIds.size + ' - ' + Array.from(installedModIds).join(', '), 'info');
     } catch (e) {
         debugLog('Could not load installed mods: ' + e, 'error');
+    }
+}
+
+// Lädt die Namen der installierten Resource Packs für das aktive Profil
+async function loadInstalledResourcePackNames() {
+    installedResourcePackNames.clear();
+
+    const profile = currentProfile;
+    if (!profile) return;
+
+    try {
+        const packs = await invoke('get_installed_resourcepacks', { profileId: profile.id });
+        packs.forEach(pack => {
+            // Speichere den Namen (ohne Endung)
+            const name = pack.name.toLowerCase().replace('.zip', '');
+            installedResourcePackNames.add(name);
+            // Auch den ersten Teil vor Bindestrich
+            const firstPart = name.split('-')[0];
+            if (firstPart.length > 2) {
+                installedResourcePackNames.add(firstPart);
+            }
+        });
+        debugLog('Loaded ' + installedResourcePackNames.size + ' installed resource pack names', 'info');
+    } catch (e) {
+        debugLog('Could not load installed resource packs: ' + e, 'error');
+    }
+}
+
+// Lädt die Namen der installierten Shader Packs für das aktive Profil
+async function loadInstalledShaderPackNames() {
+    installedShaderPackNames.clear();
+
+    const profile = currentProfile;
+    if (!profile) return;
+
+    try {
+        const packs = await invoke('get_installed_shaderpacks', { profileId: profile.id });
+        packs.forEach(pack => {
+            // Speichere den Namen (ohne Endung)
+            const name = pack.name.toLowerCase().replace('.zip', '');
+            installedShaderPackNames.add(name);
+            // Auch den ersten Teil vor Bindestrich
+            const firstPart = name.split('-')[0];
+            if (firstPart.length > 2) {
+                installedShaderPackNames.add(firstPart);
+            }
+        });
+        debugLog('Loaded ' + installedShaderPackNames.size + ' installed shader pack names', 'info');
+    } catch (e) {
+        debugLog('Could not load installed shader packs: ' + e, 'error');
     }
 }
 
@@ -1980,30 +2776,79 @@ function renderMods(mods, page = 0) {
     const list = document.getElementById('mod-list');
     if (!list) return;
 
+    // Speichere Scroll-Position
+    const scrollTop = list.scrollTop;
+
     if (mods.length === 0 && page === 0) {
-        list.innerHTML = '<div class="loading">Keine Mods gefunden</div>';
+        list.innerHTML = '<div class="loading">Keine Inhalte gefunden</div>';
         return;
     }
 
-    const modsHTML = mods.map(mod => {
-        // Prüfe ob Mod bereits installiert ist
-        const modSlug = mod.slug ? mod.slug.toLowerCase() : '';
-        const modName = mod.name ? mod.name.toLowerCase().replace(/\s+/g, '-') : '';
-        const modId = mod.id ? mod.id.toLowerCase() : '';
-        const modFirstName = mod.name ? mod.name.toLowerCase().split(' ')[0] : '';
+    // Bestimme die richtige Install-Funktion basierend auf Content-Typ
+    const getInstallFunction = () => {
+        switch(currentContentType) {
+            case 'resourcepacks': return 'installResourcePack';
+            case 'shaderpacks': return 'installShaderPack';
+            case 'modpacks': return 'installModpack'; // TODO: implementieren
+            default: return 'installMod';
+        }
+    };
 
-        // Exakte Matches prüfen
-        const isInstalled = installedModIds.has(modSlug) ||
-                           installedModIds.has(modName) ||
-                           installedModIds.has(modId) ||
-                           installedModIds.has(modFirstName) ||
-                           // Auch prüfen ob Slug im Cache enthalten ist
-                           (modSlug && Array.from(installedModIds).some(id => id === modSlug || modSlug === id));
+    const modsHTML = mods.map(mod => {
+        // Prüfe ob bereits installiert ist - NUR wenn ein Profil ausgewählt ist
+        let isInstalled = false;
+
+        if (currentProfile) {
+            const modSlug = mod.slug ? mod.slug.toLowerCase() : '';
+            const modName = mod.name ? mod.name.toLowerCase().replace(/\s+/g, '-') : '';
+            const modId = mod.id ? mod.id.toLowerCase() : '';
+            const modFirstName = mod.name ? mod.name.toLowerCase().split(' ')[0] : '';
+
+            if (currentContentType === 'mods') {
+                // Prüfe Mods
+                isInstalled = installedModIds.has(modSlug) ||
+                              installedModIds.has(modName) ||
+                              installedModIds.has(modId) ||
+                              installedModIds.has(modFirstName) ||
+                              (modSlug && Array.from(installedModIds).some(id => id === modSlug || modSlug === id));
+            } else if (currentContentType === 'resourcepacks') {
+                // Prüfe Resource Packs
+                isInstalled = installedResourcePackNames.has(modSlug) ||
+                              installedResourcePackNames.has(modName) ||
+                              installedResourcePackNames.has(modFirstName);
+            } else if (currentContentType === 'shaderpacks') {
+                // Prüfe Shader Packs
+                isInstalled = installedShaderPackNames.has(modSlug) ||
+                              installedShaderPackNames.has(modName) ||
+                              installedShaderPackNames.has(modFirstName);
+            }
+        }
+
+        // Zeige Profil-Info im Button wenn kein Profil ausgewählt
+        const installButtonText = currentProfile ? 'Install' : 'Installieren...';
+        const installFunc = getInstallFunction();
+
+        // Icon basierend auf Content-Typ
+        const defaultIcon = currentContentType === 'resourcepacks' ? '🎨' :
+                           currentContentType === 'shaderpacks' ? '✨' :
+                           currentContentType === 'modpacks' ? '📚' : '📦';
+
+        // Erstelle Icon HTML mit Fallback - prüfe ob icon_url wirklich existiert und nicht leer ist
+        const hasValidIcon = mod.icon_url && typeof mod.icon_url === 'string' && mod.icon_url.trim().length > 0;
+
+        let iconHTML;
+        if (hasValidIcon) {
+            iconHTML = `<img src="${mod.icon_url}" alt="${mod.name}" 
+                             style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;"
+                             onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\\'font-size: 32px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;\\'>${defaultIcon}</div>';">`;
+        } else {
+            iconHTML = `<div style="font-size: 32px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">${defaultIcon}</div>`;
+        }
 
         return `
-            <div class="mod-card" style="${isInstalled ? 'opacity: 0.7; border-color: #555;' : ''}">
+            <div class="mod-card" data-mod-id="${mod.id}" style="${isInstalled ? 'opacity: 0.7; border-color: #555;' : ''}">
                 <div class="mod-icon">
-                    ${mod.icon_url ? `<img src="${mod.icon_url}" alt="${mod.name}">` : '📦'}
+                    ${iconHTML}
                 </div>
                 <div class="mod-info">
                     <div class="mod-name" style="display: flex; align-items: center; gap: 10px;">
@@ -2019,7 +2864,7 @@ function renderMods(mods, page = 0) {
                 </div>
                 ${isInstalled 
                     ? `<button class="btn btn-secondary" disabled style="align-self: center; opacity: 0.5; cursor: not-allowed;">Installiert</button>`
-                    : `<button class="btn" onclick="installMod('${mod.id}', '${mod.source}')" style="align-self: center;">Install</button>`
+                    : `<button class="btn install-btn" data-mod-id="${mod.id}" onclick="${installFunc}('${mod.id}', '${mod.source}')" style="align-self: center;">${installButtonText}</button>`
                 }
             </div>
         `;
@@ -2043,37 +2888,72 @@ function renderMods(mods, page = 0) {
     `;
 
     list.innerHTML = modsHTML + paginationHTML;
+
+    // Stelle Scroll-Position wieder her
+    list.scrollTop = scrollTop;
 }
 
 function previousModPage() {
     if (currentModPage > 0) {
-        if (currentModSearchQuery) {
-            searchMods(currentModSearchQuery, currentModPage - 1);
+        const query = currentModSearchQuery;
+        const prevPage = currentModPage - 1;
+
+        if (query) {
+            if (currentContentType === 'mods') searchMods(query, prevPage);
+            else if (currentContentType === 'resourcepacks') searchResourcePacks(query, prevPage);
+            else if (currentContentType === 'shaderpacks') searchShaderPacks(query, prevPage);
+            else if (currentContentType === 'modpacks') searchModpacks(query, prevPage);
         } else {
-            loadPopularMods(currentModPage - 1);
+            if (currentContentType === 'mods') loadPopularMods(prevPage);
+            else if (currentContentType === 'resourcepacks') loadPopularResourcePacks(prevPage);
+            else if (currentContentType === 'shaderpacks') loadPopularShaderPacks(prevPage);
+            else if (currentContentType === 'modpacks') loadPopularModpacks(prevPage);
         }
     }
 }
 
 function nextModPage() {
-    if (currentModSearchQuery) {
-        searchMods(currentModSearchQuery, currentModPage + 1);
+    const query = currentModSearchQuery;
+    const nextPage = currentModPage + 1;
+
+    if (query) {
+        if (currentContentType === 'mods') searchMods(query, nextPage);
+        else if (currentContentType === 'resourcepacks') searchResourcePacks(query, nextPage);
+        else if (currentContentType === 'shaderpacks') searchShaderPacks(query, nextPage);
+        else if (currentContentType === 'modpacks') searchModpacks(query, nextPage);
     } else {
-        loadPopularMods(currentModPage + 1);
+        if (currentContentType === 'mods') loadPopularMods(nextPage);
+        else if (currentContentType === 'resourcepacks') loadPopularResourcePacks(nextPage);
+        else if (currentContentType === 'shaderpacks') loadPopularShaderPacks(nextPage);
+        else if (currentContentType === 'modpacks') loadPopularModpacks(nextPage);
     }
 }
 
 async function installMod(modId, source) {
-    if (profiles.length === 0) {
-        alert('Bitte erstelle zuerst ein Profil!');
-        switchPage('profiles');
-        return;
+    // Verwende das aktuell ausgewählte Profil oder zeige Auswahl
+    let profile = currentProfile;
+
+    if (!profile) {
+        // Zeige Profil-Auswahl Dialog
+        if (profiles.length === 0) {
+            alert('Bitte erstelle zuerst ein Profil!');
+            switchPage('profiles');
+            return;
+        }
+
+        profile = await showProfileSelectDialog();
+        if (!profile) {
+            return; // Abgebrochen
+        }
     }
 
-    // Zeige Profil-Auswahl wenn mehrere Profile vorhanden
-    const profile = profiles[0]; // TODO: Profil-Auswahl implementieren
-
     debugLog('Installing mod ' + modId + ' to profile ' + profile.name + ' (' + profile.minecraft_version + ' ' + profile.loader.loader + ')', 'info');
+
+    // Markiere Button als "installierend"
+    const btn = event.target;
+    const originalText = btn.textContent;
+    btn.textContent = '...';
+    btn.disabled = true;
 
     try {
         // Installiere Mod - Backend findet automatisch die passende Version für das Profil
@@ -2086,21 +2966,26 @@ async function installMod(modId, source) {
 
         debugLog('Mod installed successfully!', 'success');
 
-        // Aktualisiere Cache für installierte Mods
-        await loadInstalledModIds();
+        // Button als installiert markieren mit korrektem Styling
+        btn.textContent = '✓ Installiert';
+        btn.disabled = true;
+        btn.style.background = 'var(--bg-light)';
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.opacity = '0.7';
+        btn.style.cursor = 'not-allowed';
 
-        // Aktualisiere Mod-Liste um "Installiert" Badge zu zeigen
-        if (currentModSearchQuery) {
-            searchMods(currentModSearchQuery, currentModPage);
-        } else {
-            loadPopularMods(currentModPage);
-        }
+        // Aktualisiere Cache für installierte Mods (im Hintergrund)
+        loadInstalledModIds();
 
-        // Toast-Benachrichtigung statt Modal
+        // Toast-Benachrichtigung
         showToast(`Mod erfolgreich zu "${profile.name}" hinzugefügt!`, 'success', 3000);
 
     } catch (error) {
         debugLog('Install failed: ' + error, 'error');
+
+        // Button zurücksetzen bei Fehler
+        btn.textContent = originalText;
+        btn.disabled = false;
 
         // Toast-Benachrichtigung für Fehler
         showToast('Mod-Installation fehlgeschlagen: ' + error, 'error', 5000);
@@ -2125,6 +3010,73 @@ function showModInstallError(title, htmlContent) {
     const modalDiv = document.createElement('div');
     modalDiv.innerHTML = modalHTML;
     document.body.appendChild(modalDiv.firstElementChild);
+}
+
+// Profil-Auswahl Dialog für Mod-Installation
+function showProfileSelectDialog() {
+    return new Promise((resolve) => {
+        const modalHTML = `
+            <div id="profile-select-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 10000;">
+                <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 12px; padding: 25px; max-width: 450px; width: 90%;">
+                    <h2 style="color: var(--gold); margin: 0 0 20px 0; text-align: center;">📦 Profil auswählen</h2>
+                    <p style="color: var(--text-secondary); text-align: center; margin-bottom: 20px;">
+                        Wähle ein Profil für die Mod-Installation:
+                    </p>
+                    <div style="max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;">
+                        ${profiles.map(p => `
+                            <div class="profile-select-option" 
+                                 onclick="selectProfileForInstall('${p.id}')"
+                                 style="background: var(--bg-light); padding: 15px; border-radius: 8px; cursor: pointer; 
+                                        display: flex; align-items: center; gap: 15px; transition: all 0.2s;
+                                        border: 2px solid transparent;"
+                                 onmouseover="this.style.borderColor='var(--gold)'"
+                                 onmouseout="this.style.borderColor='transparent'">
+                                <div style="font-size: 24px;">${p.icon_path ? '🎮' : '📦'}</div>
+                                <div style="flex: 1;">
+                                    <div style="color: var(--text-primary); font-weight: bold;">${p.name}</div>
+                                    <div style="color: var(--text-secondary); font-size: 12px;">
+                                        ${p.loader.loader} ${p.minecraft_version}
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <button class="btn btn-secondary" onclick="cancelProfileSelect()" 
+                            style="width: 100%; margin-top: 20px; padding: 12px;">
+                        Abbrechen
+                    </button>
+                </div>
+            </div>
+        `;
+
+        const modalDiv = document.createElement('div');
+        modalDiv.innerHTML = modalHTML;
+        document.body.appendChild(modalDiv.firstElementChild);
+
+        // Speichere resolve-Funktion global für die Callbacks
+        window._profileSelectResolve = resolve;
+    });
+}
+
+function selectProfileForInstall(profileId) {
+    const profile = profiles.find(p => p.id === profileId);
+    const modal = document.getElementById('profile-select-modal');
+    if (modal) modal.remove();
+
+    if (window._profileSelectResolve) {
+        window._profileSelectResolve(profile);
+        window._profileSelectResolve = null;
+    }
+}
+
+function cancelProfileSelect() {
+    const modal = document.getElementById('profile-select-modal');
+    if (modal) modal.remove();
+
+    if (window._profileSelectResolve) {
+        window._profileSelectResolve(null);
+        window._profileSelectResolve = null;
+    }
 }
 
 // Settings

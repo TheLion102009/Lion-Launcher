@@ -1,6 +1,8 @@
 use crate::core::mods::ModManager;
 use crate::types::mod_info::{ModInfo, ModVersion, ModSearchQuery, SortOption};
 
+// ==================== MODS ====================
+
 #[tauri::command]
 pub async fn search_mods(
     query: String,
@@ -206,3 +208,411 @@ pub async fn uninstall_mod(
 
     Ok(())
 }
+
+// ==================== RESOURCE PACKS ====================
+
+#[tauri::command]
+pub async fn search_resourcepacks(
+    query: String,
+    game_version: Option<String>,
+    sort_by: Option<String>,
+    offset: Option<u32>,
+    limit: Option<u32>,
+) -> Result<Vec<ModInfo>, String> {
+    // Modrinth API: Resource Packs haben project_type=resourcepack
+    let client = reqwest::Client::new();
+    let url = "https://api.modrinth.com/v2/search";
+
+    let sort = match sort_by.as_deref() {
+        Some("downloads") => "downloads",
+        Some("updated") => "updated",
+        Some("newest") => "newest",
+        _ => "relevance",
+    };
+
+    let mut facets = vec![r#"["project_type:resourcepack"]"#.to_string()];
+
+    if let Some(version) = game_version {
+        facets.push(format!(r#"["versions:{}"]"#, version));
+    }
+
+    let facets_str = format!("[{}]", facets.join(","));
+
+    let response = client
+        .get(url)
+        .query(&[
+            ("query", query.as_str()),
+            ("facets", &facets_str),
+            ("index", sort),
+            ("offset", &offset.unwrap_or(0).to_string()),
+            ("limit", &limit.unwrap_or(20).to_string()),
+        ])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    #[derive(serde::Deserialize)]
+    struct SearchResponse {
+        hits: Vec<SearchHit>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct SearchHit {
+        project_id: String,
+        slug: String,
+        title: String,
+        description: String,
+        icon_url: Option<String>,
+        author: String,
+        downloads: u64,
+        categories: Vec<String>,
+        versions: Vec<String>,
+        date_modified: String,
+    }
+
+    let result: SearchResponse = response.json().await.map_err(|e| e.to_string())?;
+
+    Ok(result.hits.into_iter().map(|hit| {
+        let slug = hit.slug.clone();
+        ModInfo {
+            id: hit.project_id,
+            slug: hit.slug,
+            name: hit.title,
+            description: hit.description,
+            icon_url: hit.icon_url,
+            author: hit.author,
+            downloads: hit.downloads,
+            categories: hit.categories,
+            source: crate::types::mod_info::ModSource::Modrinth,
+            versions: hit.versions,
+            game_versions: vec![],
+            loaders: vec![],
+            project_url: format!("https://modrinth.com/resourcepack/{}", slug),
+            updated_at: hit.date_modified,
+        }
+    }).collect())
+}
+
+#[tauri::command]
+pub async fn install_resourcepack(
+    profile_id: String,
+    pack_id: String,
+    version_id: Option<String>,
+) -> Result<(), String> {
+    use crate::core::profiles::ProfileManager;
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    let rp_dir = profile.game_dir.join("resourcepacks");
+    tokio::fs::create_dir_all(&rp_dir).await.map_err(|e| e.to_string())?;
+
+    let mc_version = profile.minecraft_version.clone();
+
+    tracing::info!("Installing resource pack {} for {} to {:?}", pack_id, mc_version, rp_dir);
+
+    // Hole Versionen von Modrinth
+    let client = reqwest::Client::new();
+    let url = format!("https://api.modrinth.com/v2/project/{}/version", pack_id);
+
+    let response = client.get(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    #[derive(serde::Deserialize)]
+    struct Version {
+        id: String,
+        name: String,
+        version_number: String,
+        game_versions: Vec<String>,
+        files: Vec<File>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct File {
+        url: String,
+        filename: String,
+        primary: bool,
+        size: u64,
+    }
+
+    let versions: Vec<Version> = response.json().await.map_err(|e| e.to_string())?;
+
+    // Finde passende Version
+    let version = if let Some(vid) = version_id {
+        versions.iter().find(|v| v.id == vid)
+    } else {
+        versions.iter().find(|v| v.game_versions.iter().any(|gv| gv == &mc_version))
+    }.ok_or_else(|| format!("Keine passende Resource Pack Version für MC {} gefunden", mc_version))?;
+
+    tracing::info!("Installing version: {} ({})", version.version_number, version.id);
+
+    // Lade Datei herunter
+    let file = version.files.iter().find(|f| f.primary)
+        .or_else(|| version.files.first())
+        .ok_or_else(|| "No files in version".to_string())?;
+
+    let target_path = rp_dir.join(&file.filename);
+
+    tracing::info!("Downloading from {} to {:?}", file.url, target_path);
+
+    let response = client.get(&file.url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    tokio::fs::write(&target_path, &bytes).await.map_err(|e| e.to_string())?;
+
+    tracing::info!("Resource pack installed successfully to {:?}", target_path);
+
+    Ok(())
+}
+
+// ==================== SHADER PACKS ====================
+
+#[tauri::command]
+pub async fn search_shaderpacks(
+    query: String,
+    game_version: Option<String>,
+    sort_by: Option<String>,
+    offset: Option<u32>,
+    limit: Option<u32>,
+) -> Result<Vec<ModInfo>, String> {
+    let client = reqwest::Client::new();
+    let url = "https://api.modrinth.com/v2/search";
+
+    let sort = match sort_by.as_deref() {
+        Some("downloads") => "downloads",
+        Some("updated") => "updated",
+        Some("newest") => "newest",
+        _ => "relevance",
+    };
+
+    let mut facets = vec![r#"["project_type:shader"]"#.to_string()];
+
+    if let Some(version) = game_version {
+        facets.push(format!(r#"["versions:{}"]"#, version));
+    }
+
+    let facets_str = format!("[{}]", facets.join(","));
+
+    let response = client
+        .get(url)
+        .query(&[
+            ("query", query.as_str()),
+            ("facets", &facets_str),
+            ("index", sort),
+            ("offset", &offset.unwrap_or(0).to_string()),
+            ("limit", &limit.unwrap_or(20).to_string()),
+        ])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    #[derive(serde::Deserialize)]
+    struct SearchResponse {
+        hits: Vec<SearchHit>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct SearchHit {
+        project_id: String,
+        slug: String,
+        title: String,
+        description: String,
+        icon_url: Option<String>,
+        author: String,
+        downloads: u64,
+        categories: Vec<String>,
+        versions: Vec<String>,
+        date_modified: String,
+    }
+
+    let result: SearchResponse = response.json().await.map_err(|e| e.to_string())?;
+
+    Ok(result.hits.into_iter().map(|hit| {
+        let slug = hit.slug.clone();
+        ModInfo {
+            id: hit.project_id,
+            slug: hit.slug,
+            name: hit.title,
+            description: hit.description,
+            icon_url: hit.icon_url,
+            author: hit.author,
+            downloads: hit.downloads,
+            categories: hit.categories,
+            source: crate::types::mod_info::ModSource::Modrinth,
+            versions: hit.versions,
+            game_versions: vec![],
+            loaders: vec![],
+            project_url: format!("https://modrinth.com/shader/{}", slug),
+            updated_at: hit.date_modified,
+        }
+    }).collect())
+}
+
+#[tauri::command]
+pub async fn install_shaderpack(
+    profile_id: String,
+    pack_id: String,
+    version_id: Option<String>,
+) -> Result<(), String> {
+    use crate::core::profiles::ProfileManager;
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    let shader_dir = profile.game_dir.join("shaderpacks");
+    tokio::fs::create_dir_all(&shader_dir).await.map_err(|e| e.to_string())?;
+
+    let mc_version = profile.minecraft_version.clone();
+
+    tracing::info!("Installing shader pack {} for {} to {:?}", pack_id, mc_version, shader_dir);
+
+    let client = reqwest::Client::new();
+    let url = format!("https://api.modrinth.com/v2/project/{}/version", pack_id);
+
+    let response = client.get(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    #[derive(serde::Deserialize)]
+    struct Version {
+        id: String,
+        version_number: String,
+        game_versions: Vec<String>,
+        files: Vec<File>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct File {
+        url: String,
+        filename: String,
+        primary: bool,
+    }
+
+    let versions: Vec<Version> = response.json().await.map_err(|e| e.to_string())?;
+
+    let version = if let Some(vid) = version_id {
+        versions.iter().find(|v| v.id == vid)
+    } else {
+        versions.iter().find(|v| v.game_versions.iter().any(|gv| gv == &mc_version))
+            .or_else(|| versions.first()) // Shader sind oft version-unabhängig
+    }.ok_or_else(|| "Keine passende Shader Version gefunden".to_string())?;
+
+    let file = version.files.iter().find(|f| f.primary)
+        .or_else(|| version.files.first())
+        .ok_or_else(|| "No files in version".to_string())?;
+
+    let target_path = shader_dir.join(&file.filename);
+
+    let response = client.get(&file.url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    tokio::fs::write(&target_path, &bytes).await.map_err(|e| e.to_string())?;
+
+    tracing::info!("Shader pack installed successfully to {:?}", target_path);
+
+    Ok(())
+}
+
+// ==================== MODPACKS ====================
+
+#[tauri::command]
+pub async fn search_modpacks(
+    query: String,
+    game_version: Option<String>,
+    loader: Option<String>,
+    sort_by: Option<String>,
+    offset: Option<u32>,
+    limit: Option<u32>,
+) -> Result<Vec<ModInfo>, String> {
+    let client = reqwest::Client::new();
+    let url = "https://api.modrinth.com/v2/search";
+
+    let sort = match sort_by.as_deref() {
+        Some("downloads") => "downloads",
+        Some("updated") => "updated",
+        Some("newest") => "newest",
+        _ => "relevance",
+    };
+
+    let mut facets = vec![r#"["project_type:modpack"]"#.to_string()];
+
+    if let Some(version) = game_version {
+        facets.push(format!(r#"["versions:{}"]"#, version));
+    }
+    
+    if let Some(l) = loader {
+        facets.push(format!(r#"["categories:{}"]"#, l));
+    }
+
+    let facets_str = format!("[{}]", facets.join(","));
+
+    let response = client
+        .get(url)
+        .query(&[
+            ("query", query.as_str()),
+            ("facets", &facets_str),
+            ("index", sort),
+            ("offset", &offset.unwrap_or(0).to_string()),
+            ("limit", &limit.unwrap_or(20).to_string()),
+        ])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    #[derive(serde::Deserialize)]
+    struct SearchResponse {
+        hits: Vec<SearchHit>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct SearchHit {
+        project_id: String,
+        slug: String,
+        title: String,
+        description: String,
+        icon_url: Option<String>,
+        author: String,
+        downloads: u64,
+        categories: Vec<String>,
+        versions: Vec<String>,
+        date_modified: String,
+    }
+
+    let result: SearchResponse = response.json().await.map_err(|e| e.to_string())?;
+
+    Ok(result.hits.into_iter().map(|hit| {
+        let slug = hit.slug.clone();
+        ModInfo {
+            id: hit.project_id,
+            slug: hit.slug,
+            name: hit.title,
+            description: hit.description,
+            icon_url: hit.icon_url,
+            author: hit.author,
+            downloads: hit.downloads,
+            categories: hit.categories,
+            source: crate::types::mod_info::ModSource::Modrinth,
+            versions: hit.versions,
+            game_versions: vec![],
+            loaders: vec![],
+            project_url: format!("https://modrinth.com/modpack/{}", slug),
+            updated_at: hit.date_modified,
+        }
+    }).collect())
+}
+

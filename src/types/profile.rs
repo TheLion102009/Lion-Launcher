@@ -17,6 +17,8 @@ pub struct Profile {
     pub game_dir: PathBuf,
     pub java_args: Option<Vec<String>>,
     pub memory_mb: Option<u32>,
+    #[serde(default)]
+    pub settings_sync: bool, // Sync MC settings (options.txt) with global settings
 }
 
 impl Profile {
@@ -46,6 +48,7 @@ impl Profile {
             game_dir,
             java_args: None,
             memory_mb: None,
+            settings_sync: true, // Standardmäßig aktiviert
         }
     }
 

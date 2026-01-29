@@ -30,6 +30,10 @@ pub fn mods_cache_dir() -> PathBuf {
     launcher_dir().join("cache").join("mods")
 }
 
+pub fn shared_settings_file() -> PathBuf {
+    launcher_dir().join("shared_options.txt")
+}
+
 pub fn default_memory_mb() -> u32 {
     4096
 }

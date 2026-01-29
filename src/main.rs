@@ -53,6 +53,16 @@ fn main() {
             gui::bulk_toggle_mods,
             gui::bulk_delete_mods,
             gui::check_mod_updates,
+            // Resource Packs
+            gui::get_installed_resourcepacks,
+            gui::search_resourcepacks,
+            gui::install_resourcepack,
+            // Shader Packs
+            gui::search_shaderpacks,
+            gui::install_shaderpack,
+            gui::get_installed_shaderpacks,
+            // Modpacks
+            gui::search_modpacks,
             // Auth
             gui::auth::get_accounts,
             gui::auth::get_active_account,
@@ -66,6 +76,11 @@ fn main() {
             // Logs & Folders
             gui::get_profile_logs,
             gui::open_profile_folder,
+            // Settings Sync
+            gui::sync_settings_to_profile,
+            gui::sync_settings_from_profile,
+            gui::toggle_settings_sync,
+            gui::get_settings_sync_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
