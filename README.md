@@ -45,7 +45,7 @@ Ein minimalistischer Minecraft Launcher für Linux und Windows, geschrieben in R
 
 ## Installation
 
-### Vorgebaute Releases (Einfachst)
+### prebuild Releases
 
 Lade die neueste Version von den [Releases](https://github.com/yourusername/Lion-Launcher/releases):
 
