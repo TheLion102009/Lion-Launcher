@@ -51,6 +51,13 @@ impl ModrinthClient {
             }
         }
 
+        // Categories hinzufügen (z.B. technology, adventure, etc.)
+        for category in &query.categories {
+            if !category.is_empty() {
+                facets.push(format!("[\"categories:{}\"]", category));
+            }
+        }
+
         // Nur Mods (keine Modpacks etc.)
         facets.push("[\"project_type:mod\"]".to_string());
 
@@ -75,6 +82,8 @@ impl ModrinthClient {
             loaders: vec![],
             project_url: format!("https://modrinth.com/mod/{}", hit.slug),
             updated_at: hit.date_modified,
+            client_side: hit.client_side,
+            server_side: hit.server_side,
         }).collect();
 
         Ok(mods)
@@ -99,6 +108,8 @@ impl ModrinthClient {
             loaders: project.loaders,
             project_url: format!("https://modrinth.com/mod/{}", project.slug),
             updated_at: project.updated,
+            client_side: project.client_side,
+            server_side: project.server_side,
         })
     }
 
@@ -157,6 +168,10 @@ struct ModrinthSearchHit {
     categories: Vec<String>,
     versions: Vec<String>,
     date_modified: String,
+    #[serde(default)]
+    client_side: Option<String>,
+    #[serde(default)]
+    server_side: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -173,6 +188,10 @@ struct ModrinthProject {
     game_versions: Vec<String>,
     loaders: Vec<String>,
     updated: String,
+    #[serde(default)]
+    client_side: Option<String>,
+    #[serde(default)]
+    server_side: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

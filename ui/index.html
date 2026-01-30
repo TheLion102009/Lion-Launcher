@@ -69,22 +69,22 @@
                         <button class="btn btn-secondary active" data-content-type="mods"
                                 onclick="switchContentType('mods')"
                                 style="padding: 8px 20px; font-size: 14px;">
-                            📦 Mods
+                             Mods
                         </button>
                         <button class="btn btn-secondary" data-content-type="resourcepacks"
                                 onclick="switchContentType('resourcepacks')"
                                 style="padding: 8px 20px; font-size: 14px;">
-                            🎨 Resource Packs
+                             Resource Packs
                         </button>
                         <button class="btn btn-secondary" data-content-type="shaderpacks"
                                 onclick="switchContentType('shaderpacks')"
                                 style="padding: 8px 20px; font-size: 14px;">
-                            ✨ Shader Packs
+                             Shader Packs
                         </button>
                         <button class="btn btn-secondary" data-content-type="modpacks"
                                 onclick="switchContentType('modpacks')"
                                 style="padding: 8px 20px; font-size: 14px;">
-                            📚 Modpacks
+                             Modpacks
                         </button>
                     </div>
 
@@ -92,30 +92,100 @@
                         <div class="mod-list" id="mod-list">
                             <div class="loading">Search for content to get started</div>
                         </div>
-                        <div class="filters">
+                        <div class="filters" style="max-height: calc(100vh - 200px); overflow-y: auto; padding-right: 10px;">
+                            <!-- Sort By - Collapsible -->
                             <div class="filter-section">
-                                <h3>Minecraft Version</h3>
-                                <select id="filter-version" class="filter-option" style="width: 100%; border: none;">
-                                    <option value="">All Versions</option>
-                                </select>
-                                <label style="display: block; margin-top: 10px; font-size: 12px; cursor: pointer;">
-                                    <input type="checkbox" id="show-snapshots" style="margin-right: 5px;">
-                                    Show Snapshots
-                                </label>
+                                <h3 class="filter-header" onclick="toggleFilterSection('sort')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                                    <span>Sort By</span>
+                                    <span class="collapse-icon" id="collapse-sort" style="transition: transform 0.2s;">▼</span>
+                                </h3>
+                                <div id="filter-sort-content" class="filter-content">
+                                    <select id="filter-sort" class="filter-option" style="width: 100%; padding: 10px; background: var(--bg-dark); border: 2px solid var(--bg-light); border-radius: 8px; color: #666666; cursor: pointer;">
+                                        <option value="relevance">Relevance</option>
+                                        <option value="downloads" selected>Downloads</option>
+                                        <option value="updated">Recently Updated</option>
+                                        <option value="newest">Newest</option>
+                                    </select>
+                                </div>
                             </div>
+
+                            <!-- Minecraft Version - Collapsible -->
+                            <div class="filter-section">
+                                <h3 class="filter-header" onclick="toggleFilterSection('version')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                                    <span>Minecraft Version</span>
+                                    <span class="collapse-icon" id="collapse-version" style="transition: transform 0.2s;">▼</span>
+                                </h3>
+                                <div id="filter-version-content" class="filter-content">
+                                    <select id="filter-version" class="filter-option" style="width: 100%; border: none;">
+                                        <option value="">All Versions</option>
+                                    </select>
+                                    <label style="display: block; margin-top: 10px; font-size: 12px; cursor: pointer;">
+                                        <input type="checkbox" id="show-snapshots" style="margin-right: 5px;">
+                                        Show Snapshots
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Mod Loader - Collapsible -->
                             <div class="filter-section" id="loader-filter-section">
-                                <h3>Mod Loader</h3>
-                                <div class="filter-option" data-loader="fabric">Fabric</div>
-                                <div class="filter-option" data-loader="forge">Forge</div>
-                                <div class="filter-option" data-loader="neoforge">NeoForge</div>
-                                <div class="filter-option" data-loader="quilt">Quilt</div>
+                                <h3 class="filter-header" onclick="toggleFilterSection('loader')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                                    <span>Mod Loader</span>
+                                    <span class="collapse-icon" id="collapse-loader" style="transition: transform 0.2s;">▼</span>
+                                </h3>
+                                <div id="filter-loader-content" class="filter-content">
+                                    <select id="filter-loader" class="filter-option" style="width: 100%; padding: 10px; background: var(--bg-dark); border: 2px solid var(--bg-light); border-radius: 8px; color: #666666; cursor: pointer;">
+                                        <option value="">All Loaders</option>
+                                        <option value="fabric">Fabric</option>
+                                        <option value="forge">Forge</option>
+                                        <option value="neoforge">NeoForge</option>
+                                        <option value="quilt">Quilt</option>
+                                    </select>
+                                </div>
                             </div>
-                            <div class="filter-section">
-                                <h3>Sort By</h3>
-                                <div class="filter-option active" data-sort="relevance">Relevance</div>
-                                <div class="filter-option" data-sort="downloads">Downloads</div>
-                                <div class="filter-option" data-sort="updated">Recently Updated</div>
-                                <div class="filter-option" data-sort="newest">Newest</div>
+
+                            <!-- Environment - Collapsible -->
+                            <div class="filter-section" id="environment-filter-section">
+                                <h3 class="filter-header" onclick="toggleFilterSection('environment')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                                    <span>Environment</span>
+                                    <span class="collapse-icon" id="collapse-environment" style="transition: transform 0.2s;">▼</span>
+                                </h3>
+                                <div id="filter-environment-content" class="filter-content">
+                                    <label id="env-client-label" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; font-size: 13px;" onmouseover="this.style.background='var(--bg-light)'" onmouseout="this.style.background='transparent'">
+                                        <input type="checkbox" id="filter-client" value="client" style="cursor: pointer; width: 16px; height: 16px; accent-color: var(--gold);">
+                                        <!-- Icon wird hier von JS eingefügt -->
+                                        <span style="color: var(--text-primary); flex: 1;">Client</span>
+                                    </label>
+                                    <label id="env-server-label" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; font-size: 13px;" onmouseover="this.style.background='var(--bg-light)'" onmouseout="this.style.background='transparent'">
+                                        <input type="checkbox" id="filter-server" value="server" style="cursor: pointer; width: 16px; height: 16px; accent-color: var(--gold);">
+                                        <!-- Icon wird hier von JS eingefügt -->
+                                        <span style="color: var(--text-primary); flex: 1;">Server</span>
+                                    </label>
+                                    <label id="env-both-label" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; font-size: 13px;" onmouseover="this.style.background='var(--bg-light)'" onmouseout="this.style.background='transparent'">
+                                        <input type="checkbox" id="filter-both" value="both" style="cursor: pointer; width: 16px; height: 16px; accent-color: var(--gold);">
+                                        <!-- Icon wird hier von JS eingefügt -->
+                                        <span style="color: var(--text-primary); flex: 1;">Client and Server</span>
+                                    </label>
+                                    <label id="env-or-label" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; font-size: 13px;" onmouseover="this.style.background='var(--bg-light)'" onmouseout="this.style.background='transparent'">
+                                        <input type="checkbox" id="filter-or" value="or" style="cursor: pointer; width: 16px; height: 16px; accent-color: var(--gold);">
+                                        <!-- Icon wird hier von JS eingefügt -->
+                                        <span style="color: var(--text-primary); flex: 1;">Client or Server</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Categories - Collapsible -->
+                            <div class="filter-section" id="categories-filter-section">
+                                <h3 class="filter-header" onclick="toggleFilterSection('categories')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                                    <span>Categories</span>
+                                    <span class="collapse-icon" id="collapse-categories" style="transition: transform 0.2s;">▼</span>
+                                </h3>
+                                <div id="filter-categories-content" class="filter-content">
+                                    <div id="filter-categories">
+                                        <div style="color: var(--text-secondary); font-size: 12px; padding: 10px;">
+                                            Loading categories...
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

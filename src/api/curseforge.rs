@@ -54,27 +54,30 @@ impl CurseForgeClient {
 
         let cf_response: CurseForgeResponse<Vec<CurseForgeMod>> = response.json().await?;
 
-        let mods = cf_response.data.into_iter().map(|cf_mod| ModInfo {
-            id: cf_mod.id.to_string(),
-            slug: cf_mod.slug,
-            name: cf_mod.name,
-            description: cf_mod.summary,
-            icon_url: cf_mod.logo.map(|l| l.url),
-            author: cf_mod.authors.first()
-                .map(|a| a.name.clone())
-                .unwrap_or_else(|| "Unknown".to_string()),
-            downloads: cf_mod.download_count as u64,
-            categories: cf_mod.categories.into_iter()
-                .map(|c| c.name)
-                .collect(),
-            source: ModSource::CurseForge,
-            versions: vec![],
-            game_versions: cf_mod.latest_files_indexes.into_iter()
-                .map(|f| f.game_version)
-                .collect(),
-            loaders: vec![],
-            project_url: cf_mod.links.website_url,
-            updated_at: cf_mod.date_modified,
+        let mods = cf_response.data.into_iter().map(|cf_mod| {
+            let slug = cf_mod.slug.clone();
+            ModInfo {
+                id: cf_mod.id.to_string(),
+                slug: cf_mod.slug,
+                name: cf_mod.name,
+                description: cf_mod.summary,
+                icon_url: cf_mod.logo.map(|l| l.url),
+                author: cf_mod.authors.first()
+                    .map(|a| a.name.clone())
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                downloads: cf_mod.download_count as u64,
+                categories: cf_mod.categories.into_iter()
+                    .map(|c| c.name)
+                    .collect(),
+                source: ModSource::CurseForge,
+                versions: vec![],
+                game_versions: vec![],
+                loaders: vec![],
+                project_url: format!("https://www.curseforge.com/minecraft/mc-mods/{}", slug),
+                updated_at: cf_mod.date_modified,
+                client_side: None,
+                server_side: None,
+            }
         }).collect();
 
         Ok(mods)
@@ -114,6 +117,8 @@ impl CurseForgeClient {
             loaders: vec![],
             project_url: cf_mod.links.website_url,
             updated_at: cf_mod.date_modified,
+            client_side: None,
+            server_side: None,
         })
     }
 }

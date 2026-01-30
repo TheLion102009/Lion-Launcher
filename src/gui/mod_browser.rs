@@ -8,6 +8,7 @@ pub async fn search_mods(
     query: String,
     game_version: Option<String>,
     loader: Option<String>,
+    categories: Option<Vec<String>>,
     sort_by: Option<String>,
     offset: Option<u32>,
     limit: Option<u32>,
@@ -16,7 +17,7 @@ pub async fn search_mods(
         query,
         game_version,
         loader,
-        categories: Vec::new(),
+        categories: categories.unwrap_or_default(),
         offset: offset.unwrap_or(0),
         limit: limit.unwrap_or(20),
         sort_by: match sort_by.as_deref() {
@@ -56,6 +57,8 @@ pub async fn get_mod_versions(mod_id: String, source: String) -> Result<Vec<ModV
         loaders: Vec::new(),
         project_url: String::new(),
         updated_at: String::new(),
+        client_side: None,
+        server_side: None,
     };
 
     manager.get_mod_versions(&mod_info).await.map_err(|e| e.to_string())
@@ -215,6 +218,7 @@ pub async fn uninstall_mod(
 pub async fn search_resourcepacks(
     query: String,
     game_version: Option<String>,
+    categories: Option<Vec<String>>,
     sort_by: Option<String>,
     offset: Option<u32>,
     limit: Option<u32>,
@@ -234,6 +238,15 @@ pub async fn search_resourcepacks(
 
     if let Some(version) = game_version {
         facets.push(format!(r#"["versions:{}"]"#, version));
+    }
+
+    // Categories hinzufügen
+    if let Some(cats) = categories {
+        for cat in cats {
+            if !cat.is_empty() {
+                facets.push(format!(r#"["categories:{}"]"#, cat));
+            }
+        }
     }
 
     let facets_str = format!("[{}]", facets.join(","));
@@ -289,6 +302,8 @@ pub async fn search_resourcepacks(
             loaders: vec![],
             project_url: format!("https://modrinth.com/resourcepack/{}", slug),
             updated_at: hit.date_modified,
+            client_side: None,
+            server_side: None,
         }
     }).collect())
 }
@@ -379,6 +394,7 @@ pub async fn install_resourcepack(
 pub async fn search_shaderpacks(
     query: String,
     game_version: Option<String>,
+    categories: Option<Vec<String>>,
     sort_by: Option<String>,
     offset: Option<u32>,
     limit: Option<u32>,
@@ -397,6 +413,15 @@ pub async fn search_shaderpacks(
 
     if let Some(version) = game_version {
         facets.push(format!(r#"["versions:{}"]"#, version));
+    }
+
+    // Categories hinzufügen
+    if let Some(cats) = categories {
+        for cat in cats {
+            if !cat.is_empty() {
+                facets.push(format!(r#"["categories:{}"]"#, cat));
+            }
+        }
     }
 
     let facets_str = format!("[{}]", facets.join(","));
@@ -452,6 +477,8 @@ pub async fn search_shaderpacks(
             loaders: vec![],
             project_url: format!("https://modrinth.com/shader/{}", slug),
             updated_at: hit.date_modified,
+            client_side: None,
+            server_side: None,
         }
     }).collect())
 }
@@ -535,6 +562,7 @@ pub async fn search_modpacks(
     query: String,
     game_version: Option<String>,
     loader: Option<String>,
+    categories: Option<Vec<String>>,
     sort_by: Option<String>,
     offset: Option<u32>,
     limit: Option<u32>,
@@ -557,6 +585,15 @@ pub async fn search_modpacks(
     
     if let Some(l) = loader {
         facets.push(format!(r#"["categories:{}"]"#, l));
+    }
+
+    // Categories hinzufügen
+    if let Some(cats) = categories {
+        for cat in cats {
+            if !cat.is_empty() {
+                facets.push(format!(r#"["categories:{}"]"#, cat));
+            }
+        }
     }
 
     let facets_str = format!("[{}]", facets.join(","));
@@ -612,6 +649,8 @@ pub async fn search_modpacks(
             loaders: vec![],
             project_url: format!("https://modrinth.com/modpack/{}", slug),
             updated_at: hit.date_modified,
+            client_side: None,
+            server_side: None,
         }
     }).collect())
 }

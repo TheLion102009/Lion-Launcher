@@ -18,6 +18,10 @@ pub struct ModInfo {
     pub loaders: Vec<String>,
     pub project_url: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub client_side: Option<String>,
+    #[serde(default)]
+    pub server_side: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

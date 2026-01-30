@@ -43,7 +43,8 @@ let currentUsername = 'Guest';
 let selectedFilters = {
     version: '',
     loader: '',
-    sort: 'relevance'
+    sort: 'downloads',
+    categories: []
 };
 let currentModSearchQuery = '';
 let currentModPage = 0;
@@ -89,6 +90,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         await loadMinecraftVersions();
 
         setupSearch();
+
+        // Lade Environment-Icons
+        loadEnvironmentIcons();
 
         debugLog('Lion Launcher ready!', 'success');
     } catch (error) {
@@ -174,6 +178,22 @@ function showToast(message, type = 'info', duration = 3000) {
             }
         }, 300);
     }, duration);
+}
+
+// ==================== FILTER COLLAPSE/EXPAND ====================
+function toggleFilterSection(sectionName) {
+    const content = document.getElementById(`filter-${sectionName}-content`);
+    const icon = document.getElementById(`collapse-${sectionName}`);
+
+    if (!content || !icon) return;
+
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        icon.style.transform = 'rotate(0deg)';
+    } else {
+        content.style.display = 'none';
+        icon.style.transform = 'rotate(-90deg)';
+    }
 }
 
 // Navigation
@@ -357,10 +377,10 @@ function renderProfiles() {
         const loaderName = profile.loader.loader.charAt(0).toUpperCase() + profile.loader.loader.slice(1);
         const loaderDisplay = profile.loader.loader === 'vanilla' ? 'Vanilla' : loaderName;
 
-        // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst Emoji
+        // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst Unicode
         const iconHTML = profile.icon_path
-            ? `<img src="${profile.icon_path}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;" onerror="this.style.display='none'; this.parentElement.innerHTML='🎮';">`
-            : '🎮';
+            ? `<img src="${profile.icon_path}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;" onerror="this.style.display='none'; this.parentElement.innerHTML='▪';">`
+            : '▪';
 
         return `
         <div class="profile-card" data-context-menu="profile" data-profile-id="${profile.id}"
@@ -490,7 +510,7 @@ function openProfileSettings(profileId) {
                 <!-- Profil-Bild -->
                 <div style="display: flex; gap: 15px; align-items: center; background: var(--bg-light); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
                     <div id="profile-icon-preview" style="width: 60px; height: 60px; background: var(--bg-medium); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 30px; overflow: hidden;">
-                        ${profile.icon_path ? `<img src="${profile.icon_path}" style="width: 100%; height: 100%; object-fit: cover;" alt="Icon">` : '📦'}
+                        ${profile.icon_path ? `<img src="${profile.icon_path}" style="width: 100%; height: 100%; object-fit: cover;" alt="Icon">` : '▪'}
                     </div>
                     <div style="flex: 1;">
                         <input type="file" id="profile-icon-input" accept="image/*" onchange="previewProfileIcon(event)" style="display: none;">
@@ -727,7 +747,7 @@ async function launchProfile(profileId) {
     const modalHTML = `
         <div id="launch-progress-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 10000;">
             <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 10px; padding: 40px; text-align: center; min-width: 400px;">
-                <div style="font-size: 48px; margin-bottom: 20px;">🎮</div>
+                <div style="font-size: 48px; margin-bottom: 20px;">▪</div>
                 <h2 style="color: var(--gold); margin: 0 0 20px 0;">Minecraft wird vorbereitet...</h2>
                 <p style="color: var(--text-secondary); margin-bottom: 30px;" id="launch-status">
                     Lade Version-Info...
@@ -879,75 +899,286 @@ function showProfileDetails(profileId) {
     const grid = document.getElementById('profiles-grid');
     if (!grid) return;
 
-    // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst Emoji
+    // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst Unicode
     const iconHTML = profile.icon_path
-        ? `<img src="${profile.icon_path}" style="width: 64px; height: 64px; object-fit: cover; border-radius: 8px;" onerror="this.style.display='none'; this.parentElement.innerHTML='🎮';">`
-        : '🎮';
+        ? `<img src="${profile.icon_path}" style="width: 64px; height: 64px; object-fit: cover; border-radius: 8px;" onerror="this.style.display='none'; this.parentElement.innerHTML='▪';">`
+        : '▪';
 
     grid.innerHTML = `
         <div style="grid-column: 1 / -1;">
-            <!-- Header mit zurück Button -->
-            <div style="display: flex; align-items: center; margin-bottom: 30px; gap: 15px;">
-                <button class="btn btn-secondary" onclick="loadProfiles()" style="padding: 10px 20px;">
-                    ← Zurück
-                </button>
-                <div style="display: flex; align-items: center; gap: 15px; flex: 1;">
-                    <div style="width: 64px; height: 64px; font-size: 64px; display: flex; align-items: center; justify-content: center;">
-                        ${iconHTML}
-                    </div>
-                    <div>
-                        <h2 style="color: var(--gold); margin: 0 0 5px 0;">${profile.name}</h2>
-                        <p style="margin: 0; color: var(--text-secondary);">
-                            Minecraft ${profile.minecraft_version} • ${profile.loader.loader} ${profile.loader.version}
-                        </p>
-                    </div>
+            <!-- Lion Launcher Logo oben links -->
+            <div style="position: absolute; top: 20px; left: 20px; font-size: 20px; font-weight: 700; color: var(--gold);">
+                Lion Launcher
+            </div>
+            
+            <!-- Profil Header -->
+            <div style="display: flex; align-items: center; margin-bottom: 25px; gap: 20px; padding-top: 20px;">
+                <!-- Profil Icon (groß, links) -->
+                <div style="width: 80px; height: 80px; font-size: 80px; display: flex; align-items: center; justify-content: center; 
+                            flex-shrink: 0; border-radius: 10px; overflow: hidden; background: var(--bg-light);">
+                    ${iconHTML}
                 </div>
-                <button class="btn" onclick="launchProfile('${profile.id}')" style="padding: 15px 40px; font-size: 18px;">
+                
+                <!-- Profil Info (rechts vom Icon) -->
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+                    <h2 style="color: var(--gold); margin: 0; font-size: 24px; font-weight: 700;">${profile.name}</h2>
+                    <p style="margin: 0; color: var(--text-secondary); font-size: 14px;">
+                        Minecraft ${profile.minecraft_version} • ${profile.loader.loader} ${profile.loader.version}
+                    </p>
+                </div>
+                
+                <!-- Play Button -->
+                <button class="btn" onclick="launchProfile('${profile.id}')" style="padding: 15px 40px; font-size: 18px; flex-shrink: 0;">
                     ▶ Play
                 </button>
             </div>
             
-            <!-- Tab Navigation -->
-            <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid var(--bg-light); align-items: center;">
-                <button class="profile-tab active" data-tab="mods" onclick="switchProfileTab('mods')" 
-                        style="padding: 10px 20px; background: none; border: none; color: var(--text-primary); cursor: pointer; border-bottom: 3px solid var(--gold);">
-                    📦 Mods
+            <!-- Hauptkategorien-Kasten - Zentriert, größer -->
+            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; position: relative;">
+                <!-- Zurück-Button ganz links, absolut positioniert -->
+                <button class="btn btn-secondary" onclick="loadProfiles()" 
+                        style="position: absolute; left: -240px; padding: 10px 20px; flex-shrink: 0;">
+                    ← Zurück
                 </button>
-                <button class="profile-tab" data-tab="resourcepacks" onclick="switchProfileTab('resourcepacks')" 
-                        style="padding: 10px 20px; background: none; border: none; color: var(--text-secondary); cursor: pointer; border-bottom: 3px solid transparent;">
-                    🎨 Resource Packs
-                </button>
-                <button class="profile-tab" data-tab="shaderpacks" onclick="switchProfileTab('shaderpacks')" 
-                        style="padding: 10px 20px; background: none; border: none; color: var(--text-secondary); cursor: pointer; border-bottom: 3px solid transparent;">
-                    ✨ Shader Packs
-                </button>
-                <button class="profile-tab" data-tab="logs" onclick="switchProfileTab('logs')" 
-                        style="padding: 10px 20px; background: none; border: none; color: var(--text-secondary); cursor: pointer; border-bottom: 3px solid transparent;">
-                    📋 Logs
-                </button>
-                <div style="flex: 1;"></div>
-                <button onclick="openContentBrowser('${profile.id}')" 
-                        style="padding: 6px 14px; font-size: 12px; background: var(--bg-light); color: var(--gold); 
-                               border: 1px solid var(--bg-light); border-radius: 4px; cursor: pointer; font-weight: 500;
-                               transition: all 0.2s ease; margin-bottom: 8px;"
-                        onmouseover="this.style.background='var(--bg-dark)'; this.style.borderColor='var(--gold)';"
-                        onmouseout="this.style.background='var(--bg-light)'; this.style.borderColor='var(--bg-light)';">
-                    + Add Content
-                </button>
+                
+                <!-- Hauptkategorien zentriert -->
+                <div style="flex: 1; display: flex; justify-content: center;">
+                    <div style="background: var(--bg-medium); border-radius: 10px; padding: 8px; display: flex; gap: 8px; max-width: 650px;">
+                        <button class="main-category-tab active" data-maincategory="content" onclick="switchMainCategory('content')" 
+                                onmouseover="if(!this.classList.contains('active')) this.style.background='rgba(218, 165, 32, 0.1)'"
+                                onmouseout="if(!this.classList.contains('active')) this.style.background='transparent'"
+                                style="padding: 10px 24px; background: var(--gold); border: none; color: var(--bg-dark); 
+                                       cursor: pointer; border-radius: 8px; font-weight: 600; font-size: 15px; 
+                                       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; transform: scale(1);">
+                            Content
+                        </button>
+                        <button class="main-category-tab" data-maincategory="worlds" onclick="switchMainCategory('worlds')" 
+                                onmouseover="if(!this.classList.contains('active')) this.style.background='rgba(218, 165, 32, 0.1)'"
+                                onmouseout="if(!this.classList.contains('active')) this.style.background='transparent'"
+                                style="padding: 10px 24px; background: transparent; border: none; color: var(--text-secondary); 
+                                       cursor: pointer; border-radius: 8px; font-weight: 600; font-size: 15px; 
+                                       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; transform: scale(1);">
+                            Worlds
+                        </button>
+                        <button class="main-category-tab" data-maincategory="servers" onclick="switchMainCategory('servers')" 
+                                onmouseover="if(!this.classList.contains('active')) this.style.background='rgba(218, 165, 32, 0.1)'"
+                                onmouseout="if(!this.classList.contains('active')) this.style.background='transparent'"
+                                style="padding: 10px 24px; background: transparent; border: none; color: var(--text-secondary); 
+                                       cursor: pointer; border-radius: 8px; font-weight: 600; font-size: 15px; 
+                                       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; transform: scale(1);">
+                            Servers
+                        </button>
+                        <button class="main-category-tab" data-maincategory="logs" onclick="switchMainCategory('logs')" 
+                                onmouseover="if(!this.classList.contains('active')) this.style.background='rgba(218, 165, 32, 0.1)'"
+                                onmouseout="if(!this.classList.contains('active')) this.style.background='transparent'"
+                                style="padding: 10px 24px; background: transparent; border: none; color: var(--text-secondary); 
+                                       cursor: pointer; border-radius: 8px; font-weight: 600; font-size: 15px; 
+                                       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; transform: scale(1);">
+                            Logs
+                        </button>
+                    </div>
+                </div>
             </div>
             
-            <!-- Tab Content -->
-            <div id="profile-tab-content" style="background: var(--bg-light); border-radius: 10px; padding: 20px; min-height: 400px;">
-                ${renderProfileTabContent('mods', profile)}
+            <!-- Content Area (unter dem Strich) -->
+            <div id="main-category-content">
+                ${renderMainCategoryContent('content', profile)}
             </div>
         </div>
     `;
 
-    // Lade Mods automatisch nach dem Rendern
+    // Lade Content automatisch nach dem Rendern
     setTimeout(() => {
         loadInstalledMods(profile.id);
         startModsWatcher(profile.id);
     }, 50);
+}
+
+function switchMainCategory(categoryName) {
+    debugLog('Switching to main category: ' + categoryName, 'info');
+
+    // Update button styles mit Animation
+    document.querySelectorAll('.main-category-tab').forEach(btn => {
+        if (btn.dataset.maincategory === categoryName) {
+            btn.style.background = 'var(--gold)';
+            btn.style.color = 'var(--bg-dark)';
+            btn.style.transform = 'scale(1.05)';
+            btn.classList.add('active');
+        } else {
+            btn.style.background = 'transparent';
+            btn.style.color = 'var(--text-secondary)';
+            btn.style.transform = 'scale(1)';
+            btn.classList.remove('active');
+        }
+    });
+
+    // Fade-Out Animation für Content
+    const content = document.getElementById('main-category-content');
+    if (content && currentProfile) {
+        // Fade out
+        content.style.opacity = '0';
+        content.style.transform = 'translateY(-10px)';
+        content.style.transition = 'opacity 0.2s ease-out, transform 0.2s ease-out';
+
+        // Nach Fade-Out: Content wechseln und Fade-In
+        setTimeout(() => {
+            content.innerHTML = renderMainCategoryContent(categoryName, currentProfile);
+
+            // Fade in
+            content.style.opacity = '1';
+            content.style.transform = 'translateY(0)';
+            content.style.transition = 'opacity 0.3s ease-in, transform 0.3s ease-in';
+
+            // Lade kategorie-spezifische Daten
+            if (categoryName === 'content') {
+                loadInstalledMods(currentProfile.id);
+                startModsWatcher(currentProfile.id);
+            } else if (categoryName === 'logs') {
+                loadLogs(currentProfile.id);
+            }
+        }, 200);
+    }
+}
+
+function renderMainCategoryContent(categoryName, profile) {
+    switch (categoryName) {
+        case 'content':
+            return `
+                <!-- Content Tab Navigation (Mods, ResourcePacks, ShaderPacks) - kleiner -->
+                <div style="display: flex; gap: 8px; margin-bottom: 20px;">
+                    <button class="content-sub-tab active" data-subtab="mods" onclick="switchContentSubTab('mods')" 
+                            style="padding: 6px 14px; background: var(--bg-medium); border: 2px solid var(--gold); color: var(--text-primary); 
+                                   cursor: pointer; border-radius: 6px; font-weight: 500; font-size: 12px; transition: all 0.2s;">
+                        ▪ Mods
+                    </button>
+                    <button class="content-sub-tab" data-subtab="resourcepacks" onclick="switchContentSubTab('resourcepacks')" 
+                            style="padding: 6px 14px; background: var(--bg-medium); border: 2px solid var(--bg-light); color: var(--text-secondary); 
+                                   cursor: pointer; border-radius: 6px; font-weight: 500; font-size: 12px; transition: all 0.2s;">
+                        ▪ Resource Packs
+                    </button>
+                    <button class="content-sub-tab" data-subtab="shaderpacks" onclick="switchContentSubTab('shaderpacks')" 
+                            style="padding: 6px 14px; background: var(--bg-medium); border: 2px solid var(--bg-light); color: var(--text-secondary); 
+                                   cursor: pointer; border-radius: 6px; font-weight: 500; font-size: 12px; transition: all 0.2s;">
+                        ▪ Shader Packs
+                    </button>
+                    <div style="flex: 1;"></div>
+                    <button onclick="openContentBrowser('${profile.id}')" 
+                            style="padding: 6px 16px; font-size: 12px; background: var(--bg-light); color: var(--gold); 
+                                   border: 2px solid var(--gold); border-radius: 6px; cursor: pointer; font-weight: 600;
+                                   transition: all 0.2s ease;"
+                            onmouseover="this.style.background='var(--gold)'; this.style.color='var(--bg-dark)';"
+                            onmouseout="this.style.background='var(--bg-light)'; this.style.color='var(--gold)';">
+                        + Add Content
+                    </button>
+                </div>
+                
+                <!-- Sub Content Area -->
+                <div id="content-sub-tab-content">
+                    ${renderContentSubTab('mods', profile)}
+                </div>
+            `;
+
+        case 'worlds':
+            return `
+                <div style="text-align: center; padding: 60px 20px;">
+                    <div style="font-size: 48px; margin-bottom: 20px; opacity: 0.5;">🌍</div>
+                    <h3 style="color: var(--text-secondary); margin: 0;">Worlds</h3>
+                    <p style="color: var(--text-secondary); margin-top: 10px;">Kommt bald...</p>
+                </div>
+            `;
+
+        case 'servers':
+            return `
+                <div style="text-align: center; padding: 60px 20px;">
+                    <div style="font-size: 48px; margin-bottom: 20px; opacity: 0.5;">🖥️</div>
+                    <h3 style="color: var(--text-secondary); margin: 0;">Servers</h3>
+                    <p style="color: var(--text-secondary); margin-top: 10px;">Kommt bald...</p>
+                </div>
+            `;
+
+        case 'logs':
+            return renderLogsContent(profile);
+
+        default:
+            return '<p style="text-align: center; color: var(--text-secondary); padding: 40px;">Inhalt nicht verfügbar</p>';
+    }
+}
+
+function switchContentSubTab(subtabName) {
+    debugLog('Switching to content sub-tab: ' + subtabName, 'info');
+
+    // Update button styles
+    document.querySelectorAll('.content-sub-tab').forEach(btn => {
+        if (btn.dataset.subtab === subtabName) {
+            btn.style.borderColor = 'var(--gold)';
+            btn.style.color = 'var(--text-primary)';
+            btn.classList.add('active');
+        } else {
+            btn.style.borderColor = 'var(--bg-light)';
+            btn.style.color = 'var(--text-secondary)';
+            btn.classList.remove('active');
+        }
+    });
+
+    // Update content
+    const content = document.getElementById('content-sub-tab-content');
+    if (content && currentProfile) {
+        content.innerHTML = renderContentSubTab(subtabName, currentProfile);
+
+        // Lade Tab-spezifische Daten
+        if (subtabName === 'mods') {
+            loadInstalledMods(currentProfile.id);
+            startModsWatcher(currentProfile.id);
+        } else if (subtabName === 'resourcepacks') {
+            loadInstalledResourcePacks(currentProfile.id);
+        } else if (subtabName === 'shaderpacks') {
+            loadInstalledShaderPacks(currentProfile.id);
+        }
+    }
+}
+
+function renderContentSubTab(subtabName, profile) {
+    // Nutze die gleiche Rendering-Logik wie vorher
+    return renderProfileTabContent(subtabName, profile);
+}
+
+function renderLogsContent(profile) {
+    return `
+        <div style="margin-bottom: 20px;">
+            <h3 style="color: var(--gold); margin: 0 0 15px 0;">Minecraft Logs</h3>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn btn-secondary" onclick="loadLogs('${profile.id}')" style="padding: 8px 20px;">
+                    ↻ Aktualisieren
+                </button>
+                <button class="btn btn-secondary" onclick="openLogsFolder('${profile.id}')" style="padding: 8px 20px;">
+                    [+] Ordner öffnen
+                </button>
+            </div>
+        </div>
+        
+        <!-- Log Type Selector -->
+        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+            <button class="log-type-tab active" data-logtype="latest" onclick="switchLogType('latest')" 
+                    style="padding: 8px 16px; background: var(--bg-medium); border: 2px solid var(--gold); color: var(--text-primary); 
+                           cursor: pointer; border-radius: 6px; font-weight: 500; font-size: 13px; transition: all 0.2s;">
+                Latest
+            </button>
+            <button class="log-type-tab" data-logtype="debug" onclick="switchLogType('debug')" 
+                    style="padding: 8px 16px; background: var(--bg-medium); border: 2px solid var(--bg-light); color: var(--text-secondary); 
+                           cursor: pointer; border-radius: 6px; font-weight: 500; font-size: 13px; transition: all 0.2s;">
+                Debug
+            </button>
+        </div>
+        
+        <div id="logs-container" style="background: #1a1a1a; border-radius: 8px; padding: 15px; min-height: 400px; 
+                                        max-height: 600px; overflow-y: auto; font-family: 'Courier New', monospace; 
+                                        font-size: 12px; line-height: 1.6; color: #e0e0e0;">
+            <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                <div class="spinner" style="margin: 0 auto 15px;"></div>
+                <p>Lade Logs...</p>
+            </div>
+        </div>
+    `;
 }
 
 function switchProfileTab(tabName) {
@@ -1298,7 +1529,7 @@ async function loadInstalledMods(profileId) {
         if (!mods || mods.length === 0) {
             modsList.innerHTML = `
                 <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
-                    <div style="font-size: 48px; margin-bottom: 15px;">📦</div>
+                    <div style="font-size: 48px; margin-bottom: 15px;">▪</div>
                     <p>Noch keine Mods installiert</p>
                     <p style="font-size: 14px; margin-top: 10px;">
                         Gehe zum <a href="#" onclick="switchPage('mods'); return false;" style="color: var(--gold);">Mod Browser</a> um Mods zu installieren
@@ -1328,8 +1559,8 @@ async function loadInstalledMods(profileId) {
                 <!-- Icon -->
                 <div style="width: 44px; height: 44px; background: var(--bg-light); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden;">
                     ${iconUrl 
-                        ? `<img src="${iconUrl}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 22px;\\'>📦</span>'">` 
-                        : `<span style="font-size: 22px;">📦</span>`
+                        ? `<img src="${iconUrl}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 22px;\\'>▪</span>'">`
+                        : `<span style="font-size: 22px;">▪</span>`
                     }
                 </div>
                 
@@ -1352,11 +1583,11 @@ async function loadInstalledMods(profileId) {
                 <div style="display: flex; gap: 6px; flex-shrink: 0;">
                     <button class="btn btn-secondary" onclick="toggleMod('${profileId}', '${mod.filename}', ${mod.disabled})" 
                             style="padding: 5px 10px; font-size: 11px;" title="${mod.disabled ? 'Aktivieren' : 'Deaktivieren'}">
-                        ${mod.disabled ? '✅' : '⏸️'}
+                        ${mod.disabled ? '✓' : '||'}
                     </button>
                     <button class="btn btn-secondary" onclick="deleteMod('${profileId}', '${mod.filename}')" 
                             style="padding: 5px 10px; font-size: 11px; color: #f44336;" title="Löschen">
-                        🗑️
+                        ×
                     </button>
                 </div>
             </div>
@@ -1511,7 +1742,7 @@ async function loadModIcons(mods) {
                         if (card) {
                             const iconContainer = card.querySelector('div[style*="44px"]');
                             if (iconContainer) {
-                                iconContainer.innerHTML = `<img src="${data.hits[0].icon_url}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 22px;\\'>📦</span>'">`;
+                                iconContainer.innerHTML = `<img src="${data.hits[0].icon_url}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 22px;\\'>▪</span>'">`;
                             }
                         }
                     }
@@ -1560,12 +1791,12 @@ async function checkForModUpdates(profileId) {
         const updateModalHTML = `
             <div id="updates-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;" onclick="if(event.target === this) this.remove()">
                 <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 10px; padding: 25px; max-width: 500px; max-height: 80vh; overflow-y: auto;" onclick="event.stopPropagation()">
-                    <h3 style="color: var(--gold); margin: 0 0 20px 0;">🔄 ${updates.length} Update(s) verfügbar</h3>
+                    <h3 style="color: var(--gold); margin: 0 0 20px 0;">↻ ${updates.length} Update(s) verfügbar</h3>
                     <div style="display: grid; gap: 10px;">
                         ${updates.map(u => `
                             <div style="background: var(--bg-light); border-radius: 8px; padding: 12px; display: flex; align-items: center; gap: 12px;">
                                 <div style="width: 40px; height: 40px; background: var(--bg-dark); border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
-                                    ${u.icon_url ? `<img src="${u.icon_url}" style="width: 100%; height: 100%; object-fit: cover;">` : '<span style="font-size: 18px;">📦</span>'}
+                                    ${u.icon_url ? `<img src="${u.icon_url}" style="width: 100%; height: 100%; object-fit: cover;">` : '<span style="font-size: 18px;">▪</span>'}
                                 </div>
                                 <div style="flex: 1;">
                                     <p style="margin: 0; color: var(--text-primary); font-size: 13px;">${u.filename}</p>
@@ -1698,7 +1929,7 @@ async function loadInstalledResourcePacks(profileId) {
                             ${pack.name}
                         </div>
                         <div style="color: var(--text-secondary); font-size: 11px;">
-                            ${pack.is_folder ? '📁 Ordner' : '📦 ' + sizeStr}
+                            ${pack.is_folder ? '📁 Ordner' : '▪ ' + sizeStr}
                         </div>
                     </div>
                     <button class="btn btn-secondary" onclick="deleteResourcePack('${profileId}', '${pack.name.replace(/'/g, "\\'")}', ${pack.is_folder})" 
@@ -1824,7 +2055,7 @@ async function loadInstalledShaderPacks(profileId) {
                             ${pack.name}
                         </div>
                         <div style="color: var(--text-secondary); font-size: 11px;">
-                            ${pack.is_folder ? '📁 Ordner' : '📦 ' + sizeStr}
+                            ${pack.is_folder ? '📁 Ordner' : '▪ ' + sizeStr}
                         </div>
                     </div>
                     <button class="btn btn-secondary" onclick="deleteShaderPack('${profileId}', '${pack.name.replace(/'/g, "\\'")}')" 
@@ -1881,7 +2112,7 @@ function clearProfileIcon() {
     selectedProfileIcon = null;
     const preview = document.getElementById('profile-icon-preview');
     if (preview) {
-        preview.innerHTML = '📦';
+        preview.innerHTML = '▪';
     }
     const input = document.getElementById('profile-icon-input');
     if (input) input.value = '';
@@ -2191,20 +2422,11 @@ function setupSearch() {
         }, 500);
     });
 
-    document.querySelectorAll('[data-loader]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('[data-loader]').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            selectedFilters.loader = btn.dataset.loader;
-            searchMods(searchInput.value);
-        });
-    });
-
-    document.querySelectorAll('[data-sort]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('[data-sort]').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            selectedFilters.sort = btn.dataset.sort;
+    // Sort By Dropdown
+    const sortFilter = document.getElementById('filter-sort');
+    if (sortFilter) {
+        sortFilter.addEventListener('change', (e) => {
+            selectedFilters.sort = e.target.value;
             const query = searchInput.value;
             if (currentContentType === 'mods') {
                 searchMods(query);
@@ -2216,8 +2438,18 @@ function setupSearch() {
                 searchModpacks(query);
             }
         });
-    });
+    }
 
+    // Mod Loader Dropdown
+    const loaderFilter = document.getElementById('filter-loader');
+    if (loaderFilter) {
+        loaderFilter.addEventListener('change', (e) => {
+            selectedFilters.loader = e.target.value;
+            searchMods(searchInput.value);
+        });
+    }
+
+    // Version Filter
     const versionFilter = document.getElementById('filter-version');
     if (versionFilter) {
         versionFilter.addEventListener('change', (e) => {
@@ -2235,6 +2467,9 @@ function setupSearch() {
         });
     }
 
+    // Lade Kategorien von der Modrinth API
+    loadModrinthCategories();
+
     // Lade automatisch beliebte Inhalte beim Start
     loadPopularContent();
 }
@@ -2244,6 +2479,9 @@ function switchContentType(type) {
     currentContentType = type;
     currentModPage = 0;
     currentModSearchQuery = '';
+
+    // Reset categories beim Wechsel
+    selectedFilters.categories = [];
 
     // Update Button States
     document.querySelectorAll('[data-content-type]').forEach(btn => {
@@ -2273,6 +2511,9 @@ function switchContentType(type) {
         searchInput.value = '';
     }
 
+    // Lade Kategorien für den neuen Content-Typ
+    loadModrinthCategories();
+
     // Lade Inhalte
     loadPopularContent();
 }
@@ -2286,6 +2527,234 @@ function loadPopularContent() {
         loadPopularShaderPacks();
     } else if (currentContentType === 'modpacks') {
         loadPopularModpacks();
+    }
+}
+
+// Lade Kategorien von der Modrinth API (gruppiert nach header wie im Modrinth Launcher)
+async function loadModrinthCategories() {
+    const categoriesContainer = document.getElementById('filter-categories');
+    if (!categoriesContainer) return;
+
+    categoriesContainer.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px; padding: 10px;">Loading categories...</div>';
+
+    try {
+        // Modrinth API: Alle Kategorien laden
+        const response = await fetch('https://api.modrinth.com/v2/tag/category');
+        const allCategories = await response.json();
+
+        // Filtern nach Content-Type
+        const projectType = currentContentType === 'mods' ? 'mod' :
+                          currentContentType === 'modpacks' ? 'modpack' :
+                          currentContentType === 'resourcepacks' ? 'resourcepack' :
+                          currentContentType === 'shaderpacks' ? 'shader' : 'mod';
+
+        const categories = allCategories.filter(cat => cat.project_type === projectType);
+
+        if (categories && categories.length > 0) {
+            categoriesContainer.innerHTML = '';
+
+            // Gruppiere nach header
+            const grouped = {};
+            categories.forEach(cat => {
+                const header = cat.header || 'other';
+                if (!grouped[header]) {
+                    grouped[header] = [];
+                }
+                grouped[header].push(cat);
+            });
+
+            // Header-Reihenfolge definieren
+            const headerOrder = ['categories', 'features', 'resolutions', 'performance impact', 'other'];
+            const headerLabels = {
+                'categories': 'Categories',
+                'features': 'Features',
+                'resolutions': 'Resolutions',
+                'performance impact': 'Performance',
+                'other': 'Other'
+            };
+
+            // Für jeden Header eine Gruppe erstellen
+            headerOrder.forEach(headerKey => {
+                if (!grouped[headerKey] || grouped[headerKey].length === 0) return;
+
+                // Header-Titel
+                const headerDiv = document.createElement('div');
+                headerDiv.style.cssText = `
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: var(--text-secondary);
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    padding: 12px 8px 6px 8px;
+                    margin-top: 8px;
+                    border-top: 1px solid var(--bg-light);
+                `;
+                if (headerKey === headerOrder[0] || !grouped[headerOrder[0]]) {
+                    headerDiv.style.borderTop = 'none';
+                    headerDiv.style.marginTop = '0';
+                }
+                headerDiv.textContent = headerLabels[headerKey] || headerKey;
+                categoriesContainer.appendChild(headerDiv);
+
+                // Kategorien in dieser Gruppe
+                grouped[headerKey].forEach(cat => {
+                    const label = document.createElement('label');
+                    label.style.cssText = `
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        padding: 6px 8px;
+                        cursor: pointer;
+                        border-radius: 6px;
+                        transition: background 0.2s;
+                        font-size: 13px;
+                    `;
+
+                    label.addEventListener('mouseenter', () => {
+                        label.style.background = 'var(--bg-light)';
+                    });
+                    label.addEventListener('mouseleave', () => {
+                        label.style.background = 'transparent';
+                    });
+
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = cat.name;
+                    checkbox.style.cssText = `
+                        cursor: pointer;
+                        width: 16px;
+                        height: 16px;
+                        accent-color: var(--gold);
+                    `;
+                    checkbox.addEventListener('change', (e) => {
+                        if (e.target.checked) {
+                            selectedFilters.categories.push(cat.name);
+                        } else {
+                            selectedFilters.categories = selectedFilters.categories.filter(c => c !== cat.name);
+                        }
+                        // Trigger search mit aktuellen Filtern
+                        triggerContentSearch();
+                    });
+
+                    // Icon (wenn vorhanden, als SVG)
+                    if (cat.icon && cat.icon.startsWith('<svg')) {
+                        const iconSpan = document.createElement('span');
+                        iconSpan.innerHTML = cat.icon;
+                        iconSpan.style.cssText = `
+                            width: 16px;
+                            height: 16px;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            color: var(--text-secondary);
+                        `;
+                        const svg = iconSpan.querySelector('svg');
+                        if (svg) {
+                            svg.style.width = '14px';
+                            svg.style.height = '14px';
+                        }
+                        label.appendChild(checkbox);
+                        label.appendChild(iconSpan);
+                    } else {
+                        label.appendChild(checkbox);
+                    }
+
+                    const text = document.createElement('span');
+                    // Formatiere den Namen schöner
+                    const formattedName = cat.name
+                        .split('-')
+                        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                        .join(' ');
+                    text.textContent = formattedName;
+                    text.style.cssText = `
+                        color: var(--text-primary);
+                        flex: 1;
+                    `;
+
+                    label.appendChild(text);
+                    categoriesContainer.appendChild(label);
+                });
+            });
+        } else {
+            categoriesContainer.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px; padding: 10px;">No categories available</div>';
+        }
+    } catch (error) {
+        debugLog('Failed to load categories: ' + error, 'error');
+        categoriesContainer.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px; padding: 10px;">Failed to load categories</div>';
+    }
+}
+
+// Helper-Funktion um Suche mit aktuellen Filtern zu triggern
+function triggerContentSearch() {
+    const searchInput = document.getElementById('mod-search');
+    const query = searchInput ? searchInput.value : '';
+    if (currentContentType === 'mods') {
+        searchMods(query);
+    } else if (currentContentType === 'resourcepacks') {
+        searchResourcePacks(query);
+    } else if (currentContentType === 'shaderpacks') {
+        searchShaderPacks(query);
+    } else if (currentContentType === 'modpacks') {
+        searchModpacks(query);
+    }
+}
+
+// Lade Environment-Icons von der Modrinth API
+async function loadEnvironmentIcons() {
+    try {
+        debugLog('Loading environment icons...', 'info');
+
+        // Lade alle Kategorien von Modrinth
+        const response = await fetch('https://api.modrinth.com/v2/tag/category');
+        const categories = await response.json();
+
+        // Finde die Environment-Kategorien für Mods
+        const envCategories = {
+            'client': categories.find(cat => cat.project_type === 'mod' && (cat.name === 'client-side' || cat.name === 'client')),
+            'server': categories.find(cat => cat.project_type === 'mod' && (cat.name === 'server-side' || cat.name === 'server')),
+            'both': categories.find(cat => cat.project_type === 'mod' && (cat.name === 'client-and-server' || cat.name === 'clientandserver')),
+            'or': categories.find(cat => cat.project_type === 'mod' && (cat.name === 'client-or-server' || cat.name === 'clientorserver'))
+        };
+
+        // Füge Icons zu jedem Label hinzu
+        Object.entries(envCategories).forEach(([type, cat]) => {
+            if (!cat || !cat.icon) return;
+
+            const label = document.getElementById(`env-${type}-label`);
+            if (!label) return;
+
+            const checkbox = label.querySelector('input');
+            const textSpan = label.querySelector('span');
+
+            if (!checkbox || !textSpan) return;
+
+            // Erstelle Icon-Span (genau wie bei Categories)
+            const iconSpan = document.createElement('span');
+            iconSpan.innerHTML = cat.icon;
+            iconSpan.style.cssText = `
+                width: 16px;
+                height: 16px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: var(--text-secondary);
+                flex-shrink: 0;
+            `;
+
+            const svg = iconSpan.querySelector('svg');
+            if (svg) {
+                svg.style.width = '14px';
+                svg.style.height = '14px';
+            }
+
+            // Füge Icon zwischen Checkbox und Text ein
+            textSpan.parentNode.insertBefore(iconSpan, textSpan);
+            debugLog(`Environment icon added for ${type}: ${cat.name}`, 'success');
+        });
+
+        debugLog('Environment icons loaded successfully', 'success');
+    } catch (error) {
+        debugLog('Failed to load environment icons: ' + error, 'error');
     }
 }
 
@@ -2306,6 +2775,7 @@ async function loadPopularResourcePacks(page = 0) {
         const packs = await invoke('search_resourcepacks', {
             query: '',
             gameVersion: selectedFilters.version || null,
+            categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
             sortBy: 'downloads',
             offset: page * MODS_PER_PAGE,
             limit: MODS_PER_PAGE
@@ -2345,7 +2815,8 @@ async function searchResourcePacks(query, page = 0) {
         const packs = await invoke('search_resourcepacks', {
             query,
             gameVersion: selectedFilters.version || null,
-            sortBy: selectedFilters.sort || 'relevance',
+            categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
+            sortBy: selectedFilters.sort || 'downloads',
             offset: page * MODS_PER_PAGE,
             limit: MODS_PER_PAGE
         });
@@ -2420,6 +2891,7 @@ async function loadPopularShaderPacks(page = 0) {
         const packs = await invoke('search_shaderpacks', {
             query: '',
             gameVersion: selectedFilters.version || null,
+            categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
             sortBy: 'downloads',
             offset: page * MODS_PER_PAGE,
             limit: MODS_PER_PAGE
@@ -2459,7 +2931,8 @@ async function searchShaderPacks(query, page = 0) {
         const packs = await invoke('search_shaderpacks', {
             query,
             gameVersion: selectedFilters.version || null,
-            sortBy: selectedFilters.sort || 'relevance',
+            categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
+            sortBy: selectedFilters.sort || 'downloads',
             offset: page * MODS_PER_PAGE,
             limit: MODS_PER_PAGE
         });
@@ -2532,6 +3005,7 @@ async function loadPopularModpacks(page = 0) {
             query: '',
             gameVersion: selectedFilters.version || null,
             loader: selectedFilters.loader || null,
+            categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
             sortBy: 'downloads',
             offset: page * MODS_PER_PAGE,
             limit: MODS_PER_PAGE
@@ -2569,7 +3043,8 @@ async function searchModpacks(query, page = 0) {
             query,
             gameVersion: selectedFilters.version || null,
             loader: selectedFilters.loader || null,
-            sortBy: selectedFilters.sort || 'relevance',
+            categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
+            sortBy: selectedFilters.sort || 'downloads',
             offset: page * MODS_PER_PAGE,
             limit: MODS_PER_PAGE
         });
@@ -2615,6 +3090,7 @@ async function loadPopularMods(page = 0) {
             query: '',  // Leer für alle
             gameVersion: selectedFilters.version || null,
             loader: selectedFilters.loader || null,
+            categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
             sortBy: 'downloads',  // Nach Downloads sortieren
             offset: page * MODS_PER_PAGE,
             limit: MODS_PER_PAGE
@@ -2760,7 +3236,8 @@ async function searchMods(query, page = 0) {
             query,
             gameVersion: selectedFilters.version || null,
             loader: selectedFilters.loader || null,
-            sortBy: selectedFilters.sort || 'relevance',
+            categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
+            sortBy: selectedFilters.sort || 'downloads',
             offset: page * MODS_PER_PAGE,
             limit: MODS_PER_PAGE
         });
@@ -2829,9 +3306,9 @@ function renderMods(mods, page = 0) {
         const installFunc = getInstallFunction();
 
         // Icon basierend auf Content-Typ
-        const defaultIcon = currentContentType === 'resourcepacks' ? '🎨' :
-                           currentContentType === 'shaderpacks' ? '✨' :
-                           currentContentType === 'modpacks' ? '📚' : '📦';
+        const defaultIcon = currentContentType === 'resourcepacks' ? '▪' :
+                           currentContentType === 'shaderpacks' ? '✦' :
+                           currentContentType === 'modpacks' ? '▪' : '▪';
 
         // Erstelle Icon HTML mit Fallback - prüfe ob icon_url wirklich existiert und nicht leer ist
         const hasValidIcon = mod.icon_url && typeof mod.icon_url === 'string' && mod.icon_url.trim().length > 0;
@@ -2851,21 +3328,75 @@ function renderMods(mods, page = 0) {
                     ${iconHTML}
                 </div>
                 <div class="mod-info">
-                    <div class="mod-name" style="display: flex; align-items: center; gap: 10px;">
-                        ${mod.name}
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                        <span class="mod-name" style="font-size: 16px; font-weight: 600; color: var(--text-primary);">${mod.name}</span>
+                        <span style="color: var(--text-secondary); font-size: 14px;">by</span>
+                        <a href="https://modrinth.com/user/${mod.author}" 
+                           target="_blank"
+                           style="color: var(--text-secondary); font-size: 14px; text-decoration: underline; cursor: pointer; transition: color 0.2s;"
+                           onmouseover="this.style.color='#999'"
+                           onmouseout="this.style.color='var(--text-secondary)'">${mod.author}</a>
                         ${isInstalled ? '<span style="background: #4caf50; color: white; font-size: 10px; padding: 2px 8px; border-radius: 3px;">✓ Installiert</span>' : ''}
                     </div>
-                    <div class="mod-author">by ${mod.author}</div>
-                    <div class="mod-description">${mod.description}</div>
-                    <div class="mod-stats">
-                        <span>📥 ${formatNumber(mod.downloads)} downloads</span>
-                        <span>🏷️ ${mod.categories.slice(0, 3).join(', ')}</span>
+                    <div class="mod-description" style="margin-bottom: 10px;">${mod.description}</div>
+                    
+                    <!-- Environment, Loader & Categories -->
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+                        <!-- Environment -->
+                        ${(() => {
+                            const clientSide = mod.client_side;
+                            const serverSide = mod.server_side;
+                            
+                            // Client & Server: beide sind "required"
+                            if (clientSide === 'required' && serverSide === 'required') {
+                                return `<span style="background: var(--bg-dark); color: var(--gold); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 600; border: 1px solid var(--gold);">Client & Server</span>`;
+                            }
+                            // Client or Server: beide sind "optional" ODER einer required + einer optional
+                            else if ((clientSide === 'optional' && serverSide === 'optional') ||
+                                     (clientSide === 'required' && serverSide === 'optional') ||
+                                     (clientSide === 'optional' && serverSide === 'required')) {
+                                return `<span style="background: var(--bg-dark); color: var(--gold); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 600; border: 1px solid var(--gold);">Client or Server</span>`;
+                            }
+                            // Nur Client: client=required/optional, server=unsupported/unknown
+                            else if ((clientSide === 'required' || clientSide === 'optional') && 
+                                     (serverSide === 'unsupported' || serverSide === 'unknown' || !serverSide)) {
+                                return `<span style="background: var(--bg-dark); color: var(--gold); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 600; border: 1px solid var(--gold);">Client</span>`;
+                            }
+                            // Nur Server: server=required/optional, client=unsupported/unknown
+                            else if ((serverSide === 'required' || serverSide === 'optional') && 
+                                     (clientSide === 'unsupported' || clientSide === 'unknown' || !clientSide)) {
+                                return `<span style="background: var(--bg-dark); color: var(--gold); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 600; border: 1px solid var(--gold);">Server</span>`;
+                            }
+                            return '';
+                        })()}
+                        
+                        <!-- Mod Loader -->
+                        ${mod.loaders && mod.loaders.length > 0 ? 
+                            mod.loaders.slice(0, 3).map(loader => 
+                                `<span style="background: var(--bg-light); color: var(--text-primary); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 500;">${loader.charAt(0).toUpperCase() + loader.slice(1)}</span>`
+                            ).join('') : ''
+                        }
+                        
+                        <!-- Categories -->
+                        ${mod.categories && mod.categories.length > 0 ? 
+                            mod.categories.slice(0, 4).map(cat => 
+                                `<span style="background: var(--bg-light); color: var(--text-secondary); font-size: 10px; padding: 3px 8px; border-radius: 4px;">${cat}</span>`
+                            ).join('') : ''
+                        }
                     </div>
                 </div>
-                ${isInstalled 
-                    ? `<button class="btn btn-secondary" disabled style="align-self: center; opacity: 0.5; cursor: not-allowed;">Installiert</button>`
-                    : `<button class="btn install-btn" data-mod-id="${mod.id}" onclick="${installFunc}('${mod.id}', '${mod.source}')" style="align-self: center;">${installButtonText}</button>`
-                }
+                
+                <!-- Button und Downloads rechts (vertikal) -->
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;">
+                    ${isInstalled 
+                        ? `<button class="btn btn-secondary" disabled style="opacity: 0.5; cursor: not-allowed;">Installiert</button>`
+                        : `<button class="btn install-btn" data-mod-id="${mod.id}" onclick="${installFunc}('${mod.id}', '${mod.source}')">${installButtonText}</button>`
+                    }
+                    <div style="color: var(--text-secondary); font-size: 14px; white-space: nowrap; text-align: center;">
+                        <span style="font-weight: bold; color: var(--text-primary);">${formatNumber(mod.downloads)}</span>
+                        <span style="font-weight: 300;"> downloads</span>
+                    </div>
+                </div>
             </div>
         `;
     }).join('');
@@ -3018,7 +3549,7 @@ function showProfileSelectDialog() {
         const modalHTML = `
             <div id="profile-select-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 10000;">
                 <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 12px; padding: 25px; max-width: 450px; width: 90%;">
-                    <h2 style="color: var(--gold); margin: 0 0 20px 0; text-align: center;">📦 Profil auswählen</h2>
+                    <h2 style="color: var(--gold); margin: 0 0 20px 0; text-align: center;">▪ Profil auswählen</h2>
                     <p style="color: var(--text-secondary); text-align: center; margin-bottom: 20px;">
                         Wähle ein Profil für die Mod-Installation:
                     </p>
@@ -3031,7 +3562,7 @@ function showProfileSelectDialog() {
                                         border: 2px solid transparent;"
                                  onmouseover="this.style.borderColor='var(--gold)'"
                                  onmouseout="this.style.borderColor='transparent'">
-                                <div style="font-size: 24px;">${p.icon_path ? '🎮' : '📦'}</div>
+                                <div style="font-size: 24px;">${p.icon_path ? '▪' : '▪'}</div>
                                 <div style="flex: 1;">
                                     <div style="color: var(--text-primary); font-weight: bold;">${p.name}</div>
                                     <div style="color: var(--text-secondary); font-size: 12px;">
