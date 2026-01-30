@@ -906,17 +906,17 @@ function showProfileDetails(profileId) {
 
     grid.innerHTML = `
         <div style="grid-column: 1 / -1;">
-            <!-- Lion Launcher Logo oben links -->
-            <div style="position: absolute; top: 20px; left: 20px; font-size: 20px; font-weight: 700; color: var(--gold);">
-                Lion Launcher
-            </div>
-            
             <!-- Profil Header -->
             <div style="display: flex; align-items: center; margin-bottom: 25px; gap: 20px; padding-top: 20px;">
-                <!-- Profil Icon (groß, links) -->
-                <div style="width: 80px; height: 80px; font-size: 80px; display: flex; align-items: center; justify-content: center; 
-                            flex-shrink: 0; border-radius: 10px; overflow: hidden; background: var(--bg-light);">
-                    ${iconHTML}
+                <!-- Linke Spalte: Icon + Zurück-Button untereinander -->
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; flex-shrink: 0;">
+                    <div style="width: 80px; height: 80px; font-size: 80px; display: flex; align-items: center; justify-content: center; 
+                                flex-shrink: 0; border-radius: 10px; overflow: hidden; background: var(--bg-light);">
+                        ${iconHTML}
+                    </div>
+                    <button class="btn btn-secondary" onclick="loadProfiles()" style="padding: 8px 14px;">
+                        ← Zurück
+                    </button>
                 </div>
                 
                 <!-- Profil Info (rechts vom Icon) -->
@@ -932,47 +932,41 @@ function showProfileDetails(profileId) {
                     ▶ Play
                 </button>
             </div>
-            
+
             <!-- Hauptkategorien-Kasten - Zentriert, größer -->
             <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; position: relative;">
-                <!-- Zurück-Button ganz links, absolut positioniert -->
-                <button class="btn btn-secondary" onclick="loadProfiles()" 
-                        style="position: absolute; left: -240px; padding: 10px 20px; flex-shrink: 0;">
-                    ← Zurück
-                </button>
-                
                 <!-- Hauptkategorien zentriert -->
                 <div style="flex: 1; display: flex; justify-content: center;">
                     <div style="background: var(--bg-medium); border-radius: 10px; padding: 8px; display: flex; gap: 8px; max-width: 650px;">
                         <button class="main-category-tab active" data-maincategory="content" onclick="switchMainCategory('content')" 
                                 onmouseover="if(!this.classList.contains('active')) this.style.background='rgba(218, 165, 32, 0.1)'"
                                 onmouseout="if(!this.classList.contains('active')) this.style.background='transparent'"
-                                style="padding: 10px 24px; background: var(--gold); border: none; color: var(--bg-dark); 
-                                       cursor: pointer; border-radius: 8px; font-weight: 600; font-size: 15px; 
+                                style="padding: 10px 24px; background: var(--gold); border: none; color: var(--bg-dark);
+                                       cursor: pointer; border-radius: 8px; font-weight: 600; font-size: 15px;
                                        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; transform: scale(1);">
                             Content
                         </button>
                         <button class="main-category-tab" data-maincategory="worlds" onclick="switchMainCategory('worlds')" 
                                 onmouseover="if(!this.classList.contains('active')) this.style.background='rgba(218, 165, 32, 0.1)'"
                                 onmouseout="if(!this.classList.contains('active')) this.style.background='transparent'"
-                                style="padding: 10px 24px; background: transparent; border: none; color: var(--text-secondary); 
-                                       cursor: pointer; border-radius: 8px; font-weight: 600; font-size: 15px; 
+                                style="padding: 10px 24px; background: transparent; border: none; color: var(--text-secondary);
+                                       cursor: pointer; border-radius: 8px; font-weight: 600; font-size: 15px;
                                        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; transform: scale(1);">
                             Worlds
                         </button>
                         <button class="main-category-tab" data-maincategory="servers" onclick="switchMainCategory('servers')" 
                                 onmouseover="if(!this.classList.contains('active')) this.style.background='rgba(218, 165, 32, 0.1)'"
                                 onmouseout="if(!this.classList.contains('active')) this.style.background='transparent'"
-                                style="padding: 10px 24px; background: transparent; border: none; color: var(--text-secondary); 
-                                       cursor: pointer; border-radius: 8px; font-weight: 600; font-size: 15px; 
+                                style="padding: 10px 24px; background: transparent; border: none; color: var(--text-secondary);
+                                       cursor: pointer; border-radius: 8px; font-weight: 600; font-size: 15px;
                                        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; transform: scale(1);">
                             Servers
                         </button>
                         <button class="main-category-tab" data-maincategory="logs" onclick="switchMainCategory('logs')" 
                                 onmouseover="if(!this.classList.contains('active')) this.style.background='rgba(218, 165, 32, 0.1)'"
                                 onmouseout="if(!this.classList.contains('active')) this.style.background='transparent'"
-                                style="padding: 10px 24px; background: transparent; border: none; color: var(--text-secondary); 
-                                       cursor: pointer; border-radius: 8px; font-weight: 600; font-size: 15px; 
+                                style="padding: 10px 24px; background: transparent; border: none; color: var(--text-secondary);
+                                       cursor: pointer; border-radius: 8px; font-weight: 600; font-size: 15px;
                                        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; transform: scale(1);">
                             Logs
                         </button>
@@ -1145,7 +1139,7 @@ function renderContentSubTab(subtabName, profile) {
 function renderLogsContent(profile) {
     return `
         <div style="margin-bottom: 20px;">
-            <h3 style="color: var(--gold); margin: 0 0 15px 0;">Minecraft Logs</h3>
+            <h3 style="color: var(--gold); margin: 0;">Minecraft Logs</h3>
             <div style="display: flex; gap: 10px;">
                 <button class="btn btn-secondary" onclick="loadLogs('${profile.id}')" style="padding: 8px 20px;">
                     ↻ Aktualisieren
@@ -1558,10 +1552,10 @@ async function loadInstalledMods(profileId) {
                 
                 <!-- Icon -->
                 <div style="width: 44px; height: 44px; background: var(--bg-light); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden;">
-                    ${iconUrl 
-                        ? `<img src="${iconUrl}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 22px;\\'>▪</span>'">`
-                        : `<span style="font-size: 22px;">▪</span>`
-                    }
+                    ${iconUrl
+                ? `<img src="${iconUrl}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 22px;\\'>▪</span>'">`
+                : `<span style="font-size: 22px;">▪</span>`
+            }
                 </div>
                 
                 <!-- Info -->
@@ -1890,6 +1884,15 @@ async function openResourcePacksFolder(profileId) {
     }
 }
 
+async function openShaderPacksFolder(profileId) {
+    debugLog('Opening shaderpacks folder', 'info');
+    try {
+        await invoke('open_profile_folder', { profileId, subfolder: 'shaderpacks' });
+    } catch (error) {
+        debugLog('Failed to open folder: ' + error, 'error');
+    }
+}
+
 // ==================== RESOURCE PACKS ====================
 
 async function loadInstalledResourcePacks(profileId) {
@@ -2010,15 +2013,6 @@ function openContentBrowser(profileId) {
     }, 50);
 }
 
-async function openShaderPacksFolder(profileId) {
-    debugLog('Opening shaderpacks folder', 'info');
-    try {
-        await invoke('open_profile_folder', { profileId, subfolder: 'shaderpacks' });
-    } catch (error) {
-        debugLog('Failed to open folder: ' + error, 'error');
-    }
-}
-
 // ==================== SHADER PACKS (Profil) ====================
 
 async function loadInstalledShaderPacks(profileId) {
@@ -2058,7 +2052,7 @@ async function loadInstalledShaderPacks(profileId) {
                             ${pack.is_folder ? '📁 Ordner' : '▪ ' + sizeStr}
                         </div>
                     </div>
-                    <button class="btn btn-secondary" onclick="deleteShaderPack('${profileId}', '${pack.name.replace(/'/g, "\\'")}')" 
+                    <button class="btn btn-secondary" onclick="deleteShaderPack('${profileId}', '${pack.name}')" 
                             style="padding: 6px 12px; font-size: 11px; color: #f44336;">
                         🗑️
                     </button>
@@ -2324,10 +2318,7 @@ function updateVersionSelects() {
     // Support multiple version_type formats: "Release", "release", or type field
     const filteredVersions = showSnapshots
         ? allMinecraftVersions
-        : allMinecraftVersions.filter(v => {
-            const vType = v.version_type || v.type || '';
-            return vType.toLowerCase() === 'release';
-        });
+        : allMinecraftVersions.filter(v => v.version_type?.toLowerCase() === 'release');
 
     debugLog('Filtered to ' + filteredVersions.length + ' versions (snapshots: ' + showSnapshots + ')', 'info');
 
@@ -2544,9 +2535,9 @@ async function loadModrinthCategories() {
 
         // Filtern nach Content-Type
         const projectType = currentContentType === 'mods' ? 'mod' :
-                          currentContentType === 'modpacks' ? 'modpack' :
-                          currentContentType === 'resourcepacks' ? 'resourcepack' :
-                          currentContentType === 'shaderpacks' ? 'shader' : 'mod';
+            currentContentType === 'modpacks' ? 'modpack' :
+                currentContentType === 'resourcepacks' ? 'resourcepack' :
+                    currentContentType === 'shaderpacks' ? 'shader' : 'mod';
 
         const categories = allCategories.filter(cat => cat.project_type === projectType);
 
@@ -2944,118 +2935,6 @@ async function searchShaderPacks(query, page = 0) {
     }
 }
 
-async function installShaderPack(packId, source) {
-    let profile = currentProfile;
-
-    if (!profile) {
-        profile = await showProfileSelectDialog();
-        if (!profile) return;
-    }
-
-    debugLog('Installing shader pack ' + packId + ' to profile ' + profile.name, 'info');
-
-    // Markiere Button als "installierend"
-    const btn = event.target;
-    const originalText = btn.textContent;
-    btn.textContent = '...';
-    btn.disabled = true;
-
-    try {
-        await invoke('install_shaderpack', {
-            profileId: profile.id,
-            packId: packId,
-            versionId: null
-        });
-
-        debugLog('Shader pack installed successfully!', 'success');
-        showToast(`Shader Pack erfolgreich zu "${profile.name}" hinzugefügt!`, 'success', 3000);
-
-        // Button als installiert markieren mit korrektem Styling
-        btn.textContent = '✓ Installiert';
-        btn.disabled = true;
-        btn.style.background = 'var(--bg-light)';
-        btn.style.color = 'var(--text-secondary)';
-        btn.style.opacity = '0.7';
-        btn.style.cursor = 'not-allowed';
-
-        // Cache aktualisieren
-        await loadInstalledShaderPackNames();
-
-    } catch (error) {
-        debugLog('Install failed: ' + error, 'error');
-        showToast('Shader Pack-Installation fehlgeschlagen: ' + error, 'error', 5000);
-        btn.textContent = originalText;
-        btn.disabled = false;
-    }
-}
-
-// ==================== MODPACKS ====================
-
-async function loadPopularModpacks(page = 0) {
-    const modList = document.getElementById('mod-list');
-    if (!modList) return;
-
-    currentModPage = page;
-    currentModSearchQuery = '';
-
-    modList.innerHTML = '<div class="loading"><div class="spinner" style="margin: 20px auto;"></div><p>Lade beliebte Modpacks...</p></div>';
-
-    try {
-        const packs = await invoke('search_modpacks', {
-            query: '',
-            gameVersion: selectedFilters.version || null,
-            loader: selectedFilters.loader || null,
-            categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
-            sortBy: 'downloads',
-            offset: page * MODS_PER_PAGE,
-            limit: MODS_PER_PAGE
-        });
-
-        renderMods(packs, page);
-    } catch (error) {
-        debugLog('Failed to load modpacks: ' + error, 'error');
-        modList.innerHTML = `
-            <div class="loading" style="text-align: center; padding: 40px;">
-                <div style="font-size: 48px; margin-bottom: 15px;">📚</div>
-                <p style="color: var(--gold); margin-bottom: 10px;">Beliebte Modpacks</p>
-                <p style="color: var(--text-secondary);">Gib einen Suchbegriff ein oder versuche es später erneut</p>
-            </div>
-        `;
-    }
-}
-
-async function searchModpacks(query, page = 0) {
-    const modList = document.getElementById('mod-list');
-    if (!modList) return;
-
-    currentModSearchQuery = query || '';
-    currentModPage = page;
-
-    if (!query || query.length < 2) {
-        loadPopularModpacks(page);
-        return;
-    }
-
-    modList.innerHTML = '<div class="loading"><div class="spinner" style="margin: 20px auto;"></div><p>Suche...</p></div>';
-
-    try {
-        const packs = await invoke('search_modpacks', {
-            query,
-            gameVersion: selectedFilters.version || null,
-            loader: selectedFilters.loader || null,
-            categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
-            sortBy: selectedFilters.sort || 'downloads',
-            offset: page * MODS_PER_PAGE,
-            limit: MODS_PER_PAGE
-        });
-
-        renderMods(packs, page);
-    } catch (error) {
-        debugLog('Search failed: ' + error, 'error');
-        modList.innerHTML = '<div class="loading">Suche fehlgeschlagen: ' + error + '</div>';
-    }
-}
-
 async function installModpack(packId, source) {
     // Modpacks können nicht direkt installiert werden - öffne Modrinth Seite
     const url = `https://modrinth.com/modpack/${packId}`;
@@ -3284,20 +3163,20 @@ function renderMods(mods, page = 0) {
             if (currentContentType === 'mods') {
                 // Prüfe Mods
                 isInstalled = installedModIds.has(modSlug) ||
-                              installedModIds.has(modName) ||
-                              installedModIds.has(modId) ||
-                              installedModIds.has(modFirstName) ||
-                              (modSlug && Array.from(installedModIds).some(id => id === modSlug || modSlug === id));
+                    installedModIds.has(modName) ||
+                    installedModIds.has(modId) ||
+                    installedModIds.has(modFirstName) ||
+                    (modSlug && Array.from(installedModIds).some(id => id === modSlug || modSlug === id));
             } else if (currentContentType === 'resourcepacks') {
                 // Prüfe Resource Packs
                 isInstalled = installedResourcePackNames.has(modSlug) ||
-                              installedResourcePackNames.has(modName) ||
-                              installedResourcePackNames.has(modFirstName);
+                    installedResourcePackNames.has(modName) ||
+                    installedResourcePackNames.has(modFirstName);
             } else if (currentContentType === 'shaderpacks') {
                 // Prüfe Shader Packs
                 isInstalled = installedShaderPackNames.has(modSlug) ||
-                              installedShaderPackNames.has(modName) ||
-                              installedShaderPackNames.has(modFirstName);
+                    installedShaderPackNames.has(modName) ||
+                    installedShaderPackNames.has(modFirstName);
             }
         }
 
@@ -3307,8 +3186,8 @@ function renderMods(mods, page = 0) {
 
         // Icon basierend auf Content-Typ
         const defaultIcon = currentContentType === 'resourcepacks' ? '▪' :
-                           currentContentType === 'shaderpacks' ? '✦' :
-                           currentContentType === 'modpacks' ? '▪' : '▪';
+            currentContentType === 'shaderpacks' ? '✦' :
+                currentContentType === 'modpacks' ? '▪' : '▪';
 
         // Erstelle Icon HTML mit Fallback - prüfe ob icon_url wirklich existiert und nicht leer ist
         const hasValidIcon = mod.icon_url && typeof mod.icon_url === 'string' && mod.icon_url.trim().length > 0;
@@ -3336,7 +3215,7 @@ function renderMods(mods, page = 0) {
                            style="color: var(--text-secondary); font-size: 14px; text-decoration: underline; cursor: pointer; transition: color 0.2s;"
                            onmouseover="this.style.color='#999'"
                            onmouseout="this.style.color='var(--text-secondary)'">${mod.author}</a>
-                        ${isInstalled ? '<span style="background: #4caf50; color: white; font-size: 10px; padding: 2px 8px; border-radius: 3px;">✓ Installiert</span>' : ''}
+                        ${isInstalled ? '<span style="background: #4caf50; color: white; font-size: 10px; padding: 2px 5px; border-radius: 3px;">✓ Installiert</span>' : ''}
                     </div>
                     <div class="mod-description" style="margin-bottom: 10px;">${mod.description}</div>
                     
@@ -3344,54 +3223,54 @@ function renderMods(mods, page = 0) {
                     <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
                         <!-- Environment -->
                         ${(() => {
-                            const clientSide = mod.client_side;
-                            const serverSide = mod.server_side;
-                            
-                            // Client & Server: beide sind "required"
-                            if (clientSide === 'required' && serverSide === 'required') {
-                                return `<span style="background: var(--bg-dark); color: var(--gold); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 600; border: 1px solid var(--gold);">Client & Server</span>`;
-                            }
-                            // Client or Server: beide sind "optional" ODER einer required + einer optional
-                            else if ((clientSide === 'optional' && serverSide === 'optional') ||
-                                     (clientSide === 'required' && serverSide === 'optional') ||
-                                     (clientSide === 'optional' && serverSide === 'required')) {
-                                return `<span style="background: var(--bg-dark); color: var(--gold); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 600; border: 1px solid var(--gold);">Client or Server</span>`;
-                            }
-                            // Nur Client: client=required/optional, server=unsupported/unknown
-                            else if ((clientSide === 'required' || clientSide === 'optional') && 
-                                     (serverSide === 'unsupported' || serverSide === 'unknown' || !serverSide)) {
-                                return `<span style="background: var(--bg-dark); color: var(--gold); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 600; border: 1px solid var(--gold);">Client</span>`;
-                            }
-                            // Nur Server: server=required/optional, client=unsupported/unknown
-                            else if ((serverSide === 'required' || serverSide === 'optional') && 
-                                     (clientSide === 'unsupported' || clientSide === 'unknown' || !clientSide)) {
-                                return `<span style="background: var(--bg-dark); color: var(--gold); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 600; border: 1px solid var(--gold);">Server</span>`;
-                            }
-                            return '';
-                        })()}
+            const clientSide = mod.client_side;
+            const serverSide = mod.server_side;
+
+            // Client & Server: beide sind "required"
+            if (clientSide === 'required' && serverSide === 'required') {
+                return `<span style="background: var(--bg-dark); color: var(--gold); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 600; border: 1px solid var(--gold);">Client & Server</span>`;
+            }
+            // Client or Server: beide sind "optional" ODER einer required + einer optional
+            else if ((clientSide === 'optional' && serverSide === 'optional') ||
+                (clientSide === 'required' && serverSide === 'optional') ||
+                (clientSide === 'optional' && serverSide === 'required')) {
+                return `<span style="background: var(--bg-dark); color: var(--gold); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 600; border: 1px solid var(--gold);">Client or Server</span>`;
+            }
+            // Nur Client: client=required/optional, server=unsupported/unknown
+            else if ((clientSide === 'required' || clientSide === 'optional') &&
+                (serverSide === 'unsupported' || serverSide === 'unknown' || !serverSide)) {
+                return `<span style="background: var(--bg-dark); color: var(--gold); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 600; border: 1px solid var(--gold);">Client</span>`;
+            }
+            // Nur Server: server=required/optional, client=unsupported/unknown
+            else if ((serverSide === 'required' || serverSide === 'optional') &&
+                (clientSide === 'unsupported' || clientSide === 'unknown' || !clientSide)) {
+                return `<span style="background: var(--bg-dark); color: var(--gold); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 600; border: 1px solid var(--gold);">Server</span>`;
+            }
+            return '';
+        })()}
                         
                         <!-- Mod Loader -->
-                        ${mod.loaders && mod.loaders.length > 0 ? 
-                            mod.loaders.slice(0, 3).map(loader => 
-                                `<span style="background: var(--bg-light); color: var(--text-primary); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 500;">${loader.charAt(0).toUpperCase() + loader.slice(1)}</span>`
-                            ).join('') : ''
-                        }
+                        ${mod.loaders && mod.loaders.length > 0 ?
+            mod.loaders.slice(0, 3).map(loader =>
+                `<span style="background: var(--bg-light); color: var(--text-primary); font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 500;">${loader.charAt(0).toUpperCase() + loader.slice(1)}</span>`
+            ).join('') : ''
+        }
                         
                         <!-- Categories -->
-                        ${mod.categories && mod.categories.length > 0 ? 
-                            mod.categories.slice(0, 4).map(cat => 
-                                `<span style="background: var(--bg-light); color: var(--text-secondary); font-size: 10px; padding: 3px 8px; border-radius: 4px;">${cat}</span>`
-                            ).join('') : ''
-                        }
+                        ${mod.categories && mod.categories.length > 0 ?
+            mod.categories.slice(0, 4).map(cat =>
+                `<span style="background: var(--bg-light); color: var(--text-secondary); font-size: 10px; padding: 3px 8px; border-radius: 4px;">${cat}</span>`
+            ).join('') : ''
+        }
                     </div>
                 </div>
                 
                 <!-- Button und Downloads rechts (vertikal) -->
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;">
-                    ${isInstalled 
-                        ? `<button class="btn btn-secondary" disabled style="opacity: 0.5; cursor: not-allowed;">Installiert</button>`
-                        : `<button class="btn install-btn" data-mod-id="${mod.id}" onclick="${installFunc}('${mod.id}', '${mod.source}')">${installButtonText}</button>`
-                    }
+                    ${isInstalled
+            ? `<button class="btn btn-secondary" disabled style="opacity: 0.5; cursor: not-allowed;">Installiert</button>`
+            : `<button class="btn install-btn" data-mod-id="${mod.id}" onclick="${installFunc}('${mod.id}', '${mod.source}')">${installButtonText}</button>`
+        }
                     <div style="color: var(--text-secondary); font-size: 14px; white-space: nowrap; text-align: center;">
                         <span style="font-weight: bold; color: var(--text-primary);">${formatNumber(mod.downloads)}</span>
                         <span style="font-weight: 300;"> downloads</span>
@@ -3519,7 +3398,7 @@ async function installMod(modId, source) {
         btn.disabled = false;
 
         // Toast-Benachrichtigung für Fehler
-        showToast('Mod-Installation fehlgeschlagen: ' + error, 'error', 5000);
+        showToast('Mod-Installation fehlgeschlagen: ' + error, 'error', 3000);
     }
 }
 
@@ -3852,11 +3731,11 @@ async function startMicrosoftLogin() {
                 </div>
             </div>
         `;
-        
+
         document.body.insertAdjacentHTML('beforeend', modalHTML);
-        
+
         showToast('Gib den Code im Browser ein: ' + flow.user_code, 'info', 10000);
-        
+
         // Polling für Token
         currentDeviceCode = flow.device_code;
         pollForMicrosoftToken(flow.device_code, flow.interval || 5);
@@ -3874,22 +3753,22 @@ async function pollForMicrosoftToken(deviceCode, interval) {
     pollingInterval = setInterval(async () => {
         try {
             const result = await invoke('poll_microsoft_login', { deviceCode });
-            
+
             if (result) {
                 // Login erfolgreich!
                 clearInterval(pollingInterval);
                 pollingInterval = null;
                 currentDeviceCode = null;
-                
+
                 activeAccount = result;
                 currentUsername = result.username;
-                
+
                 document.getElementById('microsoft-login-modal')?.remove();
-                
+
                 updateAccountDisplay();
                 updateAccountsList();
                 updateSkinPage();
-                
+
                 showToast(`Willkommen, ${result.username}!`, 'success', 3000);
                 debugLog('Microsoft login successful: ' + result.username, 'success');
             }
@@ -3897,9 +3776,9 @@ async function pollForMicrosoftToken(deviceCode, interval) {
             clearInterval(pollingInterval);
             pollingInterval = null;
             currentDeviceCode = null;
-            
+
             document.getElementById('microsoft-login-modal')?.remove();
-            
+
             debugLog('Microsoft login error: ' + error, 'error');
             showToast('Login fehlgeschlagen: ' + error, 'error', 5000);
         }
@@ -4111,3 +3990,4 @@ function formatNumber(num) {
     }
     return num.toString();
 }
+
