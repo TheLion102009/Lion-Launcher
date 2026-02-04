@@ -14,13 +14,26 @@ pub fn greet(name: &str) -> String {
 pub async fn get_profile_logs(profile_id: String, log_type: String) -> Result<String, String> {
     use crate::core::profiles::ProfileManager;
 
-    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    tracing::info!("get_profile_logs called: profile_id={}, log_type={}", profile_id, log_type);
+
+    let profile_manager = ProfileManager::new().map_err(|e| {
+        tracing::error!("Failed to create ProfileManager: {}", e);
+        e.to_string()
+    })?;
+
+    let profiles = profile_manager.load_profiles().await.map_err(|e| {
+        tracing::error!("Failed to load profiles: {}", e);
+        e.to_string()
+    })?;
 
     let profile = profiles.get_profile(&profile_id)
-        .ok_or_else(|| "Profile not found".to_string())?;
+        .ok_or_else(|| {
+            tracing::error!("Profile not found: {}", profile_id);
+            "Profile not found".to_string()
+        })?;
 
     let logs_dir = profile.game_dir.join("logs");
+    tracing::info!("Looking for logs in: {:?}", logs_dir);
 
     let log_file = match log_type.as_str() {
         "latest" => logs_dir.join("latest.log"),
@@ -39,26 +52,56 @@ pub async fn get_profile_logs(profile_id: String, log_type: String) -> Result<St
                     .map(|e| e.path())
                     .ok_or_else(|| "Keine Crash-Reports gefunden".to_string())?
             } else {
-                return Err("Keine Crash-Reports gefunden".to_string());
+                return Ok("📋 Keine Crash-Reports vorhanden\n\nDer crash-reports Ordner existiert nicht.".to_string());
             }
         }
         _ => return Err("Unbekannter Log-Typ".to_string()),
     };
 
+    tracing::info!("Log file path: {:?}, exists: {}", log_file, log_file.exists());
+
+    // Prüfe ob Log-Datei existiert
     if !log_file.exists() {
-        return Err(format!("Log-Datei nicht gefunden: {:?}", log_file));
+        tracing::warn!("Log file does not exist: {:?}", log_file);
+        return Ok(format!(
+            "📋 Log-Datei nicht gefunden\n\n\
+            Pfad: {:?}\n\n\
+            Mögliche Gründe:\n\
+            • Minecraft wurde noch nie gestartet\n\
+            • Minecraft konnte nicht starten\n\n\
+            Starte Minecraft und versuche es erneut.",
+            log_file
+        ));
     }
 
-    // Lese nur die letzten 500KB um Performance zu erhalten
-    let content = tokio::fs::read_to_string(&log_file)
-        .await
-        .map_err(|e| e.to_string())?;
+    // Lese Log-Datei asynchron
+    let content = match tokio::fs::read_to_string(&log_file).await {
+        Ok(c) => {
+            tracing::info!("Read log file: {} bytes", c.len());
+            c
+        }
+        Err(e) => {
+            tracing::error!("Failed to read log file: {}", e);
+            return Ok(format!(
+                "⚠️ Fehler beim Lesen der Log-Datei\n\n\
+                Fehler: {}\n\
+                Pfad: {:?}",
+                e, log_file
+            ));
+        }
+    };
 
-    // Nur letzte 10000 Zeilen
+    // Falls leer
+    if content.is_empty() {
+        return Ok("📄 Log-Datei ist leer\n\nDie Datei existiert, enthält aber keine Daten.".to_string());
+    }
+
+    // Nur letzte 10000 Zeilen für Performance
     let lines: Vec<&str> = content.lines().collect();
     let start = if lines.len() > 10000 { lines.len() - 10000 } else { 0 };
     let truncated: String = lines[start..].join("\n");
 
+    tracing::info!("Returning {} lines of logs", lines.len() - start);
     Ok(truncated)
 }
 
@@ -106,6 +149,167 @@ pub async fn open_profile_folder(profile_id: String, subfolder: Option<String>) 
             .map_err(|e| e.to_string())?;
     }
 
+    Ok(())
+}
+
+/// Repariert ein Profil, indem Minecraft und Loader-Dateien neu heruntergeladen werden
+#[tauri::command]
+pub async fn repair_profile(profile_id: String) -> Result<(), String> {
+    use crate::core::profiles::ProfileManager;
+    use crate::config::defaults;
+
+    tracing::info!("Repairing profile: {}", profile_id);
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    let mc_version = &profile.minecraft_version;
+    let loader = &profile.loader.loader;
+
+    tracing::info!("Profile: {} - MC {} with {:?}", profile.name, mc_version, loader);
+
+    // Lösche Version-spezifische Dateien
+    let versions_dir = defaults::launcher_dir().join("versions").join(mc_version);
+    let libraries_dir = defaults::launcher_dir().join("libraries");
+
+    // Lösche die Minecraft Version JAR und JSON
+    if versions_dir.exists() {
+        tracing::info!("Removing version directory: {:?}", versions_dir);
+        tokio::fs::remove_dir_all(&versions_dir).await.ok();
+    }
+
+    // Lösche Loader-spezifische Installer
+    match loader {
+        crate::types::version::ModLoader::NeoForge => {
+            // Lösche NeoForge Installer
+            let pattern = format!("neoforge-");
+            if let Ok(entries) = std::fs::read_dir(&libraries_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.contains(&pattern) && name.contains("installer") {
+                        tracing::info!("Removing NeoForge installer: {:?}", entry.path());
+                        tokio::fs::remove_file(entry.path()).await.ok();
+                    }
+                }
+            }
+            // Lösche NeoForge Libraries
+            let neoforge_libs = libraries_dir.join("net").join("neoforged");
+            if neoforge_libs.exists() {
+                tracing::info!("Removing NeoForge libraries: {:?}", neoforge_libs);
+                tokio::fs::remove_dir_all(&neoforge_libs).await.ok();
+            }
+        }
+        crate::types::version::ModLoader::Forge => {
+            // Lösche Forge Installer
+            let pattern = format!("forge-{}", mc_version);
+            if let Ok(entries) = std::fs::read_dir(&libraries_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.contains(&pattern) && name.contains("installer") {
+                        tracing::info!("Removing Forge installer: {:?}", entry.path());
+                        tokio::fs::remove_file(entry.path()).await.ok();
+                    }
+                }
+            }
+            // Lösche Forge Libraries
+            let forge_libs = libraries_dir.join("net").join("minecraftforge");
+            if forge_libs.exists() {
+                tracing::info!("Removing Forge libraries: {:?}", forge_libs);
+                tokio::fs::remove_dir_all(&forge_libs).await.ok();
+            }
+        }
+        crate::types::version::ModLoader::Fabric => {
+            // Lösche Fabric Libraries
+            let fabric_libs = libraries_dir.join("net").join("fabricmc");
+            if fabric_libs.exists() {
+                tracing::info!("Removing Fabric libraries: {:?}", fabric_libs);
+                tokio::fs::remove_dir_all(&fabric_libs).await.ok();
+            }
+        }
+        crate::types::version::ModLoader::Quilt => {
+            // Lösche Quilt Libraries
+            let quilt_libs = libraries_dir.join("org").join("quiltmc");
+            if quilt_libs.exists() {
+                tracing::info!("Removing Quilt libraries: {:?}", quilt_libs);
+                tokio::fs::remove_dir_all(&quilt_libs).await.ok();
+            }
+        }
+        crate::types::version::ModLoader::Vanilla => {
+            // Nichts zu löschen
+        }
+    }
+
+    tracing::info!("Profile repair completed. Next launch will re-download everything.");
+    Ok(())
+}
+
+/// Leert den Cache eines Profils (temporäre Dateien, Shader-Cache, etc.)
+#[tauri::command]
+pub async fn clear_profile_cache(profile_id: String) -> Result<(), String> {
+    use crate::core::profiles::ProfileManager;
+
+    tracing::info!("Clearing cache for profile: {}", profile_id);
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    let game_dir = &profile.game_dir;
+
+    // Lösche temporäre Ordner
+    let cache_dirs = vec![
+        game_dir.join(".cache"),
+        game_dir.join("shadercache"),
+        game_dir.join("ShaderCache"),
+        game_dir.join(".mixin.out"),
+        game_dir.join("crash-reports"),
+        game_dir.join("debug"),
+    ];
+
+    for cache_dir in cache_dirs {
+        if cache_dir.exists() {
+            tracing::info!("Removing cache directory: {:?}", cache_dir);
+            tokio::fs::remove_dir_all(&cache_dir).await.ok();
+        }
+    }
+
+    // Lösche temporäre Dateien
+    let temp_files = vec![
+        game_dir.join("hs_err_pid*.log"),
+        game_dir.join("launcher.log"),
+        game_dir.join("classpath_debug.txt"),
+    ];
+
+    for pattern in temp_files {
+        if let Some(parent) = pattern.parent() {
+            if let Some(filename) = pattern.file_name() {
+                let filename_str = filename.to_string_lossy();
+                if let Ok(entries) = std::fs::read_dir(parent) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        // Einfacher Pattern-Match für Wildcard
+                        if filename_str.contains("*") {
+                            let prefix = filename_str.split('*').next().unwrap_or("");
+                            if name.starts_with(prefix) {
+                                tracing::info!("Removing temp file: {:?}", entry.path());
+                                tokio::fs::remove_file(entry.path()).await.ok();
+                            }
+                        } else if name == filename_str {
+                            tracing::info!("Removing temp file: {:?}", entry.path());
+                            tokio::fs::remove_file(entry.path()).await.ok();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    tracing::info!("Cache cleared for profile: {}", profile.name);
     Ok(())
 }
 

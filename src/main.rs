@@ -76,6 +76,9 @@ fn main() {
             // Logs & Folders
             gui::get_profile_logs,
             gui::open_profile_folder,
+            // Profile Maintenance
+            gui::repair_profile,
+            gui::clear_profile_cache,
             // Settings Sync
             gui::sync_settings_to_profile,
             gui::sync_settings_from_profile,

@@ -6,8 +6,16 @@ Ein minimalistischer Minecraft Launcher für Linux und Windows, geschrieben in R
 
 ✨ **Profilverwaltung**
 - Erstelle mehrere Profile mit verschiedenen Minecraft-Versionen
-- Unterstützt Vanilla, Fabric, Forge, NeoForge und Quilt
-- Jedes Profil kann eigene Mods haben
+- Vollständige Unterstützung für alle Mod-Loader:
+  - ✅ **Vanilla** - Pures Minecraft ohne Mods
+  - ✅ **Fabric** - Leichtgewichtig und schnell (Empfohlen) ⭐
+  - ✅ **Quilt** - Fabric-Fork mit erweiterten Features ⭐
+  - ⚠️ **Forge** - Der klassische Mod-Loader (Experimentell)
+  - ⚠️ **NeoForge** - Moderne Forge-Version (Experimentell, ab MC 1.20.1+)
+- Jedes Profil kann eigene Mods, Einstellungen und Resource Packs haben
+- Automatisches Laden und Verwalten der Loader-Versionen
+
+**Hinweis:** Für beste Ergebnisse empfehlen wir Fabric oder Quilt. Forge/NeoForge-Support ist experimentell und funktioniert möglicherweise nicht für alle Versionen.
 
 🔍 **Mod Browser**
 - Durchsuche Modrinth (CurseForge Support geplant)

@@ -608,6 +608,24 @@ function openProfileSettings(profileId) {
                         </label>
                     </div>
                 </div>
+                
+                <!-- Wartung / Reparatur -->
+                <div style="margin-bottom: 15px; background: rgba(255, 152, 0, 0.1); border: 1px solid #ff9800; padding: 15px; border-radius: 8px;">
+                    <label style="display: block; color: #ff9800; font-size: 14px; font-weight: 500; margin-bottom: 10px;">🔧 Wartung</label>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button class="btn btn-secondary" onclick="repairProfile('${profile.id}')" 
+                                style="padding: 8px 15px; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                            🔄 Installation reparieren
+                        </button>
+                        <button class="btn btn-secondary" onclick="clearProfileCache('${profile.id}')" 
+                                style="padding: 8px 15px; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                            🗑️ Cache leeren
+                        </button>
+                    </div>
+                    <span style="color: var(--text-secondary); font-size: 10px; display: block; margin-top: 8px;">
+                        Lädt Minecraft, Loader und Libraries neu herunter. Mods bleiben erhalten.
+                    </span>
+                </div>
             </div>
             
             <!-- Footer -->
@@ -646,6 +664,71 @@ function closeProfileSettingsModal() {
     const modal = document.getElementById('profile-settings-modal');
     if (modal) modal.remove();
     selectedProfileIcon = null;
+}
+
+// ==================== PROFIL REPARATUR ====================
+
+async function repairProfile(profileId) {
+    const profile = profiles.find(p => p.id === profileId);
+    if (!profile) {
+        showToast('Profil nicht gefunden', 'error', 3000);
+        return;
+    }
+
+    // Bestätigungsdialog
+    const confirmed = confirm(
+        `🔧 Installation reparieren?\n\n` +
+        `Profil: ${profile.name}\n` +
+        `Version: ${profile.minecraft_version}\n` +
+        `Loader: ${profile.loader.loader}\n\n` +
+        `Dies wird Minecraft und alle Loader-Dateien neu herunterladen.\n` +
+        `Deine Mods, Welten und Einstellungen bleiben erhalten.`
+    );
+
+    if (!confirmed) return;
+
+    closeProfileSettingsModal();
+    showToast('🔄 Reparatur wird gestartet...', 'info', 3000);
+    debugLog('Starting repair for profile: ' + profileId, 'info');
+
+    try {
+        await invoke('repair_profile', { profileId: profileId });
+        showToast('✅ Profil wurde erfolgreich repariert!', 'success', 4000);
+        debugLog('Profile repair completed: ' + profileId, 'success');
+    } catch (error) {
+        debugLog('Failed to repair profile: ' + error, 'error');
+        showToast('❌ Reparatur fehlgeschlagen: ' + error, 'error', 5000);
+    }
+}
+
+async function clearProfileCache(profileId) {
+    const profile = profiles.find(p => p.id === profileId);
+    if (!profile) {
+        showToast('Profil nicht gefunden', 'error', 3000);
+        return;
+    }
+
+    // Bestätigungsdialog
+    const confirmed = confirm(
+        `🗑️ Cache leeren?\n\n` +
+        `Profil: ${profile.name}\n\n` +
+        `Dies löscht temporäre Dateien und den Shader-Cache.\n` +
+        `Deine Mods, Welten und Einstellungen bleiben erhalten.`
+    );
+
+    if (!confirmed) return;
+
+    showToast('🗑️ Cache wird geleert...', 'info', 2000);
+    debugLog('Clearing cache for profile: ' + profileId, 'info');
+
+    try {
+        await invoke('clear_profile_cache', { profileId: profileId });
+        showToast('✅ Cache wurde geleert!', 'success', 3000);
+        debugLog('Cache cleared for profile: ' + profileId, 'success');
+    } catch (error) {
+        debugLog('Failed to clear cache: ' + error, 'error');
+        showToast('❌ Fehler: ' + error, 'error', 4000);
+    }
 }
 
 // ==================== SETTINGS SYNC ====================
@@ -1027,8 +1110,14 @@ function switchMainCategory(categoryName) {
             if (categoryName === 'content') {
                 loadInstalledMods(currentProfile.id);
                 startModsWatcher(currentProfile.id);
+                stopLogsAutoRefresh(); // Stoppe Logs-Refresh
             } else if (categoryName === 'logs') {
                 loadLogs(currentProfile.id);
+                startLogsAutoRefresh(currentProfile.id); // Starte Auto-Refresh für Logs
+                stopModsWatcher(); // Stoppe Mods-Watcher
+            } else {
+                stopLogsAutoRefresh();
+                stopModsWatcher();
             }
         }, 200);
     }
@@ -1138,14 +1227,17 @@ function renderContentSubTab(subtabName, profile) {
 
 function renderLogsContent(profile) {
     return `
-        <div style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
             <h3 style="color: var(--gold); margin: 0;">Minecraft Logs</h3>
             <div style="display: flex; gap: 10px;">
-                <button class="btn btn-secondary" onclick="loadLogs('${profile.id}')" style="padding: 8px 20px;">
+                <button class="btn btn-secondary" onclick="copyLogsToClipboard()" style="padding: 8px 16px;" title="Logs kopieren">
+                    📋 Kopieren
+                </button>
+                <button class="btn btn-secondary" onclick="loadLogs('${profile.id}')" style="padding: 8px 16px;" title="Aktualisieren">
                     ↻ Aktualisieren
                 </button>
-                <button class="btn btn-secondary" onclick="openLogsFolder('${profile.id}')" style="padding: 8px 20px;">
-                    [+] Ordner öffnen
+                <button class="btn btn-secondary" onclick="openLogsFolder('${profile.id}')" style="padding: 8px 16px;" title="Ordner öffnen">
+                    📁 Ordner
                 </button>
             </div>
         </div>
@@ -1155,18 +1247,30 @@ function renderLogsContent(profile) {
             <button class="log-type-tab active" data-logtype="latest" onclick="switchLogType('latest')" 
                     style="padding: 8px 16px; background: var(--bg-medium); border: 2px solid var(--gold); color: var(--text-primary); 
                            cursor: pointer; border-radius: 6px; font-weight: 500; font-size: 13px; transition: all 0.2s;">
-                Latest
+                📄 Latest
             </button>
             <button class="log-type-tab" data-logtype="debug" onclick="switchLogType('debug')" 
                     style="padding: 8px 16px; background: var(--bg-medium); border: 2px solid var(--bg-light); color: var(--text-secondary); 
                            cursor: pointer; border-radius: 6px; font-weight: 500; font-size: 13px; transition: all 0.2s;">
-                Debug
+                🔍 Debug
+            </button>
+            <button class="log-type-tab" data-logtype="crash" onclick="switchLogType('crash')" 
+                    style="padding: 8px 16px; background: var(--bg-medium); border: 2px solid var(--bg-light); color: var(--text-secondary); 
+                           cursor: pointer; border-radius: 6px; font-weight: 500; font-size: 13px; transition: all 0.2s;">
+                💥 Crash Reports
             </button>
         </div>
         
-        <div id="logs-container" style="background: #1a1a1a; border-radius: 8px; padding: 15px; min-height: 400px; 
-                                        max-height: 600px; overflow-y: auto; font-family: 'Courier New', monospace; 
-                                        font-size: 12px; line-height: 1.6; color: #e0e0e0;">
+        <!-- Log Statistics Bar -->
+        <div id="log-stats" style="display: flex; gap: 15px; margin-bottom: 10px; font-size: 11px; color: var(--text-secondary); padding: 8px 12px; background: var(--bg-medium); border-radius: 6px;">
+            <span id="log-line-count">Zeilen: -</span>
+            <span id="log-error-count" style="color: #f44336;">Errors: -</span>
+            <span id="log-warn-count" style="color: #ff9800;">Warnings: -</span>
+        </div>
+        
+        <div id="logs-container" style="background: #0d0d0d; border-radius: 8px; padding: 10px; min-height: 400px; 
+                                        max-height: 550px; overflow-y: auto; font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace; 
+                                        font-size: 11px; line-height: 1.4; color: #e0e0e0; user-select: text; border: 1px solid var(--bg-light);">
             <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                 <div class="spinner" style="margin: 0 auto 15px;"></div>
                 <p>Lade Logs...</p>
@@ -1335,16 +1439,10 @@ function renderProfileTabContent(tabName, profile) {
                 
                 <!-- Log Content -->
                 <div id="log-content" style="background: #0d0d0d; border: 1px solid var(--bg-light); border-radius: 5px; padding: 15px; font-family: 'Courier New', monospace; font-size: 11px; height: 450px; overflow-y: auto; color: #0f0; white-space: pre-wrap; word-break: break-all;">
-                    <div style="color: var(--text-secondary); text-align: center; padding: 40px;">
-                        📋 Klicke auf "Aktualisieren" um Logs zu laden<br>
-                        <span style="font-size: 10px; color: #666;">Logs erscheinen nach dem ersten Minecraft-Start</span>
+                    <div style="color: var(--gold); text-align: center; padding: 40px;">
+                        ⏳ Lade Logs...
                     </div>
                 </div>
-                
-                <script>
-                    // Auto-load logs when tab opens
-                    setTimeout(() => loadLogs('${profile.id}'), 100);
-                </script>
             `;
 
         default:
@@ -1354,9 +1452,40 @@ function renderProfileTabContent(tabName, profile) {
 
 // Helper functions for profile details
 
-function openGameFolder(profileId) {
+// Öffnet den Haupt-Ordner des Profils
+async function openProfileFolder(profileId) {
+    debugLog('Opening profile folder for: ' + profileId, 'info');
+    try {
+        await invoke('open_profile_folder', { profileId: profileId, subfolder: null });
+        showToast('Ordner wird geöffnet...', 'info', 2000);
+    } catch (error) {
+        debugLog('Failed to open profile folder: ' + error, 'error');
+        showToast('Fehler beim Öffnen: ' + error, 'error', 3000);
+    }
+}
+
+// Öffnet den Game-Ordner (gleich wie Profil-Ordner)
+async function openGameFolder(profileId) {
     debugLog('Opening game folder for: ' + profileId, 'info');
-    alert('Ordner öffnen wird noch implementiert');
+    try {
+        await invoke('open_profile_folder', { profileId: profileId, subfolder: null });
+        showToast('Ordner wird geöffnet...', 'info', 2000);
+    } catch (error) {
+        debugLog('Failed to open game folder: ' + error, 'error');
+        showToast('Fehler beim Öffnen: ' + error, 'error', 3000);
+    }
+}
+
+// Öffnet den Logs-Ordner
+async function openLogsFolder(profileId) {
+    debugLog('Opening logs folder for: ' + profileId, 'info');
+    try {
+        await invoke('open_profile_folder', { profileId: profileId, subfolder: 'logs' });
+        showToast('Logs-Ordner wird geöffnet...', 'info', 2000);
+    } catch (error) {
+        debugLog('Failed to open logs folder: ' + error, 'error');
+        showToast('Fehler beim Öffnen: ' + error, 'error', 3000);
+    }
 }
 
 let currentLogType = 'latest';
@@ -1364,50 +1493,147 @@ let currentLogType = 'latest';
 async function loadLogs(profileId) {
     debugLog('Loading logs for profile: ' + profileId, 'info');
 
-    const logContent = document.getElementById('log-content');
-    if (!logContent) return;
+    // Warte kurz, damit das DOM sicher geladen ist
+    await new Promise(resolve => setTimeout(resolve, 50));
 
-    logContent.innerHTML = '<div style="color: var(--gold);">⏳ Lade Logs...</div>';
+    // Versuche beide möglichen Element-IDs (für verschiedene UI-Ansichten)
+    let targetElement = document.getElementById('logs-container') || document.getElementById('log-content');
+    if (!targetElement) {
+        debugLog('ERROR: logs container element not found, retrying...', 'error');
+        // Versuche es nochmal nach einer kurzen Pause
+        await new Promise(resolve => setTimeout(resolve, 100));
+        targetElement = document.getElementById('logs-container') || document.getElementById('log-content');
+        if (!targetElement) {
+            debugLog('ERROR: logs container element still not found after retry!', 'error');
+            return;
+        }
+    }
+
+
+    targetElement.innerHTML = '<div style="color: var(--gold); text-align: center; padding: 20px;">⏳ Lade Logs für ' + currentLogType + '...</div>';
 
     try {
+        debugLog('Calling invoke get_profile_logs with profileId=' + profileId + ', logType=' + currentLogType, 'info');
+
         const logs = await invoke('get_profile_logs', {
             profileId: profileId,
             logType: currentLogType
         });
 
-        if (logs && logs.length > 0) {
-            // Logs mit Syntax-Highlighting
-            const formattedLogs = logs.split('\n').map(line => {
-                if (line.includes('[ERROR]') || line.includes('ERROR') || line.includes('Exception')) {
-                    return `<span style="color: #f44336;">${escapeHtml(line)}</span>`;
-                } else if (line.includes('[WARN]') || line.includes('WARN')) {
-                    return `<span style="color: #ff9800;">${escapeHtml(line)}</span>`;
-                } else if (line.includes('[INFO]') || line.includes('INFO')) {
-                    return `<span style="color: #4caf50;">${escapeHtml(line)}</span>`;
-                } else if (line.includes('[DEBUG]') || line.includes('DEBUG')) {
-                    return `<span style="color: #9e9e9e;">${escapeHtml(line)}</span>`;
-                } else {
-                    return `<span style="color: #ccc;">${escapeHtml(line)}</span>`;
-                }
-            }).join('\n');
+        debugLog('Received logs response, length: ' + (logs ? logs.length : 'null'), 'info');
 
-            logContent.innerHTML = formattedLogs;
-            logContent.scrollTop = logContent.scrollHeight;
-            debugLog('Logs loaded: ' + logs.split('\n').length + ' lines', 'success');
-        } else {
-            logContent.innerHTML = `
+        if (!logs || logs.trim().length === 0) {
+            targetElement.innerHTML = `
                 <div style="color: var(--text-secondary); text-align: center; padding: 40px;">
                     📋 Keine ${currentLogType} Logs gefunden<br>
-                    <span style="font-size: 10px; color: #666;">Starte Minecraft um Logs zu generieren</span>
+                    <span style="font-size: 11px; color: #666;">Starte Minecraft um Logs zu generieren</span>
+                    <div style="margin-top: 15px; font-size: 10px; color: #555;">
+                        Profile ID: ${profileId}
+                    </div>
                 </div>
             `;
+            return;
         }
+
+        // Prüfe ob es eine Hilfsnachricht ist (beginnt mit Emoji)
+        if (logs.startsWith('📋') || logs.startsWith('📄') || logs.startsWith('⚠️')) {
+            targetElement.innerHTML = `<pre style="color: var(--gold); white-space: pre-wrap; font-family: monospace; font-size: 12px; line-height: 1.6;">${escapeHtml(logs)}</pre>`;
+            return;
+        }
+
+        // Normale Logs mit Syntax-Highlighting und besserer Formatierung
+        const formattedLogs = logs.split('\n').map((line, index) => {
+            if (!line.trim()) return ''; // Leere Zeilen überspringen
+
+            // Erkenne Zeitstempel-Muster: [HH:MM:SS] oder [12:34:56]
+            const timeMatch = line.match(/^\[(\d{2}:\d{2}:\d{2})\]/);
+            let timeStamp = '';
+            let restOfLine = line;
+
+            if (timeMatch) {
+                timeStamp = timeMatch[1];
+                restOfLine = line.substring(timeMatch[0].length);
+            }
+
+            // Bestimme Farbe basierend auf Log-Level
+            let levelColor = '#b0b0b0'; // Standard: grau
+            let levelBadge = '';
+
+            if (line.includes('[ERROR]') || line.includes('/ERROR]') || line.includes('Exception') || line.includes('FATAL')) {
+                levelColor = '#f44336';
+                levelBadge = '<span style="background: #f44336; color: white; padding: 1px 5px; border-radius: 3px; font-size: 9px; margin-right: 6px;">ERROR</span>';
+            } else if (line.includes('[WARN]') || line.includes('/WARN]') || line.includes('Warning')) {
+                levelColor = '#ff9800';
+                levelBadge = '<span style="background: #ff9800; color: black; padding: 1px 5px; border-radius: 3px; font-size: 9px; margin-right: 6px;">WARN</span>';
+            } else if (line.includes('[INFO]') || line.includes('/INFO]')) {
+                levelColor = '#4caf50';
+                levelBadge = '<span style="background: #4caf50; color: white; padding: 1px 5px; border-radius: 3px; font-size: 9px; margin-right: 6px;">INFO</span>';
+            } else if (line.includes('[DEBUG]') || line.includes('/DEBUG]')) {
+                levelColor = '#9e9e9e';
+                levelBadge = '<span style="background: #616161; color: white; padding: 1px 5px; border-radius: 3px; font-size: 9px; margin-right: 6px;">DEBUG</span>';
+            }
+
+            // Entferne das Level aus dem Rest der Zeile für sauberere Anzeige
+            restOfLine = restOfLine
+                .replace(/\[INFO\]/g, '')
+                .replace(/\[WARN\]/g, '')
+                .replace(/\[ERROR\]/g, '')
+                .replace(/\[DEBUG\]/g, '')
+                .replace(/\[main\/INFO\]/g, '')
+                .replace(/\[main\/WARN\]/g, '')
+                .replace(/\[main\/ERROR\]/g, '')
+                .replace(/\[Render thread\/INFO\]/g, '')
+                .replace(/\[Render thread\/WARN\]/g, '')
+                .replace(/\[Render thread\/ERROR\]/g, '')
+                .trim();
+
+            // Erstelle die formatierte Zeile
+            const timeDisplay = timeStamp
+                ? `<span style="color: #888; font-weight: 500; min-width: 70px; display: inline-block;">${timeStamp}</span>`
+                : '';
+
+            return `<div class="log-line" style="display: flex; align-items: flex-start; padding: 3px 8px; margin: 1px 0; border-radius: 3px; cursor: text; user-select: text; transition: background 0.1s;" 
+                        onmouseover="this.style.background='rgba(255,255,255,0.05)'" 
+                        onmouseout="this.style.background='transparent'"
+                        data-line="${index}">
+                ${timeDisplay}
+                ${levelBadge}
+                <span style="color: ${levelColor}; flex: 1; word-break: break-word;">${escapeHtml(restOfLine)}</span>
+            </div>`;
+        }).filter(line => line).join('');
+
+        targetElement.innerHTML = `
+            <div style="display: flex; flex-direction: column;">
+                ${formattedLogs}
+            </div>
+        `;
+        targetElement.scrollTop = targetElement.scrollHeight;
+
+        // Speichere Roh-Logs für Kopieren
+        currentRawLogs = logs;
+
+        // Aktualisiere Statistiken
+        updateLogStats(logs);
+
+        debugLog('Logs loaded successfully: ' + logs.split('\n').length + ' lines', 'success');
     } catch (error) {
         debugLog('Failed to load logs: ' + error, 'error');
-        logContent.innerHTML = `
-            <div style="color: #f44336; text-align: center; padding: 40px;">
-                ❌ Fehler beim Laden der Logs<br>
-                <span style="font-size: 10px; color: #666;">${error}</span>
+        targetElement.innerHTML = `
+            <div style="text-align: left; padding: 20px;">
+                <div style="color: #f44336; margin-bottom: 15px;">❌ Fehler beim Laden der Logs</div>
+                <pre style="color: var(--text-secondary); white-space: pre-wrap; font-size: 11px; background: #1a1a1a; padding: 10px; border-radius: 5px;">${escapeHtml(String(error))}</pre>
+                <div style="margin-top: 15px; font-size: 10px; color: #666;">
+                    Profile ID: ${profileId}<br>
+                    Log Type: ${currentLogType}
+                </div>
+                <div style="margin-top: 20px; padding: 15px; background: rgba(255, 152, 0, 0.1); border: 1px solid #ff9800; border-radius: 8px;">
+                    <div style="color: #ff9800; font-weight: bold; margin-bottom: 10px;">💡 Tipps:</div>
+                    <ul style="color: var(--text-secondary); font-size: 11px; margin: 0; padding-left: 20px;">
+                        <li>Starte Minecraft und warte ein paar Sekunden</li>
+                        <li>Klicke dann auf 🔄 Aktualisieren</li>
+                        <li>Öffne den Logs-Ordner mit dem 📁-Button</li>
+                    </ul>
+                </div>
             </div>
         `;
     }
@@ -1417,7 +1643,22 @@ function switchLogType(logType, profileId) {
     debugLog('Switching to log type: ' + logType, 'info');
     currentLogType = logType;
 
-    // Update button styles
+    // Update button styles - unterstütze beide Button-Klassen
+    document.querySelectorAll('.log-type-tab').forEach(btn => {
+        if (btn.dataset.logtype === logType) {
+            btn.style.background = 'var(--bg-medium)';
+            btn.style.border = '2px solid var(--gold)';
+            btn.style.color = 'var(--text-primary)';
+            btn.classList.add('active');
+        } else {
+            btn.style.background = 'var(--bg-medium)';
+            btn.style.border = '2px solid var(--bg-light)';
+            btn.style.color = 'var(--text-secondary)';
+            btn.classList.remove('active');
+        }
+    });
+
+    // Alternative Button-Klasse (für renderProfileTabContent)
     document.querySelectorAll('.log-type-btn').forEach(btn => {
         if (btn.dataset.log === logType) {
             btn.style.background = 'var(--gold)';
@@ -1430,19 +1671,10 @@ function switchLogType(logType, profileId) {
         }
     });
 
-    // Load logs
-    loadLogs(profileId);
+    // Load logs - use currentProfile if no profileId provided
+    loadLogs(profileId || (currentProfile ? currentProfile.id : null));
 }
 
-async function openLogsFolder(profileId) {
-    debugLog('Opening logs folder for: ' + profileId, 'info');
-    try {
-        await invoke('open_profile_folder', { profileId: profileId, subfolder: 'logs' });
-    } catch (error) {
-        debugLog('Failed to open folder: ' + error, 'error');
-        alert('Konnte Ordner nicht öffnen: ' + error);
-    }
-}
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -1450,9 +1682,81 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Kopiert die aktuellen Logs in die Zwischenablage
+async function copyLogsToClipboard() {
+    // Verwende die gespeicherten Roh-Logs für bessere Lesbarkeit
+    if (!currentRawLogs || currentRawLogs.trim().length === 0) {
+        showToast('Keine Logs zum Kopieren gefunden', 'error', 2000);
+        return;
+    }
+
+    try {
+        await navigator.clipboard.writeText(currentRawLogs);
+        showToast('Logs in Zwischenablage kopiert! 📋', 'success', 2000);
+        debugLog('Logs copied to clipboard: ' + currentRawLogs.length + ' characters', 'success');
+    } catch (error) {
+        debugLog('Failed to copy logs: ' + error, 'error');
+        showToast('Fehler beim Kopieren: ' + error, 'error', 3000);
+    }
+}
+
+// Variable zum Speichern der Roh-Logs für Statistiken
+let currentRawLogs = '';
+
+// Aktualisiert die Log-Statistiken Anzeige
+function updateLogStats(logs) {
+    const lines = logs.split('\n').filter(l => l.trim());
+    const lineCount = lines.length;
+    const errorCount = lines.filter(l => l.includes('[ERROR]') || l.includes('/ERROR]') || l.includes('Exception') || l.includes('FATAL')).length;
+    const warnCount = lines.filter(l => l.includes('[WARN]') || l.includes('/WARN]')).length;
+
+    const lineCountEl = document.getElementById('log-line-count');
+    const errorCountEl = document.getElementById('log-error-count');
+    const warnCountEl = document.getElementById('log-warn-count');
+
+    if (lineCountEl) lineCountEl.textContent = `Zeilen: ${lineCount.toLocaleString()}`;
+    if (errorCountEl) {
+        errorCountEl.textContent = `Errors: ${errorCount}`;
+        errorCountEl.style.fontWeight = errorCount > 0 ? 'bold' : 'normal';
+    }
+    if (warnCountEl) {
+        warnCountEl.textContent = `Warnings: ${warnCount}`;
+        warnCountEl.style.fontWeight = warnCount > 0 ? 'bold' : 'normal';
+    }
+}
+
 function refreshLogs() {
     if (currentProfile) {
+        debugLog('Manually refreshing logs', 'info');
         loadLogs(currentProfile.id);
+    }
+}
+
+// Auto-Refresh für Logs
+let logsRefreshInterval = null;
+
+function startLogsAutoRefresh(profileId) {
+    stopLogsAutoRefresh();
+
+    debugLog('Starting logs auto-refresh', 'info');
+
+    // Aktualisiere alle 3 Sekunden
+    logsRefreshInterval = setInterval(() => {
+        if (currentProfile && currentProfile.id === profileId) {
+            // Nur aktualisieren wenn auf der Logs-Seite
+            const logsTab = document.querySelector('[data-category="logs"].active');
+            if (logsTab) {
+                loadLogs(profileId);
+            }
+        }
+    }, 3000);
+}
+
+function stopLogsAutoRefresh() {
+    if (logsRefreshInterval) {
+        clearInterval(logsRefreshInterval);
+        logsRefreshInterval = null;
+        debugLog('Stopped logs auto-refresh', 'info');
     }
 }
 
@@ -2245,7 +2549,19 @@ function setupModals() {
     const cancelBtn = document.getElementById('cancel-profile-btn');
     const saveBtn = document.getElementById('save-profile-btn');
     const loaderSelect = document.getElementById('profile-loader');
+    const loaderWarning = document.getElementById('loader-warning');
 
+    // Zeige Warnung bei Forge/NeoForge Auswahl
+    if (loaderSelect && loaderWarning) {
+        loaderSelect.addEventListener('change', (e) => {
+            const loader = e.target.value;
+            if (loader === 'forge' || loader === 'neoforge') {
+                loaderWarning.style.display = 'block';
+            } else {
+                loaderWarning.style.display = 'none';
+            }
+        });
+    }
 
     if (cancelBtn) {
         cancelBtn.addEventListener('click', () => {
