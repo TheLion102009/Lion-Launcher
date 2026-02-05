@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::core::download::DownloadManager;
 
 /// Forge/NeoForge Installer Handler
+/// Unterstützt beide Loader-Typen mit einheitlicher Schnittstelle
 pub struct ForgeInstaller {
     download_manager: DownloadManager,
 }
@@ -49,6 +50,7 @@ impl ForgeInstaller {
                     // Versuche Standard-Maven-URLs
                     let maven_urls = vec![
                         format!("https://maven.minecraftforge.net/{}", lib_path),
+                        format!("https://maven.neoforged.net/releases/{}", lib_path),
                         format!("https://repo1.maven.org/maven2/{}", lib_path),
                     ];
 
@@ -75,6 +77,19 @@ impl ForgeInstaller {
             classpath: classpath_entries.join(":"),
             minecraft_arguments: profile.version_info.minecraft_arguments,
         })
+    }
+
+    /// Installiert NeoForge aus einem Installer-JAR
+    /// NeoForge verwendet das gleiche Format wie moderne Forge-Versionen
+    pub async fn install_neoforge(
+        &self,
+        installer_jar: &Path,
+        libraries_dir: &Path,
+        mc_version: &str,
+    ) -> Result<ForgeInstallation> {
+        // NeoForge verwendet das gleiche Installationsformat wie Forge
+        tracing::info!("Processing NeoForge installer: {:?}", installer_jar);
+        self.install_forge(installer_jar, libraries_dir, mc_version).await
     }
 
     fn extract_install_profile(&self, installer_jar: &Path) -> Result<ForgeInstallProfile> {
@@ -126,6 +141,45 @@ impl ForgeInstaller {
             maven.to_string()
         }
     }
+
+    /// Erkennt automatisch ob ein Installer Forge oder NeoForge ist
+    pub fn detect_loader_type(installer_jar: &Path) -> Result<LoaderType> {
+        let file = std::fs::File::open(installer_jar)?;
+        let mut archive = zip::ZipArchive::new(file)?;
+
+        // Prüfe install_profile.json
+        if let Ok(mut entry) = archive.by_name("install_profile.json") {
+            let mut data = String::new();
+            std::io::Read::read_to_string(&mut entry, &mut data)?;
+            
+            if data.contains("neoforged") || data.contains("net.neoforged") {
+                return Ok(LoaderType::NeoForge);
+            }
+            
+            if data.contains("minecraftforge") || data.contains("net.minecraftforge") {
+                return Ok(LoaderType::Forge);
+            }
+        }
+
+        // Fallback: Prüfe Dateinamen
+        if let Some(filename) = installer_jar.file_name() {
+            let filename_str = filename.to_string_lossy();
+            if filename_str.contains("neoforge") {
+                return Ok(LoaderType::NeoForge);
+            }
+            if filename_str.contains("forge") {
+                return Ok(LoaderType::Forge);
+            }
+        }
+
+        bail!("Could not detect loader type from installer JAR")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoaderType {
+    Forge,
+    NeoForge,
 }
 
 #[derive(Debug, Deserialize)]

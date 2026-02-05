@@ -35,6 +35,9 @@ fn main() {
             gui::save_config,
             gui::get_minecraft_versions,
             gui::get_fabric_versions,
+            gui::get_quilt_versions,
+            gui::get_forge_versions,
+            gui::get_neoforge_versions,
             // Profiles
             gui::get_profiles,
             gui::create_profile,

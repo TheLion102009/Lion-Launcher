@@ -258,3 +258,65 @@ pub fn get_active_access_token() -> Option<(String, String, String)> {
 
     Some((account.uuid.clone(), account.username.clone(), account.access_token.clone()))
 }
+
+/// Gibt das Access-Token zurück und refreshed es automatisch wenn es abgelaufen ist
+pub async fn get_active_access_token_refreshed() -> Option<(String, String, String)> {
+    let account_data = {
+        let state = AUTH_STATE.try_lock().ok()?;
+        let active_uuid = state.active_account.as_ref()?;
+        let account = state.accounts.iter().find(|a| &a.uuid == active_uuid)?;
+        
+        (account.uuid.clone(), 
+         account.username.clone(), 
+         account.access_token.clone(),
+         account.expires_at,
+         account.refresh_token.clone(),
+         account.is_microsoft)
+    };
+    
+    let (uuid, username, access_token, expires_at, refresh_token, is_microsoft) = account_data;
+    
+    // Prüfe ob Token abgelaufen ist (oder in den nächsten 5 Minuten abläuft)
+    let needs_refresh = if let Some(expires) = expires_at {
+        use chrono::Utc;
+        let now = Utc::now();
+        let threshold = now + chrono::Duration::minutes(5);
+        expires < threshold
+    } else {
+        false
+    };
+    
+    if needs_refresh && is_microsoft {
+        if let Some(ref_token) = refresh_token {
+            tracing::info!("⚠️  Access-Token ist abgelaufen, refreshe automatisch...");
+            
+            // Versuche Token zu refreshen
+            let auth = crate::core::auth::MinecraftAuth::new();
+            match auth.refresh_auth(&ref_token).await {
+                Ok(new_account) => {
+                    tracing::info!("✅ Token erfolgreich refreshed!");
+                    
+                    // Update im State
+                    let mut state = AUTH_STATE.lock().await;
+                    if let Some(existing) = state.accounts.iter_mut().find(|a| a.uuid == uuid) {
+                        *existing = new_account.clone();
+                    }
+                    
+                    // Speichere State
+                    if let Err(e) = save_auth_state(&state) {
+                        tracing::warn!("⚠️  Konnte Auth-State nicht speichern: {}", e);
+                    }
+                    
+                    return Some((new_account.uuid, new_account.username, new_account.access_token));
+                }
+                Err(e) => {
+                    tracing::error!("❌ Token-Refresh fehlgeschlagen: {}", e);
+                    tracing::warn!("⚠️  Verwende alten Token, Multiplayer funktioniert eventuell nicht!");
+                }
+            }
+        }
+    }
+    
+    Some((uuid, username, access_token))
+}
+

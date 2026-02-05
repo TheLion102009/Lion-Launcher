@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use anyhow::{Result, bail};
-use crate::api::{fabric, forge, neoforge, quilt};
+use crate::api::{fabric, forge, neoforge, quilt, forge_compat};
 use crate::types::version::ModLoader;
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +10,7 @@ pub struct LoaderManager {
     fabric: fabric::FabricClient,
     forge: forge::ForgeClient,
     neoforge: neoforge::NeoForgeClient,
+    forge_compat: forge_compat::ForgeCompatClient,
     quilt: quilt::QuiltClient,
 }
 
@@ -19,6 +20,7 @@ impl LoaderManager {
             fabric: fabric::FabricClient::new()?,
             forge: forge::ForgeClient::new()?,
             neoforge: neoforge::NeoForgeClient::new()?,
+            forge_compat: forge_compat::ForgeCompatClient::new()?,
             quilt: quilt::QuiltClient::new()?,
         })
     }
@@ -55,7 +57,7 @@ impl LoaderManager {
                     .map(|v| LoaderVersionInfo {
                         id: format!("forge-{}", v.forge_version),
                         version: v.forge_version,
-                        stable: true, // Forge hat keine explizite stable-Flag
+                        stable: !v.full_version.contains("beta") && !v.full_version.contains("alpha"),
                         loader_type: ModLoader::Forge,
                     })
                     .collect())
@@ -87,6 +89,29 @@ impl LoaderManager {
         }
     }
 
+    /// Lädt alle kompatiblen Forge/NeoForge-Versionen für eine MC-Version
+    pub async fn get_forge_compatible_versions(
+        &self,
+        minecraft_version: &str,
+    ) -> Result<forge_compat::ForgeCompatVersions> {
+        self.forge_compat.get_all_compatible_versions(minecraft_version).await
+    }
+
+    /// Gibt den empfohlenen Loader für eine MC-Version zurück (Forge vs NeoForge)
+    pub fn get_recommended_forge_loader(&self, minecraft_version: &str) -> forge_compat::LoaderType {
+        forge_compat::ForgeCompatClient::get_recommended_loader(minecraft_version)
+    }
+
+    /// Prüft ob Forge-Mods mit NeoForge kompatibel sind
+    pub fn are_forge_mods_compatible_with_neoforge(&self, minecraft_version: &str) -> bool {
+        forge_compat::ForgeCompatClient::are_forge_mods_compatible_with_neoforge(minecraft_version)
+    }
+
+    /// Gibt Migrations-Informationen von Forge zu NeoForge
+    pub fn get_forge_migration_info(&self, minecraft_version: &str) -> forge_compat::MigrationInfo {
+        forge_compat::ForgeCompatClient::get_migration_info(minecraft_version)
+    }
+
     /// Lädt alle unterstützten Minecraft-Versionen für einen Loader
     pub async fn get_supported_game_versions(&self, loader: ModLoader) -> Result<Vec<String>> {
         match loader {
@@ -109,6 +134,11 @@ impl LoaderManager {
                 Ok(versions.into_iter().map(|v| v.version).collect())
             }
         }
+    }
+
+    /// Lädt alle Minecraft-Versionen mit Forge oder NeoForge Support
+    pub async fn get_all_forge_compatible_game_versions(&self) -> Result<Vec<String>> {
+        self.forge_compat.get_all_supported_versions().await
     }
 
     /// Prüft, ob eine bestimmte Minecraft-Version von einem Loader unterstützt wird

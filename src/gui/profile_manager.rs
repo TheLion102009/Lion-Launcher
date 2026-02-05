@@ -163,8 +163,10 @@ pub async fn launch_profile(profile_id: String, username: String) -> Result<(), 
     manager.save_profiles(&profiles).await.map_err(|e| e.to_string())?;
 
     // Hole Account-Daten (UUID, Username, Token) vom aktiven Account
+    // WICHTIG: Verwende refreshed Funktion um abgelaufene Tokens automatisch zu erneuern!
     let (account_uuid, account_username, access_token) =
-        crate::gui::auth::get_active_access_token()
+        crate::gui::auth::get_active_access_token_refreshed()
+            .await
             .unwrap_or_else(|| {
                 // Fallback für Offline-Accounts
                 let uuid = uuid::Uuid::new_v4().to_string().replace("-", "");

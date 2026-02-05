@@ -22,14 +22,6 @@ impl NeoForgeClient {
     pub async fn get_loader_versions(&self, minecraft_version: &str) -> Result<Vec<NeoForgeVersion>> {
         let all_versions = self.get_all_versions().await?;
         
-        // NeoForge verwendet ein anderes Versionsschema
-        // Ab MC 1.20.1+ ist NeoForge verfügbar
-        let mc_version_parts: Vec<&str> = minecraft_version.split('.').collect();
-        
-        if mc_version_parts.len() < 2 {
-            bail!("Ungültige Minecraft-Version: {}", minecraft_version);
-        }
-
         // Filtere Versionen nach Minecraft-Kompatibilität
         let filtered: Vec<NeoForgeVersion> = all_versions
             .into_iter()
@@ -50,41 +42,97 @@ impl NeoForgeClient {
         let mut versions = Vec::new();
         
         for version_str in response.versions {
-            // NeoForge-Versionen sind im Format "20.4.80" für MC 1.20.4
-            // oder "21.0.0-beta" für MC 1.21
             if let Some(neoforge_version) = Self::parse_version(&version_str) {
                 versions.push(neoforge_version);
             }
         }
         
-        versions.sort_by(|a, b| b.version.cmp(&a.version));
+        // Sortiere nach Version (neueste zuerst)
+        versions.sort_by(|a, b| Self::compare_neoforge_versions(&b.version, &a.version));
         
         Ok(versions)
     }
 
     fn parse_version(version_str: &str) -> Option<NeoForgeVersion> {
-        // Format: "20.4.80" -> MC 1.20.4, NeoForge 20.4.80
-        let parts: Vec<&str> = version_str.split('.').collect();
+        // NeoForge Versionsschema:
+        // - Für MC 1.20.1: "20.1.x" Format
+        // - Für MC 1.20.2+: "20.2.x", "20.3.x", "20.4.x" etc.
+        // - Für MC 1.21+: "21.0.x", "21.1.x" etc.
+        
+        // Entferne Build-Suffixes
+        let clean_version = version_str
+            .split('-')
+            .next()
+            .unwrap_or(version_str);
+
+        let parts: Vec<&str> = clean_version.split('.').collect();
         
         if parts.is_empty() {
             return None;
         }
 
-        // Extrahiere MC-Version aus NeoForge-Version
-        let mc_major = parts[0].parse::<u32>().ok()?;
-        let mc_minor = if parts.len() > 1 {
+        // Parse major version (entspricht MC major version nach 1.)
+        let major = parts[0].parse::<u32>().ok()?;
+        
+        // Parse minor version (entspricht MC minor version)
+        let minor = if parts.len() > 1 {
             parts[1].parse::<u32>().ok()?
         } else {
             0
         };
 
-        let mc_version = format!("1.{}.{}", mc_major, mc_minor);
+        // Bestimme die Minecraft-Version
+        let mc_version = Self::get_minecraft_version_for_neoforge(major, minor);
 
         Some(NeoForgeVersion {
             version: version_str.to_string(),
             mc_version,
             is_beta: version_str.contains("beta") || version_str.contains("alpha"),
+            installer_url: format!(
+                "{}/net/neoforged/neoforge/{}/neoforge-{}-installer.jar",
+                NEOFORGE_MAVEN_URL, version_str, version_str
+            ),
         })
+    }
+
+    /// Bestimmt die Minecraft-Version basierend auf der NeoForge-Version
+    fn get_minecraft_version_for_neoforge(major: u32, minor: u32) -> String {
+        // NeoForge Mapping:
+        // 20.1.x -> 1.20.1
+        // 20.2.x -> 1.20.2
+        // 20.3.x -> 1.20.3
+        // 20.4.x -> 1.20.4
+        // 20.5.x -> 1.20.5
+        // 20.6.x -> 1.20.6
+        // 21.0.x -> 1.21.0 / 1.21
+        // 21.1.x -> 1.21.1
+        // 21.2.x -> 1.21.2
+        // 21.3.x -> 1.21.3
+        
+        format!("1.{}.{}", major, minor)
+    }
+
+    fn compare_neoforge_versions(a: &str, b: &str) -> std::cmp::Ordering {
+        let parse = |v: &str| -> Vec<u32> {
+            v.split(&['.', '-'][..])
+                .filter_map(|s| s.parse::<u32>().ok())
+                .collect()
+        };
+
+        let a_parts = parse(a);
+        let b_parts = parse(b);
+
+        for i in 0..a_parts.len().max(b_parts.len()) {
+            let a_part = a_parts.get(i).copied().unwrap_or(0);
+            let b_part = b_parts.get(i).copied().unwrap_or(0);
+            
+            match a_part.cmp(&b_part) {
+                std::cmp::Ordering::Equal => continue,
+                other => return other,
+            }
+        }
+        
+        std::cmp::Ordering::Equal
     }
 
     /// Lädt alle unterstützten Minecraft-Versionen
@@ -96,11 +144,38 @@ impl NeoForgeClient {
             .map(|v| v.mc_version)
             .collect();
         
-        mc_versions.sort();
         mc_versions.dedup();
-        mc_versions.reverse();
+        
+        // Sortiere nach Version
+        mc_versions.sort_by(|a, b| {
+            Self::compare_mc_versions(b, a) // Neueste zuerst
+        });
         
         Ok(mc_versions)
+    }
+
+    fn compare_mc_versions(a: &str, b: &str) -> std::cmp::Ordering {
+        let parse = |v: &str| -> Vec<u32> {
+            v.trim_start_matches("1.")
+                .split('.')
+                .filter_map(|s| s.parse::<u32>().ok())
+                .collect()
+        };
+
+        let a_parts = parse(a);
+        let b_parts = parse(b);
+
+        for i in 0..a_parts.len().max(b_parts.len()) {
+            let a_part = a_parts.get(i).copied().unwrap_or(0);
+            let b_part = b_parts.get(i).copied().unwrap_or(0);
+            
+            match a_part.cmp(&b_part) {
+                std::cmp::Ordering::Equal => continue,
+                other => return other,
+            }
+        }
+        
+        std::cmp::Ordering::Equal
     }
 
     /// Generiert die Download-URL für NeoForge-Installer
@@ -110,6 +185,11 @@ impl NeoForgeClient {
             NEOFORGE_MAVEN_URL, version, version
         )
     }
+
+    /// Prüft ob NeoForge für eine MC-Version verfügbar ist (1.20.1+)
+    pub fn is_available_for_version(mc_version: &str) -> bool {
+        Self::compare_mc_versions(mc_version, "1.20.1") != std::cmp::Ordering::Less
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +197,7 @@ pub struct NeoForgeVersion {
     pub version: String,
     pub mc_version: String,
     pub is_beta: bool,
+    pub installer_url: String,
 }
 
 impl NeoForgeVersion {

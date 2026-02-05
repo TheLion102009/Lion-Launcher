@@ -2434,10 +2434,41 @@ async function populateEditVersionSelect() {
     const currentVersion = currentProfile?.minecraft_version || '';
     const showSnapshotsEdit = document.getElementById('edit-show-snapshots')?.checked || false;
 
-    const filtered = allMinecraftVersions.filter(v => {
+    // Prüfe welcher Loader gewählt ist
+    const loaderSelect = document.getElementById('edit-profile-loader');
+    const selectedLoader = loaderSelect ? loaderSelect.value : currentProfile?.loader?.loader || 'vanilla';
+
+    let filtered = allMinecraftVersions.filter(v => {
         if (showSnapshotsEdit) return true;
         return v.version_type === 'release';
     });
+
+    // WICHTIG: NeoForge unterstützt nur Versionen ab 1.20.2!
+    if (selectedLoader === 'neoforge') {
+        filtered = filtered.filter(v => {
+            const versionId = v.id;
+
+            // Snapshots immer erlauben wenn aktiviert
+            if (showSnapshotsEdit && v.version_type !== 'release') {
+                return true;
+            }
+
+            // Parse Version
+            const parts = versionId.split('.').map(p => parseInt(p));
+            if (parts.length < 3) return false;
+
+            const [major, minor, patch] = parts;
+
+            if (major !== 1) return false;
+
+            // 1.20.2 bis 1.21.11
+            if (minor === 20 && patch >= 2) return true;
+            if (minor === 21 && patch <= 11) return true;
+            if (minor > 21) return false;
+
+            return false;
+        });
+    }
 
     select.innerHTML = filtered.map(v =>
         `<option value="${v.id}" ${v.id === currentVersion ? 'selected' : ''}>${v.id}</option>`
@@ -2458,6 +2489,10 @@ async function updateEditLoaderVersions() {
     const loader = loaderSelect.value;
     const mcVersion = mcVersionSelect?.value || currentProfile?.minecraft_version;
 
+    // WICHTIG: Aktualisiere verfügbare MC-Versionen basierend auf Loader!
+    // (z.B. NeoForge nur 1.20.2+)
+    await populateEditVersionSelect();
+
     if (loader === 'vanilla') {
         versionSelect.innerHTML = '<option value="">-</option>';
         versionSelect.disabled = true;
@@ -2468,18 +2503,28 @@ async function updateEditLoaderVersions() {
     versionSelect.innerHTML = '<option value="">Lade...</option>';
 
     try {
+        let versions = [];
+
         if (loader === 'fabric') {
-            const versions = await invoke('get_fabric_versions', { mcVersion });
-            versionSelect.innerHTML = versions.map(v =>
-                `<option value="${v.version}">${v.version}</option>`
-            ).join('');
+            versions = await invoke('get_fabric_versions', { minecraftVersion: mcVersion });
+        } else if (loader === 'quilt') {
+            versions = await invoke('get_quilt_versions', { minecraftVersion: mcVersion });
+        } else if (loader === 'forge') {
+            versions = await invoke('get_forge_versions', { minecraftVersion: mcVersion });
+        } else if (loader === 'neoforge') {
+            versions = await invoke('get_neoforge_versions', { minecraftVersion: mcVersion });
+        }
+
+        if (versions && versions.length > 0) {
+            // Zeige die neueste als Standard + alle anderen
+            versionSelect.innerHTML = '<option value="">Neueste (' + versions[0] + ')</option>' +
+                versions.map(v => `<option value="${v}">${v}</option>`).join('');
         } else {
-            // Für Forge/NeoForge/Quilt
             versionSelect.innerHTML = '<option value="">Neueste</option>';
         }
     } catch (error) {
         console.error('Failed to load loader versions:', error);
-        versionSelect.innerHTML = '<option value="">Neueste</option>';
+        versionSelect.innerHTML = '<option value="">Neueste (Fehler beim Laden)</option>';
     }
 }
 
@@ -2551,15 +2596,21 @@ function setupModals() {
     const loaderSelect = document.getElementById('profile-loader');
     const loaderWarning = document.getElementById('loader-warning');
 
-    // Zeige Warnung bei Forge/NeoForge Auswahl
+    // Zeige Warnung bei Forge/NeoForge Auswahl UND aktualisiere Versionen
     if (loaderSelect && loaderWarning) {
-        loaderSelect.addEventListener('change', (e) => {
+        loaderSelect.addEventListener('change', async (e) => {
             const loader = e.target.value;
             if (loader === 'forge' || loader === 'neoforge') {
                 loaderWarning.style.display = 'block';
             } else {
                 loaderWarning.style.display = 'none';
             }
+
+            // WICHTIG: Aktualisiere die verfügbaren Versionen basierend auf dem Loader!
+            updateVersionSelects();
+
+            // WICHTIG: Lade auch die Loader-Versionen!
+            await updateCreateLoaderVersions();
         });
     }
 
@@ -2632,11 +2683,46 @@ function updateVersionSelects() {
 
     // Filter versions based on snapshot toggle
     // Support multiple version_type formats: "Release", "release", or type field
-    const filteredVersions = showSnapshots
+    let filteredVersions = showSnapshots
         ? allMinecraftVersions
         : allMinecraftVersions.filter(v => v.version_type?.toLowerCase() === 'release');
 
-    debugLog('Filtered to ' + filteredVersions.length + ' versions (snapshots: ' + showSnapshots + ')', 'info');
+    // WICHTIG: NeoForge unterstützt nur Versionen ab 1.20.2!
+    // Filtere Versionen basierend auf dem gewählten Loader
+    const loaderSelect = document.getElementById('profile-loader');
+    const selectedLoader = loaderSelect ? loaderSelect.value : 'vanilla';
+
+    if (selectedLoader === 'neoforge') {
+        // NeoForge: Nur 1.20.2 bis 1.21.11 (und Snapshots wenn aktiviert)
+        filteredVersions = filteredVersions.filter(v => {
+            const versionId = v.id;
+
+            // Snapshots immer erlauben wenn Snapshot-Toggle aktiv ist
+            if (showSnapshots && v.version_type?.toLowerCase() !== 'release') {
+                return true;
+            }
+
+            // Parse Version (z.B. "1.21.2" -> [1, 21, 2])
+            const parts = versionId.split('.').map(p => parseInt(p));
+            if (parts.length < 3) return false;
+
+            const [major, minor, patch] = parts;
+
+            // Nur Minecraft 1.x
+            if (major !== 1) return false;
+
+            // 1.20.2 bis 1.21.11
+            if (minor === 20 && patch >= 2) return true;  // 1.20.2+
+            if (minor === 21 && patch <= 11) return true; // 1.21.0 bis 1.21.11
+            if (minor > 21) return false; // Zu neu
+
+            return false;
+        });
+
+        debugLog('Filtered to ' + filteredVersions.length + ' NeoForge-compatible versions (1.20.2 - 1.21.11)', 'info');
+    } else {
+        debugLog('Filtered to ' + filteredVersions.length + ' versions (snapshots: ' + showSnapshots + ')', 'info');
+    }
 
     // Update Profile Modal select (limit to 50 for performance)
     const profileSelect = document.getElementById('profile-mc-version');
@@ -2656,6 +2742,58 @@ function updateVersionSelects() {
             filteredVersions.slice(0, 30).map(v =>
                 `<option value="${v.id}">${v.id}${v.version_type !== 'Release' ? ' (' + v.version_type + ')' : ''}</option>`
             ).join('');
+    }
+}
+
+// Lade Loader-Versionen für das Create-Profile-Modal
+async function updateCreateLoaderVersions() {
+    const loaderSelect = document.getElementById('profile-loader');
+    const versionSelect = document.getElementById('profile-loader-version');
+    const mcVersionSelect = document.getElementById('profile-mc-version');
+
+    if (!loaderSelect || !versionSelect || !mcVersionSelect) return;
+
+    const loader = loaderSelect.value;
+    const mcVersion = mcVersionSelect.value;
+
+    if (!mcVersion) {
+        versionSelect.innerHTML = '<option value="">Wähle zuerst MC-Version</option>';
+        versionSelect.disabled = true;
+        return;
+    }
+
+    if (loader === 'vanilla') {
+        versionSelect.innerHTML = '<option value="">-</option>';
+        versionSelect.disabled = true;
+        return;
+    }
+
+    versionSelect.disabled = false;
+    versionSelect.innerHTML = '<option value="">Lade...</option>';
+
+    try {
+        let versions = [];
+
+        if (loader === 'fabric') {
+            versions = await invoke('get_fabric_versions', { minecraftVersion: mcVersion });
+        } else if (loader === 'quilt') {
+            versions = await invoke('get_quilt_versions', { minecraftVersion: mcVersion });
+        } else if (loader === 'forge') {
+            versions = await invoke('get_forge_versions', { minecraftVersion: mcVersion });
+        } else if (loader === 'neoforge') {
+            versions = await invoke('get_neoforge_versions', { minecraftVersion: mcVersion });
+        }
+
+        if (versions && versions.length > 0) {
+            // Zeige die neueste als Standard + alle anderen
+            versionSelect.innerHTML = '<option value="">Neueste (' + versions[0] + ')</option>' +
+                versions.map(v => `<option value="${v}">${v}</option>`).join('');
+        } else {
+            versionSelect.innerHTML = '<option value="">Neueste</option>';
+        }
+    } catch (error) {
+        console.error('Failed to load loader versions:', error);
+        versionSelect.innerHTML = '<option value="">Neueste (Fehler beim Laden)</option>';
     }
 }
 

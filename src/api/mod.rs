@@ -5,4 +5,5 @@ pub mod mojang;
 pub mod fabric;
 pub mod forge;
 pub mod neoforge;
+pub mod forge_compat;
 pub mod quilt;

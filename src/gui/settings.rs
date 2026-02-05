@@ -60,6 +60,43 @@ pub async fn get_fabric_versions(minecraft_version: String) -> Result<Vec<String
 }
 
 #[tauri::command]
+pub async fn get_quilt_versions(minecraft_version: String) -> Result<Vec<String>, String> {
+    let client = crate::api::quilt::QuiltClient::new()
+        .map_err(|e| e.to_string())?;
+
+    let versions = client.get_loader_versions(&minecraft_version)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(versions.into_iter().map(|v| v.loader.version).collect())
+}
+
+#[tauri::command]
+pub async fn get_forge_versions(minecraft_version: String) -> Result<Vec<String>, String> {
+    let client = crate::api::forge::ForgeClient::new()
+        .map_err(|e| e.to_string())?;
+
+    let versions = client.get_loader_versions(&minecraft_version)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // ForgeVersion verwendet "forge_version" nicht "version"!
+    Ok(versions.into_iter().map(|v| v.forge_version).collect())
+}
+
+#[tauri::command]
+pub async fn get_neoforge_versions(minecraft_version: String) -> Result<Vec<String>, String> {
+    let client = crate::api::neoforge::NeoForgeClient::new()
+        .map_err(|e| e.to_string())?;
+
+    let versions = client.get_loader_versions(&minecraft_version)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(versions.into_iter().map(|v| v.version).collect())
+}
+
+#[tauri::command]
 pub async fn initialize_launcher() -> Result<(), String> {
     crate::core::fs::ensure_launcher_dirs()
         .await
