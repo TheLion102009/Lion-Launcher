@@ -71,11 +71,26 @@ impl ForgeClient {
         let mut versions = Vec::new();
         
         for (mc_version, forge_versions) in data.versions {
-            for forge_version in forge_versions {
+            for raw_forge_version in forge_versions {
+                // Die Forge-Version in maven-metadata.json kann im Format "1.11.2-13.20.0.2201"
+                // oder nur "47.3.0" sein. Wir müssen das MC-Prefix entfernen wenn vorhanden.
+                let forge_version = if raw_forge_version.starts_with(&format!("{}-", mc_version)) {
+                    // Format: "1.11.2-13.20.0.2201" -> "13.20.0.2201"
+                    raw_forge_version.strip_prefix(&format!("{}-", mc_version))
+                        .unwrap_or(&raw_forge_version)
+                        .to_string()
+                } else {
+                    // Format: "47.3.0" -> "47.3.0"
+                    raw_forge_version.clone()
+                };
+
                 let full_version = format!("{}-{}", mc_version, forge_version);
                 let recommended = promotions.as_ref()
                     .and_then(|p| p.promos.get(&format!("{}-recommended", mc_version)))
-                    .map(|v| v == &forge_version)
+                    .map(|v| {
+                        // Vergleiche auch mit raw_forge_version falls das in promotions steht
+                        v == &forge_version || v == &raw_forge_version
+                    })
                     .unwrap_or(false);
 
                 let installer_url = self.get_installer_url(&mc_version, &forge_version);

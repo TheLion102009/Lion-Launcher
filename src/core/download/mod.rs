@@ -5,6 +5,7 @@ use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use futures_util::StreamExt;
 
+#[derive(Clone)]
 pub struct DownloadManager {
     client: reqwest::Client,
 }
@@ -30,6 +31,20 @@ impl DownloadManager {
         }
 
         let response = self.client.get(url).send().await?;
+
+        // Prüfe HTTP-Status
+        if !response.status().is_success() {
+            anyhow::bail!("HTTP error {}: {} for URL: {}", response.status().as_u16(), response.status().canonical_reason().unwrap_or("Unknown"), url);
+        }
+
+        // Prüfe ob es eine HTML-Fehlerseite ist (statt einer Binärdatei)
+        if let Some(content_type) = response.headers().get("content-type") {
+            let ct = content_type.to_str().unwrap_or("");
+            if ct.contains("text/html") && (url.ends_with(".jar") || url.ends_with(".zip")) {
+                anyhow::bail!("Expected binary file but got HTML (likely a 404 page) for URL: {}", url);
+            }
+        }
+
         let total_size = response.content_length().unwrap_or(0);
 
         let mut file = tokio::fs::File::create(dest).await?;
@@ -47,6 +62,14 @@ impl DownloadManager {
         }
 
         file.flush().await?;
+
+        // Validiere heruntergeladene Datei
+        let metadata = tokio::fs::metadata(dest).await?;
+        if metadata.len() == 0 {
+            tokio::fs::remove_file(dest).await.ok();
+            anyhow::bail!("Downloaded file is empty for URL: {}", url);
+        }
+
         Ok(())
     }
 

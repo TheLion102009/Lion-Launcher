@@ -1,6 +1,21 @@
 use crate::core::mods::ModManager;
 use crate::types::mod_info::{ModInfo, ModVersion, ModSearchQuery, SortOption};
 
+// Re-export ModrinthCategory für Frontend
+pub use crate::api::modrinth::ModrinthCategory;
+
+// Import für get_modrinth_categories
+use crate::api::modrinth::ModrinthClient;
+
+// ==================== CATEGORIES ====================
+
+#[tauri::command]
+pub async fn get_modrinth_categories() -> Result<Vec<ModrinthCategory>, String> {
+    let client = ModrinthClient::new().map_err(|e| e.to_string())?;
+    let categories = client.get_categories().await.map_err(|e| e.to_string())?;
+    Ok(categories)
+}
+
 // ==================== MODS ====================
 
 #[tauri::command]
@@ -42,26 +57,22 @@ pub async fn get_mod_versions(mod_id: String, source: String) -> Result<Vec<ModV
         _ => return Err("Invalid source".to_string()),
     };
 
-    let mod_info = ModInfo {
-        id: mod_id,
-        source: mod_source,
-        slug: String::new(),
-        name: String::new(),
-        description: String::new(),
-        icon_url: None,
-        author: String::new(),
-        downloads: 0,
-        categories: Vec::new(),
-        versions: Vec::new(),
-        game_versions: Vec::new(),
-        loaders: Vec::new(),
-        project_url: String::new(),
-        updated_at: String::new(),
-        client_side: None,
-        server_side: None,
-    };
+    manager.get_mod_versions_raw(&mod_id, mod_source).await.map_err(|e| e.to_string())
+}
 
-    manager.get_mod_versions(&mod_info).await.map_err(|e| e.to_string())
+#[tauri::command]
+pub async fn get_mod_info(mod_id: String, source: String) -> Result<ModInfo, String> {
+    let client = ModrinthClient::new().map_err(|e| e.to_string())?;
+
+    match source.as_str() {
+        "modrinth" => {
+            client.get_mod(&mod_id).await.map_err(|e| e.to_string())
+        }
+        "curseforge" => {
+            Err("CurseForge not yet implemented".to_string())
+        }
+        _ => Err("Invalid source".to_string()),
+    }
 }
 
 #[tauri::command]
@@ -129,7 +140,7 @@ pub async fn install_mod(
         all_versions.iter().find(|v| v.id == vid)
     } else {
         // Finde passende Version für MC-Version und Loader
-        all_versions.iter().find(|v| {
+        let mut found = all_versions.iter().find(|v| {
             let has_mc_version = v.game_versions.iter().any(|gv| gv == &mc_version);
             let has_loader = v.loaders.iter().any(|l| l.to_lowercase() == loader);
 
@@ -140,7 +151,26 @@ pub async fn install_mod(
             } else {
                 false
             }
-        })
+        });
+
+        // Quilt Fallback: Wenn keine Quilt-Version gefunden, versuche Fabric (Quilt ist Fabric-kompatibel)
+        if found.is_none() && loader == "quilt" {
+            tracing::info!("No Quilt version found, trying Fabric as fallback...");
+            found = all_versions.iter().find(|v| {
+                let has_mc_version = v.game_versions.iter().any(|gv| gv == &mc_version);
+                let has_fabric = v.loaders.iter().any(|l| l.to_lowercase() == "fabric");
+
+                if has_mc_version && has_fabric {
+                    tracing::info!("Found Fabric version as fallback: {} (mc: {:?}, loaders: {:?})",
+                        v.version_number, v.game_versions, v.loaders);
+                    true
+                } else {
+                    false
+                }
+            });
+        }
+
+        found
     };
 
     let version = matching_version
@@ -150,19 +180,67 @@ pub async fn install_mod(
             mc_version, loader
         ))?;
 
+    // Warnung wenn die gewählte Version nicht exakt zur MC-Version passt
+    if !version.game_versions.iter().any(|gv| gv == &mc_version) {
+        let supported_versions = version.game_versions.join(", ");
+        let mod_display_name = mod_name.as_deref().unwrap_or(mod_id.as_str());
+        tracing::warn!(
+            "⚠️  VERSION MISMATCH: Mod '{}' v{} ist für {} gedacht, aber dein Profil verwendet {}! \
+             Dies kann zu Crashes führen.",
+            mod_display_name, version.version_number, supported_versions, mc_version
+        );
+    }
+
     tracing::info!("Installing version: {} ({})", version.version_number, version.id);
+
+    // Prüfe ob bereits eine Version dieser Mod installiert ist und entferne sie
+    if let Ok(mut entries) = tokio::fs::read_dir(&mods_dir).await {
+        let modinfos_dir = profile.game_dir.join("modinfos");
+        
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("jar") {
+                // Prüfe ob dies die gleiche Mod ist (über Metadaten)
+                let filename = path.file_name().unwrap().to_str().unwrap();
+                let meta_filename = filename.replace(".jar", ".json");
+                let meta_path = modinfos_dir.join(&meta_filename);
+                
+                if let Ok(meta_content) = tokio::fs::read_to_string(&meta_path).await {
+                    if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&meta_content) {
+                        if let Some(existing_mod_id) = meta.get("mod_id").and_then(|v| v.as_str()) {
+                            if existing_mod_id == mod_id {
+                                // Gleiche Mod gefunden - lösche alte Version
+                                tracing::info!("🗑️  Removing old version: {}", filename);
+                                if let Err(e) = tokio::fs::remove_file(&path).await {
+                                    tracing::warn!("Failed to remove old mod file: {}", e);
+                                }
+                                // Lösche auch alte Metadaten
+                                let _ = tokio::fs::remove_file(&meta_path).await;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     manager.download_mod(version, &mods_dir)
         .await
         .map_err(|e| e.to_string())?;
 
-    // Speichere Metadaten neben der JAR-Datei
+    // Speichere Metadaten in separatem modinfos/ Ordner
     let primary_file = version.files.iter().find(|f| f.primary)
         .or_else(|| version.files.first())
         .ok_or_else(|| "No files in version".to_string())?;
 
-    let jar_path = mods_dir.join(&primary_file.filename);
-    let meta_path = jar_path.with_extension("jar.meta.json");
+    // Erstelle modinfos/ Ordner im Profil-Verzeichnis
+    let modinfos_dir = profile.game_dir.join("modinfos");
+    tokio::fs::create_dir_all(&modinfos_dir).await.map_err(|e| e.to_string())?;
+
+    // Speichere Metadaten mit gleichem Dateinamen aber in modinfos/
+    let jar_filename = &primary_file.filename;
+    let meta_filename = jar_filename.replace(".jar", ".json");
+    let meta_path = modinfos_dir.join(&meta_filename);
 
     let metadata = serde_json::json!({
         "mod_id": mod_id,
@@ -170,11 +248,14 @@ pub async fn install_mod(
         "icon_url": icon_url,
         "version": version.version_number,
         "source": source,
+        "filename": jar_filename,
     });
 
-    if let Err(e) = tokio::fs::write(&meta_path, metadata.to_string()).await {
-        tracing::warn!("Failed to write metadata file: {}", e);
+    if let Err(e) = tokio::fs::write(&meta_path, serde_json::to_string_pretty(&metadata).unwrap()).await {
+        tracing::warn!("Failed to write metadata file to {:?}: {}", meta_path, e);
         // Nicht kritisch, fahre fort
+    } else {
+        tracing::info!("✅ Saved metadata to {:?}", meta_path);
     }
 
     tracing::info!("Mod {} installed successfully to {:?}", mod_id, mods_dir);
@@ -292,9 +373,11 @@ pub async fn search_resourcepacks(
             slug: hit.slug,
             name: hit.title,
             description: hit.description,
+            body: None,
             icon_url: hit.icon_url,
             author: hit.author,
             downloads: hit.downloads,
+            followers: None,
             categories: hit.categories,
             source: crate::types::mod_info::ModSource::Modrinth,
             versions: hit.versions,
@@ -304,6 +387,11 @@ pub async fn search_resourcepacks(
             updated_at: hit.date_modified,
             client_side: None,
             server_side: None,
+            source_url: None,
+            issues_url: None,
+            wiki_url: None,
+            discord_url: None,
+            gallery: vec![],
         }
     }).collect())
 }
@@ -384,6 +472,13 @@ pub async fn install_resourcepack(
     tokio::fs::write(&target_path, &bytes).await.map_err(|e| e.to_string())?;
 
     tracing::info!("Resource pack installed successfully to {:?}", target_path);
+
+    // META-INF Entfernung deaktiviert - kann Probleme mit eingebetteten Assets verursachen
+    // if file.filename.ends_with(".zip") {
+    //     if let Err(e) = remove_meta_inf_from_zip(&target_path).await {
+    //         tracing::warn!("Failed to remove META-INF from {}: {}", file.filename, e);
+    //     }
+    // }
 
     Ok(())
 }
@@ -467,9 +562,11 @@ pub async fn search_shaderpacks(
             slug: hit.slug,
             name: hit.title,
             description: hit.description,
+            body: None,
             icon_url: hit.icon_url,
             author: hit.author,
             downloads: hit.downloads,
+            followers: None,
             categories: hit.categories,
             source: crate::types::mod_info::ModSource::Modrinth,
             versions: hit.versions,
@@ -479,6 +576,11 @@ pub async fn search_shaderpacks(
             updated_at: hit.date_modified,
             client_side: None,
             server_side: None,
+            source_url: None,
+            issues_url: None,
+            wiki_url: None,
+            discord_url: None,
+            gallery: vec![],
         }
     }).collect())
 }
@@ -551,6 +653,13 @@ pub async fn install_shaderpack(
     tokio::fs::write(&target_path, &bytes).await.map_err(|e| e.to_string())?;
 
     tracing::info!("Shader pack installed successfully to {:?}", target_path);
+
+    // META-INF Entfernung deaktiviert - kann Probleme mit eingebetteten Assets verursachen
+    // if file.filename.ends_with(".zip") {
+    //     if let Err(e) = remove_meta_inf_from_zip(&target_path).await {
+    //         tracing::warn!("Failed to remove META-INF from {}: {}", file.filename, e);
+    //     }
+    // }
 
     Ok(())
 }
@@ -639,9 +748,11 @@ pub async fn search_modpacks(
             slug: hit.slug,
             name: hit.title,
             description: hit.description,
+            body: None,
             icon_url: hit.icon_url,
             author: hit.author,
             downloads: hit.downloads,
+            followers: None,
             categories: hit.categories,
             source: crate::types::mod_info::ModSource::Modrinth,
             versions: hit.versions,
@@ -651,7 +762,78 @@ pub async fn search_modpacks(
             updated_at: hit.date_modified,
             client_side: None,
             server_side: None,
+            source_url: None,
+            issues_url: None,
+            wiki_url: None,
+            discord_url: None,
+            gallery: vec![],
         }
     }).collect())
 }
 
+/// Entfernt nur Signatur-Dateien aus einer ZIP-Datei (Resource Pack, Shader Pack, etc.)
+async fn remove_meta_inf_from_zip(zip_path: &std::path::Path) -> Result<(), String> {
+    use std::io::{Read, Write};
+    use zip::write::FileOptions;
+
+    // Lese die originale ZIP
+    let zip_file = std::fs::File::open(zip_path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(zip_file).map_err(|e| e.to_string())?;
+
+    // Erstelle temporäre Datei
+    let temp_path = zip_path.with_extension("zip.tmp");
+    let temp_file = std::fs::File::create(&temp_path).map_err(|e| e.to_string())?;
+    let mut zip_writer = zip::ZipWriter::new(temp_file);
+
+    let mut removed_count = 0;
+
+    // Kopiere alle Dateien, aber überspringe nur Signatur-Dateien
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let name = file.name().to_string();
+
+        // Überspringe NUR Signatur-Dateien (.SF, .DSA, .RSA, .EC)
+        // Behalte aber andere META-INF Dateien (z.B. MANIFEST.MF, nested JARs)
+        let should_skip = name.starts_with("META-INF/") && (
+            name.ends_with(".SF") ||   // Signature File
+            name.ends_with(".DSA") ||  // Digital Signature
+            name.ends_with(".RSA") ||  // RSA Signature
+            name.ends_with(".EC")      // Elliptic Curve Signature
+        );
+
+        if should_skip {
+            tracing::debug!("Removing signature file: {}", name);
+            removed_count += 1;
+            continue;
+        }
+
+        // Kopiere andere Dateien
+        let options = FileOptions::default()
+            .compression_method(file.compression())
+            .unix_permissions(file.unix_mode().unwrap_or(0o755));
+
+        if name.ends_with('/') {
+            // Ordner
+            zip_writer.add_directory(&name, options).map_err(|e| e.to_string())?;
+        } else {
+            // Datei
+            zip_writer.start_file(&name, options).map_err(|e| e.to_string())?;
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer).map_err(|e| e.to_string())?;
+            zip_writer.write_all(&buffer).map_err(|e| e.to_string())?;
+        }
+    }
+
+    zip_writer.finish().map_err(|e| e.to_string())?;
+    drop(archive);
+
+    if removed_count > 0 {
+        tracing::info!("Removed {} signature files from ZIP", removed_count);
+    }
+
+    // Ersetze originale Datei mit bereinigter Version
+    tokio::fs::remove_file(zip_path).await.map_err(|e| e.to_string())?;
+    tokio::fs::rename(&temp_path, zip_path).await.map_err(|e| e.to_string())?;
+
+    Ok(())
+}

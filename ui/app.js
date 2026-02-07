@@ -40,6 +40,9 @@ let currentPage = 'profiles';
 let currentProfile = null;
 let profiles = [];
 let currentUsername = 'Guest';
+let openedFromProfile = false; // Trackt ob Content Browser von Profil geöffnet wurde
+let skipLoadProfiles = false; // Verhindert loadProfiles() wenn direkt zur Detail-Ansicht gewechselt wird
+let currentProfileSubTab = 'mods'; // Trackt welchen Content-Sub-Tab (mods/resourcepacks/shaderpacks) der User im Profil geöffnet hat
 let selectedFilters = {
     version: '',
     loader: '',
@@ -226,6 +229,33 @@ function switchPage(page) {
 
     currentPage = page;
 
+    // Wenn zur Profiles-Seite gewechselt wird, lade Übersicht (außer wenn skipLoadProfiles gesetzt ist)
+    if (page === 'profiles') {
+        if (!skipLoadProfiles) {
+            loadProfiles(); // Lädt die Profil-Übersicht
+        } else {
+            skipLoadProfiles = false; // Reset für nächstes Mal
+        }
+    }
+
+    // Wenn zum Content Browser gewechselt wird
+    if (page === 'mods') {
+        if (!openedFromProfile) {
+            // Von Hauptmenü geöffnet - lösche currentProfile und reset Filter
+            currentProfile = null;
+            // Reset Filter auf Standard ("All Loaders")
+            setTimeout(() => {
+                resetFiltersToDefault();
+            }, 100);
+            debugLog('Content Browser opened from main menu - filters reset to default', 'info');
+        } else {
+            // Von Profil geöffnet - currentProfile bleibt erhalten für Auto-Filter
+            debugLog('Content Browser opened from profile - auto-filters will be applied', 'info');
+        }
+        // Reset Flag für nächstes Mal
+        openedFromProfile = false;
+    }
+
     // Zeige Back-Button im Mod-Browser wenn von einem Profil kommend
     const backBtn = document.getElementById('back-to-profile-btn');
     if (backBtn) {
@@ -271,20 +301,18 @@ function switchPage(page) {
             applyProfileFilters(currentProfile);
         }
 
-        loadInstalledModIds().then(() => {
-            // Lade Mods neu mit aktuellem Cache
-            if (currentModSearchQuery) {
-                searchMods(currentModSearchQuery, currentModPage);
-            } else {
-                loadPopularMods(currentModPage);
-            }
-        });
+        // WICHTIG: Dieser Code wird NACH openContentBrowser/switchContentType ausgeführt!
+        // Daher sollte er NICHT den Content laden - das macht switchContentType bereits!
+        // Wir laden nur den installedModIds Cache.
+        loadInstalledModIds();
     }
 }
 
 // Wendet die Filter basierend auf dem Profil an
 function applyProfileFilters(profile) {
-    // Setze Minecraft Version Filter
+    debugLog('Applying profile filters for: ' + profile.name + ', ContentType: ' + currentContentType, 'info');
+
+    // Setze Minecraft Version Filter (für alle Content Types)
     const versionFilter = document.getElementById('filter-version');
     if (versionFilter && profile.minecraft_version) {
         versionFilter.value = profile.minecraft_version;
@@ -292,31 +320,78 @@ function applyProfileFilters(profile) {
         debugLog('Set version filter to: ' + profile.minecraft_version, 'info');
     }
 
-    // Setze Mod Loader Filter
-    const loaderName = profile.loader.loader;
-    if (loaderName && loaderName !== 'vanilla') {
-        // Finde den Button für den Loader
-        const loaderBtn = document.querySelector(`[data-loader="${loaderName}"]`);
-        if (loaderBtn) {
-            // Entferne active von allen Loader-Buttons
-            document.querySelectorAll('[data-loader]').forEach(b => b.classList.remove('active'));
-            // Setze den richtigen als active
-            loaderBtn.classList.add('active');
+    // Setze Mod Loader Filter NUR für Mods/Modpacks
+    if (currentContentType === 'mods' || currentContentType === 'modpacks') {
+        const loaderName = profile.loader.loader;
+        if (loaderName && loaderName !== 'vanilla') {
+            // Setze das Loader-Dropdown
+            const loaderSelect = document.getElementById('filter-loader');
+            if (loaderSelect) {
+                loaderSelect.value = loaderName;
+                debugLog('Set loader dropdown to: ' + loaderName, 'info');
+            }
+
+            // Finde und aktiviere den Button für den Loader (falls Buttons existieren)
+            const loaderBtn = document.querySelector(`[data-loader="${loaderName}"]`);
+            if (loaderBtn) {
+                // Entferne active von allen Loader-Buttons
+                document.querySelectorAll('[data-loader]').forEach(b => b.classList.remove('active'));
+                // Setze den richtigen als active
+                loaderBtn.classList.add('active');
+                debugLog('Set loader button to: ' + loaderName, 'info');
+            }
+
             selectedFilters.loader = loaderName;
-            debugLog('Set loader filter to: ' + loaderName, 'info');
+        } else {
+            // Vanilla = kein Loader-Filter
+            const loaderSelect = document.getElementById('filter-loader');
+            if (loaderSelect) {
+                loaderSelect.value = ''; // "All Loaders"
+            }
+            document.querySelectorAll('[data-loader]').forEach(b => b.classList.remove('active'));
+            selectedFilters.loader = '';
         }
-    } else {
-        // Vanilla = kein Loader-Filter
-        document.querySelectorAll('[data-loader]').forEach(b => b.classList.remove('active'));
-        selectedFilters.loader = '';
     }
+
+    // KEINE Suche triggern! loadPopularContent() wurde bereits von switchContentType() aufgerufen
+    debugLog('Filters applied, content already loaded by switchContentType()', 'info');
+}
+
+// Setzt alle Filter auf Standard zurück (für Content Browser vom Hauptmenü)
+function resetFiltersToDefault() {
+    debugLog('Resetting filters to default (All Loaders)', 'info');
+
+    // Reset Loader Filter
+    const loaderSelect = document.getElementById('filter-loader');
+    if (loaderSelect) {
+        loaderSelect.value = ''; // "All Loaders"
+    }
+
+    // Reset Loader Buttons
+    document.querySelectorAll('[data-loader]').forEach(b => b.classList.remove('active'));
+
+    // Reset selectedFilters
+    selectedFilters.loader = '';
+    selectedFilters.version = '';
+
+    // Reset Version Filter
+    const versionFilter = document.getElementById('filter-version');
+    if (versionFilter) {
+        versionFilter.value = '';
+    }
+
+    debugLog('Filters reset complete', 'info');
 }
 
 function backToProfileFromModBrowser() {
-    if (currentProfile) {
-        showProfileDetails(currentProfile.id);
+    if (currentProfile && currentProfile.id) {
+        const profileId = currentProfile.id; // Speichere ID bevor currentProfile gelöscht wird
+        skipLoadProfiles = true; // Überspringe loadProfiles() um Flash zu vermeiden
         switchPage('profiles');
+        // Zeige direkt die Detail-Ansicht (kein setTimeout mehr nötig!)
+        showProfileDetails(profileId);
     } else {
+        // Kein Profil gesetzt, gehe zur Hauptübersicht
         switchPage('profiles');
     }
 }
@@ -371,16 +446,25 @@ function renderProfiles() {
         return;
     }
 
+    // Sortiere Profile nach "Zuletzt gespielt" (neueste zuerst)
+    // Profile ohne last_played kommen ans Ende
+    const sortedProfiles = [...profiles].sort((a, b) => {
+        if (!a.last_played && !b.last_played) return 0;
+        if (!a.last_played) return 1;
+        if (!b.last_played) return -1;
+        return new Date(b.last_played) - new Date(a.last_played);
+    });
+
     // Profile-Cards + Create-Card am Ende
-    const profileCards = profiles.map(profile => {
+    const profileCards = sortedProfiles.map(profile => {
         // Modloader-Name formatieren (erster Buchstabe groß)
         const loaderName = profile.loader.loader.charAt(0).toUpperCase() + profile.loader.loader.slice(1);
         const loaderDisplay = profile.loader.loader === 'vanilla' ? 'Vanilla' : loaderName;
 
-        // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst Unicode
+        // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst App-Icon
         const iconHTML = profile.icon_path
-            ? `<img src="${profile.icon_path}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;" onerror="this.style.display='none'; this.parentElement.innerHTML='▪';">`
-            : '▪';
+            ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;" onerror="this.onerror=null; this.src='icon.png';">`
+            : `<img src="icon.png" alt="Default Icon" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;">`;
 
         return `
         <div class="profile-card" data-context-menu="profile" data-profile-id="${profile.id}"
@@ -464,8 +548,63 @@ function showProfileContextMenu(event, profileId) {
     setTimeout(() => document.addEventListener('click', closeMenu), 10);
 }
 
+// RAM-Slider Hilfsfunktionen
+function updateMemoryDisplay(value) {
+    const display = document.getElementById('memory-value-display');
+    if (display) {
+        display.textContent = `${value} MB`;
+    }
+
+    // Update Fortschrittsbalken
+    const progressBar = document.getElementById('memory-slider-progress');
+    const slider = document.getElementById('edit-profile-memory');
+
+    if (progressBar && slider) {
+        const min = parseFloat(slider.min);
+        const max = parseFloat(slider.max);
+        const percentage = ((value - min) / (max - min)) * 100;
+        progressBar.style.width = `${percentage}%`;
+    }
+}
+
+async function initMemorySlider(currentMemory) {
+    try {
+        // Hole System-RAM
+        const systemMemoryMB = await invoke('get_system_memory');
+        console.log('[Memory Slider] System RAM:', systemMemoryMB, 'MB');
+
+        const slider = document.getElementById('edit-profile-memory');
+        const maxLabel = document.getElementById('max-memory-label');
+
+        if (slider && systemMemoryMB) {
+            // Setze Maximum auf 90% des System-RAMs (sinnvolle Obergrenze)
+            const maxMemory = Math.floor(systemMemoryMB * 0.9);
+            slider.max = maxMemory;
+
+            if (maxLabel) {
+                maxLabel.textContent = `${Math.floor(maxMemory / 1024)} GB`;
+            }
+
+            // Setze aktuellen Wert
+            slider.value = currentMemory || 4096;
+
+            // Initialisiere Fortschrittsbalken
+            updateMemoryDisplay(slider.value);
+
+            console.log('[Memory Slider] Initialized - Max:', maxMemory, 'MB, Current:', slider.value, 'MB');
+        }
+    } catch (error) {
+        console.error('[Memory Slider] Failed to get system memory:', error);
+        // Fallback: Behalte Standard-Maximum und initialisiere trotzdem
+        const slider = document.getElementById('edit-profile-memory');
+        if (slider) {
+            updateMemoryDisplay(slider.value);
+        }
+    }
+}
+
 // Öffne Profil-Einstellungen als eigenes Modal-Fenster
-function openProfileSettings(profileId) {
+async function openProfileSettings(profileId) {
     const menu = document.getElementById('profile-context-menu');
     if (menu) menu.remove();
 
@@ -498,7 +637,7 @@ function openProfileSettings(profileId) {
             <!-- Header -->
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid var(--bg-light);">
                 <h2 style="color: var(--gold); margin: 0; font-size: 18px;">⚙️ Profil-Einstellungen</h2>
-                <button onclick="closeProfileSettingsModal()" 
+                <button onclick="closeProfileSettingsModal('${profile.id}')" 
                         style="background: none; border: none; color: var(--text-secondary); font-size: 24px; cursor: pointer; padding: 0; line-height: 1;">
                     ✕
                 </button>
@@ -510,7 +649,7 @@ function openProfileSettings(profileId) {
                 <!-- Profil-Bild -->
                 <div style="display: flex; gap: 15px; align-items: center; background: var(--bg-light); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
                     <div id="profile-icon-preview" style="width: 60px; height: 60px; background: var(--bg-medium); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 30px; overflow: hidden;">
-                        ${profile.icon_path ? `<img src="${profile.icon_path}" style="width: 100%; height: 100%; object-fit: cover;" alt="Icon">` : '▪'}
+                        ${profile.icon_path ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.onerror=null; this.src='icon.png';">` : `<img src="icon.png" alt="Default Icon" style="width: 100%; height: 100%; object-fit: cover;">`}
                     </div>
                     <div style="flex: 1;">
                         <input type="file" id="profile-icon-input" accept="image/*" onchange="previewProfileIcon(event)" style="display: none;">
@@ -566,10 +705,83 @@ function openProfileSettings(profileId) {
                 
                 <!-- Speicher -->
                 <div style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 13px;">Speicher (MB)</label>
-                    <input type="number" value="${profile.memory_mb || 4096}" id="edit-profile-memory"
-                           style="width: 100%; padding: 10px; background: var(--bg-light); border: none; border-radius: 6px; color: var(--text-primary); font-size: 14px;">
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 13px;">
+                        RAM-Zuweisung: <span id="memory-value-display" style="color: var(--gold); font-weight: bold;">${profile.memory_mb || 4096} MB</span>
+                    </label>
+                    <div style="width: 100%; position: relative; height: 20px; margin: 0 10px;">
+                        <!-- Fortschrittsbalken unter dem Slider -->
+                        <div style="position: absolute; width: calc(100% - 20px); height: 8px; background: var(--bg-light); border-radius: 4px; top: 6px; left: 0; right: 0; pointer-events: none;">
+                            <div id="memory-slider-progress" style="height: 100%; background: var(--gold); border-radius: 4px; width: 0%; transition: width 0.1s ease;"></div>
+                        </div>
+                        <!-- Slider -->
+                        <input type="range" 
+                               id="edit-profile-memory" 
+                               min="512" 
+                               max="16384" 
+                               step="512"
+                               value="${profile.memory_mb || 4096}"
+                               oninput="updateMemoryDisplay(this.value)"
+                               style="width: calc(100% - 20px); cursor: pointer; -webkit-appearance: none; appearance: none; background: transparent; outline: none; position: absolute; top: 0; left: 0; z-index: 2;">
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 12px; padding: 0 10px; font-size: 11px; color: var(--text-secondary);">
+                        <span>512 MB</span>
+                        <span id="max-memory-label">16 GB</span>
+                    </div>
                 </div>
+                
+                <style>
+                    /* Slider Thumb */
+                    #edit-profile-memory::-webkit-slider-thumb {
+                        -webkit-appearance: none;
+                        appearance: none;
+                        width: 20px;
+                        height: 20px;
+                        background: var(--gold);
+                        cursor: pointer;
+                        border-radius: 50%;
+                        border: 3px solid var(--bg-dark);
+                        box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+                        transition: all 0.2s;
+                        position: relative;
+                        z-index: 3;
+                    }
+                    
+                    #edit-profile-memory::-webkit-slider-thumb:hover {
+                        transform: scale(1.15);
+                        box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+                    }
+                    
+                    #edit-profile-memory::-moz-range-thumb {
+                        width: 14px;
+                        height: 14px;
+                        background: var(--gold);
+                        cursor: pointer;
+                        border-radius: 50%;
+                        border: 3px solid var(--bg-dark);
+                        box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+                        transition: all 0.2s;
+                    }
+                    
+                    #edit-profile-memory::-moz-range-thumb:hover {
+                        transform: scale(1.15);
+                        box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+                    }
+                    
+                    /* Track (unsichtbar/transparent) */
+                    #edit-profile-memory::-webkit-slider-runnable-track {
+                        width: 100%;
+                        height: 20px;
+                        background: transparent;
+                        border: none;
+                    }
+                    
+                    #edit-profile-memory::-moz-range-track {
+                        width: 100%;
+                        height: 20px;
+                        background: transparent;
+                        border: none;
+                    }
+                </style>
                 
                 <!-- Java Argumente -->
                 <div style="margin-bottom: 15px;">
@@ -627,30 +839,23 @@ function openProfileSettings(profileId) {
                     </span>
                 </div>
             </div>
-            
-            <!-- Footer -->
-            <div style="padding: 15px 20px; border-top: 1px solid var(--bg-light); display: flex; justify-content: flex-end; gap: 10px;">
-                <button class="btn btn-secondary" onclick="closeProfileSettingsModal()" style="padding: 10px 20px;">
-                    Abbrechen
-                </button>
-                <button class="btn" onclick="saveProfileSettingsFromModal('${profile.id}')" style="padding: 10px 25px;">
-                    💾 Speichern
-                </button>
-            </div>
         </div>
     `;
 
     document.body.appendChild(modal);
 
-    // Schließen bei Klick auf Hintergrund
+    // Initialisiere RAM-Slider mit System-RAM
+    initMemorySlider(profile.memory_mb || 4096);
+
+    // Schließen bei Klick auf Hintergrund (mit Auto-Save)
     modal.addEventListener('click', (e) => {
-        if (e.target === modal) closeProfileSettingsModal();
+        if (e.target === modal) closeProfileSettingsModal(profile.id);
     });
 
-    // Escape-Taste zum Schließen
+    // Escape-Taste zum Schließen (mit Auto-Save)
     const escHandler = (e) => {
         if (e.key === 'Escape') {
-            closeProfileSettingsModal();
+            closeProfileSettingsModal(profile.id);
             document.removeEventListener('keydown', escHandler);
         }
     };
@@ -660,7 +865,12 @@ function openProfileSettings(profileId) {
     setTimeout(() => populateEditVersionSelect(), 50);
 }
 
-function closeProfileSettingsModal() {
+async function closeProfileSettingsModal(profileId) {
+    // Auto-Save: Speichere Änderungen vor dem Schließen
+    if (profileId) {
+        await saveProfileSettingsFromModal(profileId, true); // true = silent mode
+    }
+
     const modal = document.getElementById('profile-settings-modal');
     if (modal) modal.remove();
     selectedProfileIcon = null;
@@ -773,7 +983,7 @@ async function syncSettingsToProfile(profileId) {
     }
 }
 
-async function saveProfileSettingsFromModal(profileId) {
+async function saveProfileSettingsFromModal(profileId, silent = false) {
     const nameInput = document.getElementById('edit-profile-name');
     const memoryInput = document.getElementById('edit-profile-memory');
     const mcVersionSelect = document.getElementById('edit-profile-mc-version');
@@ -782,7 +992,9 @@ async function saveProfileSettingsFromModal(profileId) {
     const javaArgsTextarea = document.getElementById('edit-profile-java-args');
 
     if (!nameInput || !memoryInput) {
-        showToast('Fehler: Formular nicht gefunden', 'error', 3000);
+        if (!silent) {
+            showToast('Fehler: Formular nicht gefunden', 'error', 3000);
+        }
         return;
     }
 
@@ -802,15 +1014,18 @@ async function saveProfileSettingsFromModal(profileId) {
             updates: updates
         });
 
-        closeProfileSettingsModal();
-        showToast('Profil-Einstellungen gespeichert!', 'success', 3000);
+        if (!silent) {
+            showToast('Profil-Einstellungen gespeichert!', 'success', 3000);
+        }
         selectedProfileIcon = null;
 
         // Reload profiles
         await loadProfiles();
     } catch (error) {
         debugLog('Failed to save settings: ' + error, 'error');
-        showToast('Fehler beim Speichern: ' + error, 'error', 5000);
+        if (!silent) {
+            showToast('Fehler beim Speichern: ' + error, 'error', 5000);
+        }
     }
 }
 
@@ -977,15 +1192,16 @@ function showProfileDetails(profileId) {
     }
 
     currentProfile = profile;
+    currentProfileSubTab = 'mods'; // Reset auf Mods beim Öffnen eines Profils
 
     // Erstelle Details-View
     const grid = document.getElementById('profiles-grid');
     if (!grid) return;
 
-    // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst Unicode
+    // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst App-Icon
     const iconHTML = profile.icon_path
-        ? `<img src="${profile.icon_path}" style="width: 64px; height: 64px; object-fit: cover; border-radius: 8px;" onerror="this.style.display='none'; this.parentElement.innerHTML='▪';">`
-        : '▪';
+        ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 64px; height: 64px; object-fit: cover; border-radius: 8px;" onerror="this.onerror=null; this.src='icon.png';">`
+        : `<img src="icon.png" alt="Default Icon" style="width: 64px; height: 64px; object-fit: cover; border-radius: 8px;">`;
 
     grid.innerHTML = `
         <div style="grid-column: 1 / -1;">
@@ -1111,6 +1327,14 @@ function switchMainCategory(categoryName) {
                 loadInstalledMods(currentProfile.id);
                 startModsWatcher(currentProfile.id);
                 stopLogsAutoRefresh(); // Stoppe Logs-Refresh
+            } else if (categoryName === 'worlds') {
+                loadWorlds(currentProfile.id);
+                stopLogsAutoRefresh();
+                stopModsWatcher();
+            } else if (categoryName === 'servers') {
+                loadServers(currentProfile.id);
+                stopLogsAutoRefresh();
+                stopModsWatcher();
             } else if (categoryName === 'logs') {
                 loadLogs(currentProfile.id);
                 startLogsAutoRefresh(currentProfile.id); // Starte Auto-Refresh für Logs
@@ -1163,20 +1387,12 @@ function renderMainCategoryContent(categoryName, profile) {
 
         case 'worlds':
             return `
-                <div style="text-align: center; padding: 60px 20px;">
-                    <div style="font-size: 48px; margin-bottom: 20px; opacity: 0.5;">🌍</div>
-                    <h3 style="color: var(--text-secondary); margin: 0;">Worlds</h3>
-                    <p style="color: var(--text-secondary); margin-top: 10px;">Kommt bald...</p>
-                </div>
+                ${renderProfileTabContent('worlds', profile)}
             `;
 
         case 'servers':
             return `
-                <div style="text-align: center; padding: 60px 20px;">
-                    <div style="font-size: 48px; margin-bottom: 20px; opacity: 0.5;">🖥️</div>
-                    <h3 style="color: var(--text-secondary); margin: 0;">Servers</h3>
-                    <p style="color: var(--text-secondary); margin-top: 10px;">Kommt bald...</p>
-                </div>
+                ${renderProfileTabContent('servers', profile)}
             `;
 
         case 'logs':
@@ -1189,6 +1405,9 @@ function renderMainCategoryContent(categoryName, profile) {
 
 function switchContentSubTab(subtabName) {
     debugLog('Switching to content sub-tab: ' + subtabName, 'info');
+
+    // Speichere aktuellen Sub-Tab
+    currentProfileSubTab = subtabName;
 
     // Update button styles
     document.querySelectorAll('.content-sub-tab').forEach(btn => {
@@ -1216,6 +1435,10 @@ function switchContentSubTab(subtabName) {
             loadInstalledResourcePacks(currentProfile.id);
         } else if (subtabName === 'shaderpacks') {
             loadInstalledShaderPacks(currentProfile.id);
+        } else if (subtabName === 'worlds') {
+            loadWorlds(currentProfile.id);
+        } else if (subtabName === 'servers') {
+            loadServers(currentProfile.id);
         }
     }
 }
@@ -1402,6 +1625,49 @@ function renderProfileTabContent(tabName, profile) {
                     <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                         <div class="spinner" style="margin: 0 auto 15px;"></div>
                         <p>Lade Shader Packs...</p>
+                    </div>
+                </div>
+            `;
+
+        case 'worlds':
+            stopModsWatcher();
+            return `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="color: var(--gold); margin: 0;">🌍 Welten</h3>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary" onclick="refreshWorlds('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
+                            🔄
+                        </button>
+                        <button class="btn btn-secondary" onclick="openWorldsFolder('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
+                            📁
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="profile-worlds-list" style="display: grid; gap: 8px; max-height: 500px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
+                    <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        <div class="spinner" style="margin: 0 auto 15px;"></div>
+                        <p>Lade Welten...</p>
+                    </div>
+                </div>
+            `;
+
+        case 'servers':
+            stopModsWatcher();
+            return `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="color: var(--gold); margin: 0;">🖥️ Server</h3>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary" onclick="refreshServers('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
+                            🔄
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="profile-servers-list" style="display: grid; gap: 8px; max-height: 500px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
+                    <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        <div class="spinner" style="margin: 0 auto 15px;"></div>
+                        <p>Lade Server...</p>
                     </div>
                 </div>
             `;
@@ -1848,10 +2114,13 @@ async function loadInstalledMods(profileId) {
             const hasUpdate = mod.has_update;
 
             return `
-            <div class="installed-mod-card" data-filename="${mod.filename}" style="background: var(--bg-dark); border: 1px solid ${mod.disabled ? '#666' : 'var(--bg-light)'}; border-radius: 8px; padding: 12px; display: flex; align-items: center; gap: 12px; ${mod.disabled ? 'opacity: 0.6;' : ''} transition: all 0.2s;">
+            <div class="installed-mod-card" data-filename="${mod.filename}" 
+                 onclick="if(!event.target.closest('input, button')) { showModDetailsFromProfile('${mod.mod_id || ''}', '${mod.source || 'modrinth'}'); }"
+                 style="background: var(--bg-dark); border: 1px solid ${mod.disabled ? '#666' : 'var(--bg-light)'}; border-radius: 8px; padding: 12px; display: flex; align-items: center; gap: 12px; ${mod.disabled ? 'opacity: 0.6;' : ''} transition: all 0.2s; cursor: pointer;">
                 <!-- Checkbox -->
                 <input type="checkbox" class="mod-checkbox" data-filename="${mod.filename}" 
                        onchange="toggleModSelection('${mod.filename}')"
+                       onclick="event.stopPropagation();"
                        style="width: 18px; height: 18px; cursor: pointer; flex-shrink: 0; accent-color: var(--gold);">
                 
                 <!-- Icon -->
@@ -1879,11 +2148,11 @@ async function loadInstalledMods(profileId) {
                 
                 <!-- Actions -->
                 <div style="display: flex; gap: 6px; flex-shrink: 0;">
-                    <button class="btn btn-secondary" onclick="toggleMod('${profileId}', '${mod.filename}', ${mod.disabled})" 
+                    <button class="btn btn-secondary" onclick="event.stopPropagation(); toggleMod('${profileId}', '${mod.filename}', ${mod.disabled})" 
                             style="padding: 5px 10px; font-size: 11px;" title="${mod.disabled ? 'Aktivieren' : 'Deaktivieren'}">
                         ${mod.disabled ? '✓' : '||'}
                     </button>
-                    <button class="btn btn-secondary" onclick="deleteMod('${profileId}', '${mod.filename}')" 
+                    <button class="btn btn-secondary" onclick="event.stopPropagation(); deleteMod('${profileId}', '${mod.filename}')" 
                             style="padding: 5px 10px; font-size: 11px; color: #f44336;" title="Löschen">
                         ×
                     </button>
@@ -2004,9 +2273,6 @@ async function bulkDeleteMods(profileId) {
         return;
     }
 
-    if (!confirm(`Möchtest du wirklich ${selectedMods.size} Mods löschen?`)) {
-        return;
-    }
 
     const count = selectedMods.size;
     debugLog('Bulk deleting ' + count + ' mods', 'info');
@@ -2147,9 +2413,6 @@ async function toggleMod(profileId, filename, isCurrentlyDisabled) {
 }
 
 async function deleteMod(profileId, filename) {
-    if (!confirm(`Möchtest du "${filename}" wirklich löschen?`)) {
-        return;
-    }
 
     debugLog('Deleting mod: ' + filename, 'info');
 
@@ -2265,19 +2528,15 @@ async function refreshResourcePacks(profileId) {
 }
 
 async function deleteResourcePack(profileId, name, isFolder) {
-    if (!confirm(`Resource Pack "${name}" wirklich löschen?`)) {
-        return;
-    }
+    debugLog('Deleting resource pack: ' + name, 'info');
 
     try {
-        const profile = profiles.find(p => p.id === profileId);
-        if (!profile) return;
+        await invoke('delete_resourcepack', { profileId, name });
 
-        const rpPath = `${profile.game_dir}/resourcepacks/${name}`;
+        debugLog('Resource Pack deleted successfully', 'success');
+        loadInstalledResourcePacks(profileId);
 
-        // TODO: Backend-Command für Löschen hinzufügen
-        // Für jetzt zeige nur Nachricht
-        showToast('Löschfunktion wird implementiert...', 'info', 2000);
+        showToast(`Resource Pack "${name}" wurde gelöscht!`, 'success', 3000);
 
     } catch (error) {
         debugLog('Failed to delete resource pack: ' + error, 'error');
@@ -2290,6 +2549,7 @@ function browseResourcePacks(profileId) {
     const profile = profiles.find(p => p.id === profileId);
     if (profile) {
         currentProfile = profile;
+        openedFromProfile = true; // Wichtig! Sonst werden Filter zurückgesetzt
     }
 
     // Wechsle zu Resource Packs
@@ -2298,18 +2558,64 @@ function browseResourcePacks(profileId) {
 }
 
 function openContentBrowser(profileId) {
-    // Speichere aktuelles Profil und wechsle zum Content Browser
+    // Speichere aktuelles Profil und setze Flag VOR switchPage
     const profile = profiles.find(p => p.id === profileId);
     if (profile) {
         currentProfile = profile;
+        openedFromProfile = true; // Setze Flag BEVOR switchPage aufgerufen wird
+        debugLog('Opening Content Browser from profile: ' + profile.name + ', SubTab: ' + currentProfileSubTab, 'info');
     }
 
-    // Wechsle zum Content Browser (default: Mods)
+    // Wechsle zum Content Browser
     switchPage('mods');
-    switchContentType('mods');
 
-    // Verstecke Modpacks Button wenn aus Profil geöffnet
+    // Setze Filter ZUERST (bevor Content geladen wird!)
+    if (currentProfile) {
+        // Setze nur selectedFilters, OHNE DOM zu ändern (das passiert später)
+        selectedFilters.version = currentProfile.minecraft_version;
+
+        // Loader nur für Mods/Modpacks
+        if (currentProfileSubTab === 'mods' || currentProfileSubTab === 'modpacks') {
+            const loaderName = currentProfile.loader.loader;
+            if (loaderName && loaderName !== 'vanilla') {
+                selectedFilters.loader = loaderName;
+            } else {
+                selectedFilters.loader = '';
+            }
+        } else {
+            selectedFilters.loader = ''; // Kein Loader für Resource Packs/Shader Packs
+        }
+
+        debugLog('Pre-set filters: version=' + selectedFilters.version + ', loader=' + selectedFilters.loader, 'info');
+    }
+
+    // JETZT wechsle zum richtigen Content Type (mit bereits gesetzten Filtern!)
+    switchContentType(currentProfileSubTab);
+
+    debugLog('Content Browser opened: currentContentType = ' + currentContentType, 'info');
+
+    // Update DOM-Elemente (Dropdowns etc.) nach dem Content geladen wurde
     setTimeout(() => {
+        if (currentProfile) {
+            // Update Version Dropdown
+            const versionFilter = document.getElementById('filter-version');
+            if (versionFilter && currentProfile.minecraft_version) {
+                versionFilter.value = currentProfile.minecraft_version;
+            }
+
+            // Update Loader Dropdown (nur für Mods/Modpacks)
+            if (currentContentType === 'mods' || currentContentType === 'modpacks') {
+                const loaderName = currentProfile.loader.loader;
+                const loaderSelect = document.getElementById('filter-loader');
+                if (loaderSelect && loaderName && loaderName !== 'vanilla') {
+                    loaderSelect.value = loaderName;
+                } else if (loaderSelect) {
+                    loaderSelect.value = '';
+                }
+            }
+        }
+
+        // Verstecke Modpacks Button wenn aus Profil geöffnet
         const modpacksBtn = document.querySelector('[data-content-type="modpacks"]');
         if (modpacksBtn && currentProfile) {
             modpacksBtn.style.display = 'none';
@@ -2382,10 +2688,225 @@ async function refreshShaderPacks(profileId) {
 }
 
 async function deleteShaderPack(profileId, name) {
-    if (!confirm(`Shader Pack "${name}" wirklich löschen?`)) {
-        return;
+    debugLog('Deleting shader pack: ' + name, 'info');
+
+    try {
+        await invoke('delete_shaderpack', { profileId, name });
+
+        debugLog('Shader Pack deleted successfully', 'success');
+        loadInstalledShaderPacks(profileId);
+
+        showToast(`Shader Pack "${name}" wurde gelöscht!`, 'success', 3000);
+
+    } catch (error) {
+        debugLog('Failed to delete shader pack: ' + error, 'error');
+        showToast('Fehler beim Löschen: ' + error, 'error', 3000);
     }
-    showToast('Löschfunktion wird implementiert...', 'info', 2000);
+}
+
+// ==================== WORLDS ====================
+
+async function loadWorlds(profileId) {
+    const list = document.getElementById('profile-worlds-list');
+    if (!list) return;
+
+    try {
+        const worlds = await invoke('get_worlds', { profileId });
+
+        if (worlds.length === 0) {
+            list.innerHTML = `
+                <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
+                    <div style="font-size: 48px; margin-bottom: 15px;">🌍</div>
+                    <p>Keine Welten gefunden</p>
+                    <p style="font-size: 14px; margin-top: 10px;">
+                        Starte Minecraft und erstelle eine Welt
+                    </p>
+                </div>
+            `;
+            return;
+        }
+
+        const worldsHTML = worlds.map(world => {
+            // Formatiere letzte Spielzeit
+            const lastPlayed = world.last_played > 0
+                ? formatTimestamp(world.last_played)
+                : 'Unbekannt';
+
+            // Formatiere Größe
+            const sizeStr = formatBytes(world.size_bytes);
+
+            // Icon oder Fallback
+            const iconHtml = world.icon_base64
+                ? `<img src="${world.icon_base64}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">`
+                : `<div style="font-size: 32px;">🌍</div>`;
+
+            return `
+                <div style="background: var(--bg-light); padding: 12px; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
+                    <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--bg-dark); border-radius: 4px; overflow: hidden;">
+                        ${iconHtml}
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="color: var(--text-primary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            ${world.name}
+                        </div>
+                        <div style="color: var(--text-secondary); font-size: 11px; display: flex; gap: 10px; flex-wrap: wrap;">
+                            <span>🎮 ${world.game_mode}</span>
+                            <span>📅 ${lastPlayed}</span>
+                            <span>📦 ${sizeStr}</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-gold" onclick="launchWorld('${profileId}', '${world.folder_name}')" 
+                            style="padding: 8px 16px; font-size: 12px;">
+                        ▶️ Play
+                    </button>
+                </div>
+            `;
+        }).join('');
+
+        list.innerHTML = worldsHTML;
+
+    } catch (error) {
+        debugLog('Failed to load worlds: ' + error, 'error');
+        list.innerHTML = `
+            <div style="text-align: center; padding: 40px; color: #f44336;">
+                Fehler beim Laden: ${error}
+            </div>
+        `;
+    }
+}
+
+async function refreshWorlds(profileId) {
+    await loadWorlds(profileId);
+    showToast('Welten aktualisiert', 'success', 2000);
+}
+
+async function openWorldsFolder(profileId) {
+    try {
+        await invoke('open_profile_folder', { profileId: profileId, subfolder: 'saves' });
+        showToast('Welten-Ordner wird geöffnet...', 'info', 2000);
+    } catch (error) {
+        debugLog('Failed to open worlds folder: ' + error, 'error');
+        showToast('Fehler beim Öffnen: ' + error, 'error', 3000);
+    }
+}
+
+async function launchWorld(profileId, worldName) {
+    try {
+        showToast(`Starte Welt "${worldName}"...`, 'info', 3000);
+        await invoke('launch_world', { profileId, worldName });
+        showToast(`Minecraft startet mit Welt "${worldName}"`, 'success', 3000);
+    } catch (error) {
+        debugLog('Failed to launch world: ' + error, 'error');
+        showToast('Fehler beim Starten: ' + error, 'error', 5000);
+    }
+}
+
+// ==================== SERVERS ====================
+
+async function loadServers(profileId) {
+    const list = document.getElementById('profile-servers-list');
+    if (!list) return;
+
+    try {
+        const servers = await invoke('get_servers', { profileId });
+
+        if (servers.length === 0) {
+            list.innerHTML = `
+                <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
+                    <div style="font-size: 48px; margin-bottom: 15px;">🖥️</div>
+                    <p>Keine Server gespeichert</p>
+                    <p style="font-size: 14px; margin-top: 10px;">
+                        Starte Minecraft und füge Server hinzu
+                    </p>
+                </div>
+            `;
+            return;
+        }
+
+        const serversHTML = servers.map(server => {
+            // Icon oder Fallback
+            const iconHtml = server.icon_base64
+                ? `<img src="${server.icon_base64}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">`
+                : `<div style="font-size: 32px;">🖥️</div>`;
+
+            // MOTD oder IP als Beschreibung
+            const description = server.motd || server.ip;
+
+            return `
+                <div style="background: var(--bg-light); padding: 12px; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
+                    <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--bg-dark); border-radius: 4px; overflow: hidden;">
+                        ${iconHtml}
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="color: var(--text-primary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            ${server.name}
+                        </div>
+                        <div style="color: var(--text-secondary); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            ${description}
+                        </div>
+                    </div>
+                    <button class="btn btn-gold" onclick="launchServer('${profileId}', '${server.ip}')" 
+                            style="padding: 8px 16px; font-size: 12px;">
+                        ▶️ Join
+                    </button>
+                </div>
+            `;
+        }).join('');
+
+        list.innerHTML = serversHTML;
+
+    } catch (error) {
+        debugLog('Failed to load servers: ' + error, 'error');
+        list.innerHTML = `
+            <div style="text-align: center; padding: 40px; color: #f44336;">
+                Fehler beim Laden: ${error}
+            </div>
+        `;
+    }
+}
+
+async function refreshServers(profileId) {
+    await loadServers(profileId);
+    showToast('Server aktualisiert', 'success', 2000);
+}
+
+async function launchServer(profileId, serverIp) {
+    try {
+        showToast(`Verbinde zu Server "${serverIp}"...`, 'info', 3000);
+        await invoke('launch_server', { profileId, serverIp });
+        showToast(`Minecraft startet und verbindet zu "${serverIp}"`, 'success', 3000);
+    } catch (error) {
+        debugLog('Failed to launch server: ' + error, 'error');
+        showToast('Fehler beim Verbinden: ' + error, 'error', 5000);
+    }
+}
+
+// Helper: Formatiert Bytes in lesbare Größe
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// Helper: Formatiert Timestamp in lesbares Datum
+function formatTimestamp(timestamp) {
+    // Minecraft speichert LastPlayed in Millisekunden
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return 'Unbekannt';
+
+    const now = new Date();
+    const diff = now - date;
+
+    // Relative Zeit
+    if (diff < 60000) return 'Gerade eben';
+    if (diff < 3600000) return `Vor ${Math.floor(diff / 60000)} Min.`;
+    if (diff < 86400000) return `Vor ${Math.floor(diff / 3600000)} Std.`;
+    if (diff < 604800000) return `Vor ${Math.floor(diff / 86400000)} Tagen`;
+
+    // Absolutes Datum
+    return date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 // Profil-Bild Vorschau
@@ -2921,7 +3442,13 @@ function setupSearch() {
 
 // Content Type Switching
 function switchContentType(type) {
+    debugLog('switchContentType called with type: ' + type, 'warn');
+    debugLog('currentContentType BEFORE: ' + currentContentType, 'warn');
+
     currentContentType = type;
+
+    debugLog('currentContentType AFTER: ' + currentContentType, 'warn');
+
     currentModPage = 0;
     currentModSearchQuery = '';
 
@@ -2964,14 +3491,22 @@ function switchContentType(type) {
 }
 
 function loadPopularContent() {
+    debugLog('loadPopularContent called with currentContentType: ' + currentContentType, 'warn');
+
     if (currentContentType === 'mods') {
+        debugLog('Loading MODS', 'warn');
         loadPopularMods();
     } else if (currentContentType === 'resourcepacks') {
+        debugLog('Loading RESOURCEPACKS', 'warn');
         loadPopularResourcePacks();
     } else if (currentContentType === 'shaderpacks') {
+        debugLog('Loading SHADERPACKS', 'warn');
         loadPopularShaderPacks();
     } else if (currentContentType === 'modpacks') {
+        debugLog('Loading MODPACKS', 'warn');
         loadPopularModpacks();
+    } else {
+        debugLog('UNKNOWN currentContentType: ' + currentContentType, 'error');
     }
 }
 
@@ -2983,9 +3518,8 @@ async function loadModrinthCategories() {
     categoriesContainer.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px; padding: 10px;">Loading categories...</div>';
 
     try {
-        // Modrinth API: Alle Kategorien laden
-        const response = await fetch('https://api.modrinth.com/v2/tag/category');
-        const allCategories = await response.json();
+        // Lade Kategorien über Backend (kein CORS-Problem!)
+        const allCategories = await invoke('get_modrinth_categories');
 
         // Filtern nach Content-Type
         const projectType = currentContentType === 'mods' ? 'mod' :
@@ -3149,9 +3683,8 @@ async function loadEnvironmentIcons() {
     try {
         debugLog('Loading environment icons...', 'info');
 
-        // Lade alle Kategorien von Modrinth
-        const response = await fetch('https://api.modrinth.com/v2/tag/category');
-        const categories = await response.json();
+        // Lade alle Kategorien von Modrinth über Backend
+        const categories = await invoke('get_modrinth_categories');
 
         // Finde die Environment-Kategorien für Mods
         const envCategories = {
@@ -3215,6 +3748,9 @@ async function loadPopularResourcePacks(page = 0) {
 
     // Lade installierte Resource Packs für Markierung
     await loadInstalledResourcePackNames();
+
+    // Lade auch installierte Mods für den Fall dass User zu Mods wechselt
+    await loadInstalledModIds();
 
     try {
         const packs = await invoke('search_resourcepacks', {
@@ -3318,6 +3854,51 @@ async function installResourcePack(packId, source) {
     }
 }
 
+async function installShaderPack(packId, source) {
+    let profile = currentProfile;
+
+    if (!profile) {
+        profile = await showProfileSelectDialog();
+        if (!profile) return;
+    }
+
+    debugLog('Installing shader pack ' + packId + ' to profile ' + profile.name, 'info');
+
+    // Markiere Button als "installierend"
+    const btn = event.target;
+    const originalText = btn.textContent;
+    btn.textContent = '...';
+    btn.disabled = true;
+
+    try {
+        await invoke('install_shaderpack', {
+            profileId: profile.id,
+            packId: packId,
+            versionId: null
+        });
+
+        debugLog('Shader pack installed successfully!', 'success');
+        showToast(`Shader Pack erfolgreich zu "${profile.name}" hinzugefügt!`, 'success', 3000);
+
+        // Button als installiert markieren mit korrektem Styling
+        btn.textContent = '✓ Installiert';
+        btn.disabled = true;
+        btn.style.background = 'var(--bg-light)';
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.opacity = '0.7';
+        btn.style.cursor = 'not-allowed';
+
+        // Cache aktualisieren
+        await loadInstalledShaderPackNames();
+
+    } catch (error) {
+        debugLog('Install failed: ' + error, 'error');
+        showToast('Shader Pack-Installation fehlgeschlagen: ' + error, 'error', 5000);
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+}
+
 // ==================== SHADER PACKS ====================
 
 async function loadPopularShaderPacks(page = 0) {
@@ -3331,6 +3912,9 @@ async function loadPopularShaderPacks(page = 0) {
 
     // Lade installierte Shader für Markierung
     await loadInstalledShaderPackNames();
+
+    // Lade auch installierte Mods für den Fall dass User zu Mods wechselt
+    await loadInstalledModIds();
 
     try {
         const packs = await invoke('search_shaderpacks', {
@@ -3656,7 +4240,9 @@ function renderMods(mods, page = 0) {
         }
 
         return `
-            <div class="mod-card" data-mod-id="${mod.id}" style="${isInstalled ? 'opacity: 0.7; border-color: #555;' : ''}">
+            <div class="mod-card" data-mod-id="${mod.id}" data-mod-source="${mod.source || 'modrinth'}" 
+                 style="${isInstalled ? 'opacity: 0.7; border-color: #555;' : ''} cursor: pointer;"
+                 onclick="handleModCardClick(event, '${mod.id}', '${mod.source || 'modrinth'}')">
                 <div class="mod-icon">
                     ${iconHTML}
                 </div>
@@ -4443,5 +5029,690 @@ function formatNumber(num) {
         return (num / 1000).toFixed(1) + 'K';
     }
     return num.toString();
+}
+
+// ==================== MOD DETAILS ====================
+
+let currentModDetails = null;
+let modDetailsFromBrowser = false;
+
+function handleModCardClick(event, modId, source) {
+    // Prüfe ob der Click auf einem Button oder Link war
+    const target = event.target;
+    const isButton = target.tagName === 'BUTTON' || target.closest('button');
+    const isLink = target.tagName === 'A' || target.closest('a');
+
+    if (isButton || isLink) {
+        // Button/Link wurde geklickt - nicht zur Details-Seite navigieren
+        event.stopPropagation();
+        return;
+    }
+
+    // Ansonsten öffne Mod-Details
+    showModDetails(modId, source);
+}
+
+// Funktion zum Öffnen von Mod-Details vom Profile Content aus
+async function showModDetailsFromProfile(modId, source = 'modrinth') {
+    modDetailsFromBrowser = false;  // Kam NICHT vom Browser, sondern vom Profile
+    await showModDetails(modId, source);
+}
+
+async function showModDetails(modId, source = 'modrinth') {
+    debugLog(`Opening mod details for ${modId} from ${source}`);
+
+    // Standardmäßig vom Mod Browser (wird von showModDetailsFromProfile überschrieben)
+    if (typeof modDetailsFromBrowser === 'undefined') {
+        modDetailsFromBrowser = true;
+    }
+
+    // Setze Tab zurück auf Description und Filter zurück
+    currentModDetailsTab = 'description';
+
+    // Initialisiere Filter mit Profil-Werten wenn vorhanden
+    if (currentProfile) {
+        debugLog(`Current Profile: ${currentProfile.name}, MC: ${currentProfile.minecraft_version}, Loader: ${currentProfile.loader?.loader}`, 'info');
+
+        modDetailsVersionFilter.mcVersion = currentProfile.minecraft_version || '';
+
+        // Loader-Name direkt aus Profil (wie im Content Browser)
+        const loaderName = currentProfile.loader?.loader;
+        if (loaderName && loaderName !== 'vanilla') {
+            modDetailsVersionFilter.loader = loaderName.toLowerCase();
+        } else {
+            modDetailsVersionFilter.loader = '';
+        }
+
+        modDetailsVersionFilter.includeSnapshots = false;
+        debugLog(`Initialized version filter - MC: ${modDetailsVersionFilter.mcVersion}, Loader: ${modDetailsVersionFilter.loader}`, 'info');
+    } else {
+        modDetailsVersionFilter = { loader: '', mcVersion: '', includeSnapshots: false };
+    }
+
+    // Wechsle zur Details-Seite
+    switchPage('mod-details');
+
+    const content = document.getElementById('mod-details-content');
+    if (!content) return;
+
+    content.innerHTML = '<div class="loading"><div class="spinner" style="margin: 20px auto;"></div><p>Loading mod details...</p></div>';
+
+    try {
+        // Lade Mod-Details von der API
+        const mod = await invoke('get_mod_info', { modId, source });
+        const versions = await invoke('get_mod_versions', { modId, source });
+
+        currentModDetails = { mod, versions, source };
+
+        await renderModDetails(mod, versions);
+    } catch (error) {
+        debugLog('Failed to load mod details: ' + error, 'error');
+        content.innerHTML = `<div class="loading">Failed to load mod details: ${error}</div>`;
+    }
+}
+
+// Track current tab and filter state for mod details
+let currentModDetailsTab = 'description';
+let modDetailsVersionFilter = { loader: '', mcVersion: '', includeSnapshots: false };
+
+async function renderModDetails(mod, versions) {
+    const content = document.getElementById('mod-details-content');
+    const nameHeader = document.getElementById('mod-details-name');
+
+    if (nameHeader) nameHeader.textContent = mod.name;
+
+    // Environment Labels
+    const clientSide = mod.client_side;
+    const serverSide = mod.server_side;
+    let envLabel = '';
+
+    if (clientSide === 'required' && serverSide === 'required') {
+        envLabel = 'Client & Server';
+    } else if ((clientSide === 'optional' && serverSide === 'optional') ||
+        (clientSide === 'required' && serverSide === 'optional') ||
+        (clientSide === 'optional' && serverSide === 'required')) {
+        envLabel = 'Client or Server';
+    } else if ((clientSide === 'required' || clientSide === 'optional') &&
+        (serverSide === 'unsupported' || serverSide === 'unknown' || !serverSide)) {
+        envLabel = 'Client';
+    } else if ((serverSide === 'required' || serverSide === 'optional') &&
+        (clientSide === 'unsupported' || clientSide === 'unknown' || !clientSide)) {
+        envLabel = 'Server';
+    }
+
+    // Sammle alle einzigartigen Loader und MC-Versionen
+    const allLoaders = new Set();
+    const allMcVersions = new Set();
+    versions.forEach(v => {
+        if (v.loaders) v.loaders.forEach(l => allLoaders.add(l.toLowerCase()));
+        // Nur Release-Versionen zu den Filtern hinzufügen
+        const versionType = (v.version_type || 'release').toLowerCase();
+        if (versionType === 'release' && v.game_versions) {
+            v.game_versions.forEach(gv => {
+                // Zusätzlicher Check: Filteriere Snapshot-ähnliche Versionen
+                if (!gv.toLowerCase().includes('snapshot') &&
+                    !gv.toLowerCase().includes('pre') &&
+                    !gv.toLowerCase().includes('rc') &&
+                    !gv.toLowerCase().includes('alpha') &&
+                    !gv.toLowerCase().includes('beta')) {
+                    allMcVersions.add(gv);
+                }
+            });
+        }
+    });
+
+    // Sortiere MC-Versionen (neueste zuerst)
+    const sortedMcVersions = Array.from(allMcVersions).sort((a, b) => {
+        const partsA = a.split('.').map(n => parseInt(n) || 0);
+        const partsB = b.split('.').map(n => parseInt(n) || 0);
+        for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+            const diff = (partsB[i] || 0) - (partsA[i] || 0);
+            if (diff !== 0) return diff;
+        }
+        return 0;
+    });
+
+    const html = `
+        <!-- Header Section -->
+        <div style="display: grid; grid-template-columns: 80px 1fr auto; gap: 20px; margin-bottom: 20px; background: var(--bg-medium); padding: 20px; border-radius: 12px;">
+            <!-- Mod Icon -->
+            <div style="width: 80px; height: 80px; flex-shrink: 0;">
+                ${mod.icon_url ? 
+                    `<img src="${mod.icon_url}" alt="${mod.name}" 
+                         style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;"
+                         onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\\'font-size: 48px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: var(--bg-dark); border-radius: 8px;\\'>▪</div>';">` :
+                    `<div style="font-size: 48px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: var(--bg-dark); border-radius: 8px;">▪</div>`
+                }
+            </div>
+            
+            <!-- Mod Info -->
+            <div>
+                <h2 style="margin: 0 0 6px 0; font-size: 24px; color: var(--text-primary);">${mod.name}</h2>
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                    <span style="color: var(--text-secondary); font-size: 13px;">by</span>
+                    <a href="https://modrinth.com/user/${mod.author}" 
+                       target="_blank"
+                       style="color: var(--gold); font-size: 13px; text-decoration: underline;">
+                        ${mod.author}
+                    </a>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 12px;">
+                    ${envLabel ? `<span style="background: var(--bg-dark); color: var(--gold); font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 600; border: 1px solid var(--gold);">${envLabel}</span>` : ''}
+                    ${mod.categories && mod.categories.length > 0 ? mod.categories.slice(0, 5).map(cat => 
+                        `<span style="background: var(--bg-dark); color: var(--text-secondary); font-size: 10px; padding: 3px 8px; border-radius: 4px;">${cat}</span>`
+                    ).join('') : ''}
+                </div>
+                <p style="color: var(--text-secondary); font-size: 14px; margin: 0; line-height: 1.6;">
+                    ${mod.description}
+                </p>
+            </div>
+            
+            <!-- Right Side: Install Button, Last Updated, Downloads -->
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 12px; min-width: 200px;">
+                ${currentProfile ? 
+                    `<button class="btn btn-primary" onclick="installModFromDetails('${mod.id}')" 
+                             style="width: 100%; padding: 14px 24px; font-size: 15px; font-weight: 600;">
+                        ⬇ Install
+                    </button>` :
+                    `<button class="btn btn-secondary" disabled 
+                             style="width: 100%; padding: 14px 24px; font-size: 15px; opacity: 0.5; cursor: not-allowed;">
+                        Select Profile First
+                    </button>`
+                }
+                
+                <div style="text-align: right; padding: 8px 0;">
+                    <div style="color: var(--text-secondary); font-size: 11px; margin-bottom: 4px;">Last Updated</div>
+                    <div style="color: var(--text-primary); font-size: 13px;">${new Date(mod.updated_at).toLocaleDateString()}</div>
+                </div>
+                
+                <div style="text-align: right; padding: 8px 0;">
+                    <div style="color: var(--text-primary); font-size: 24px; font-weight: 700;">${formatNumber(mod.downloads)}</div>
+                    <div style="color: var(--text-secondary); font-size: 12px;">downloads</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Tabs Navigation -->
+        <div style="display: flex; gap: 5px; margin-bottom: 15px; background: var(--bg-medium); padding: 6px; border-radius: 10px;">
+            <button class="mod-details-tab ${currentModDetailsTab === 'description' ? 'active' : ''}" 
+                    onclick="switchModDetailsTab('description')"
+                    style="flex: 1; padding: 12px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;
+                           background: ${currentModDetailsTab === 'description' ? 'var(--gold)' : 'transparent'};
+                           color: ${currentModDetailsTab === 'description' ? 'var(--bg-dark)' : 'var(--text-secondary)'};">
+                📄 Description
+            </button>
+            <button class="mod-details-tab ${currentModDetailsTab === 'versions' ? 'active' : ''}" 
+                    onclick="switchModDetailsTab('versions')"
+                    style="flex: 1; padding: 12px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;
+                           background: ${currentModDetailsTab === 'versions' ? 'var(--gold)' : 'transparent'};
+                           color: ${currentModDetailsTab === 'versions' ? 'var(--bg-dark)' : 'var(--text-secondary)'};">
+                📦 Versions (${versions.length})
+            </button>
+            <button class="mod-details-tab ${currentModDetailsTab === 'gallery' ? 'active' : ''}" 
+                    onclick="switchModDetailsTab('gallery')"
+                    style="flex: 1; padding: 12px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;
+                           background: ${currentModDetailsTab === 'gallery' ? 'var(--gold)' : 'transparent'};
+                           color: ${currentModDetailsTab === 'gallery' ? 'var(--bg-dark)' : 'var(--text-secondary)'};">
+                🖼️ Gallery
+            </button>
+        </div>
+        
+        <!-- Tab Content -->
+        <div id="mod-details-tab-content">
+            <div class="loading"><div class="spinner" style="margin: 20px auto;"></div></div>
+        </div>
+    `;
+
+    content.innerHTML = html;
+
+    // Rendere Tab-Content separat (async)
+    const tabContent = await renderModDetailsTabContent(mod, versions, allLoaders, sortedMcVersions);
+    document.getElementById('mod-details-tab-content').innerHTML = tabContent;
+}
+
+async function renderModDetailsTabContent(mod, versions, allLoaders, sortedMcVersions) {
+    switch (currentModDetailsTab) {
+        case 'description':
+            return renderDescriptionTab(mod);
+        case 'versions':
+            return await renderVersionsTab(mod, versions, allLoaders, sortedMcVersions);
+        case 'gallery':
+            return renderGalleryTab(mod);
+        default:
+            return renderDescriptionTab(mod);
+    }
+}
+
+function renderDescriptionTab(mod) {
+    // Body/Long Description - falls verfügbar, sonst kurze Beschreibung
+    const longDescription = mod.body || mod.description || 'No description available.';
+
+    // Konvertiere Markdown zu einfachem HTML (basic)
+    const formattedDescription = formatMarkdown(longDescription);
+
+    return `
+        <div style="background: var(--bg-medium); padding: 24px; border-radius: 12px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 16px 0; font-size: 18px; color: var(--text-primary);">About this project</h3>
+            <div style="color: var(--text-secondary); font-size: 14px; line-height: 1.8;">
+                ${formattedDescription}
+            </div>
+        </div>
+        
+        <!-- Links Section -->
+        <div style="background: var(--bg-medium); padding: 20px; border-radius: 12px;">
+            <h3 style="margin: 0 0 12px 0; font-size: 16px; color: var(--text-primary);">External Resources</h3>
+            <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                <a href="https://modrinth.com/mod/${mod.slug || mod.id}" target="_blank" 
+                   class="btn btn-secondary" style="padding: 10px 16px; text-decoration: none; font-size: 13px;">
+                    🌐 Modrinth
+                </a>
+                ${mod.source_url ? 
+                    `<a href="${mod.source_url}" target="_blank" 
+                        class="btn btn-secondary" style="padding: 10px 16px; text-decoration: none; font-size: 13px;">
+                        💻 Source Code
+                    </a>` : ''
+                }
+                ${mod.issues_url ? 
+                    `<a href="${mod.issues_url}" target="_blank" 
+                        class="btn btn-secondary" style="padding: 10px 16px; text-decoration: none; font-size: 13px;">
+                        🐛 Issues
+                    </a>` : ''
+                }
+                ${mod.wiki_url ? 
+                    `<a href="${mod.wiki_url}" target="_blank" 
+                        class="btn btn-secondary" style="padding: 10px 16px; text-decoration: none; font-size: 13px;">
+                        📚 Wiki
+                    </a>` : ''
+                }
+                ${mod.discord_url ? 
+                    `<a href="${mod.discord_url}" target="_blank" 
+                        class="btn btn-secondary" style="padding: 10px 16px; text-decoration: none; font-size: 13px;">
+                        💬 Discord
+                    </a>` : ''
+                }
+            </div>
+        </div>
+    `;
+}
+
+async function renderVersionsTab(mod, versions, allLoaders, sortedMcVersions) {
+    // Hole installierte Mods vom aktuellen Profil
+    let installedMods = [];
+    let installedVersion = null;
+
+    if (currentProfile) {
+        try {
+            installedMods = await invoke('get_installed_mods', { profileId: currentProfile.id });
+            // Finde installierte Version dieser Mod
+            const installedMod = installedMods.find(m => m.mod_id === mod.id);
+            if (installedMod && installedMod.version) {
+                installedVersion = installedMod.version;
+            }
+        } catch (error) {
+            debugLog('Failed to get installed mods: ' + error, 'error');
+        }
+    }
+
+    // Filtere Versionen basierend auf Filter
+    let filteredVersions = versions;
+
+    if (modDetailsVersionFilter.loader) {
+        filteredVersions = filteredVersions.filter(v => {
+            if (!v.loaders) return false;
+
+            const selectedLoader = modDetailsVersionFilter.loader.toLowerCase();
+
+            // Wenn Quilt ausgewählt ist, akzeptiere auch Fabric-Mods
+            if (selectedLoader === 'quilt') {
+                return v.loaders.some(l => {
+                    const loader = l.toLowerCase();
+                    return loader === 'quilt' || loader === 'fabric';
+                });
+            }
+
+            // Sonst normaler Vergleich
+            return v.loaders.some(l => l.toLowerCase() === selectedLoader);
+        });
+    }
+
+    if (modDetailsVersionFilter.mcVersion) {
+        filteredVersions = filteredVersions.filter(v =>
+            v.game_versions && v.game_versions.includes(modDetailsVersionFilter.mcVersion)
+        );
+    }
+
+    // Filtere Snapshots aus wenn nicht aktiviert
+    if (!modDetailsVersionFilter.includeSnapshots) {
+        filteredVersions = filteredVersions.filter(v => {
+            const versionType = (v.version_type || 'release').toLowerCase();
+            return versionType === 'release';
+        });
+    }
+
+    // Sortiere Versionen nach Datum (neueste zuerst)
+    filteredVersions.sort((a, b) => new Date(b.published) - new Date(a.published));
+
+    debugLog(`Creating loader options. Available loaders: ${Array.from(allLoaders).join(', ')}, Selected: ${modDetailsVersionFilter.loader}`, 'info');
+
+    const loaderOptions = Array.from(allLoaders).map(l =>
+        `<option value="${l}" ${modDetailsVersionFilter.loader === l ? 'selected' : ''}>${l.charAt(0).toUpperCase() + l.slice(1)}</option>`
+    ).join('');
+
+    const mcVersionOptions = sortedMcVersions.map(v =>
+        `<option value="${v}" ${modDetailsVersionFilter.mcVersion === v ? 'selected' : ''}>${v}</option>`
+    ).join('');
+
+    return `
+        <div style="background: var(--bg-medium); padding: 20px; border-radius: 12px;">
+            <!-- Filter Bar -->
+            <div style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label style="color: var(--text-secondary); font-size: 13px; white-space: nowrap;">Loader:</label>
+                    <select id="version-filter-loader" onchange="filterModVersions()"
+                            style="padding: 8px 12px; background: var(--bg-dark); border: 1px solid var(--bg-light); border-radius: 6px; color: var(--text-primary); font-size: 13px; min-width: 120px;">
+                        <option value="">All Loaders</option>
+                        ${loaderOptions}
+                    </select>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label style="color: var(--text-secondary); font-size: 13px; white-space: nowrap;">MC Version:</label>
+                    <select id="version-filter-mc" onchange="filterModVersions()"
+                            style="padding: 8px 12px; background: var(--bg-dark); border: 1px solid var(--bg-light); border-radius: 6px; color: var(--text-primary); font-size: 13px; min-width: 100px;">
+                        <option value="">All Versions</option>
+                        ${mcVersionOptions}
+                    </select>
+                </div>
+                <button class="btn btn-secondary" 
+                        onclick="toggleSnapshotFilter()"
+                        style="padding: 8px 16px; font-size: 12px; display: flex; align-items: center; gap: 6px; ${modDetailsVersionFilter.includeSnapshots ? 'background: var(--gold); color: var(--bg-dark);' : ''}">
+                    ${modDetailsVersionFilter.includeSnapshots ? '✓' : ''} Snapshots
+                </button>
+                <div style="flex: 1;"></div>
+                <span style="color: var(--text-secondary); font-size: 12px;">
+                    ${filteredVersions.length} version${filteredVersions.length !== 1 ? 's' : ''} found
+                </span>
+            </div>
+            
+            <!-- Versions List -->
+            ${filteredVersions.length === 0 ? 
+                `<p style="color: var(--text-secondary); padding: 40px; text-align: center;">
+                    No versions match your filter criteria.
+                </p>` :
+                `<div style="max-height: 500px; overflow-y: auto;">
+                    ${filteredVersions.map(version => {
+                        const versionType = version.version_type || 'release';
+                        const typeColor = versionType === 'release' ? '#4caf50' : 
+                                         versionType === 'beta' ? '#ff9800' : '#f44336';
+                        const typeLabel = versionType.charAt(0).toUpperCase() + versionType.slice(1);
+                        
+                        // Prüfe ob diese Version installiert ist
+                        const isInstalled = installedVersion === version.version_number;
+                        
+                        return `
+                        <div style="background: var(--bg-dark); padding: 16px; border-radius: 8px; margin-bottom: 10px; border-left: 3px solid ${typeColor};">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+                                <div style="flex: 1;">
+                                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px; flex-wrap: wrap;">
+                                        <span style="font-weight: 600; color: var(--text-primary); font-size: 15px;">${version.name || version.version_number}</span>
+                                        <span style="background: ${typeColor}; color: white; font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: 600;">${typeLabel}</span>
+                                        ${isInstalled ? 
+                                            `<span style="background: var(--gold); color: var(--bg-dark); font-size: 10px; padding: 3px 8px; border-radius: 3px; font-weight: 700;">✓ INSTALLED</span>` 
+                                            : ''
+                                        }
+                                    </div>
+                                    <span style="color: var(--text-secondary); font-size: 12px;">${version.version_number}</span>
+                                </div>
+                                ${currentProfile ? 
+                                    (isInstalled ? 
+                                        `<button class="btn btn-secondary" disabled style="padding: 8px 20px; font-size: 13px; opacity: 0.6;">
+                                            ✓ Installed
+                                        </button>` :
+                                        `<button class="btn btn-primary" onclick="installModVersion('${mod.id}', '${version.id}')" 
+                                                 style="padding: 8px 20px; font-size: 13px;">
+                                            Install
+                                        </button>`
+                                    ) :
+                                    `<button class="btn btn-secondary" disabled style="padding: 8px 20px; font-size: 13px; opacity: 0.5; cursor: not-allowed;">
+                                        Select Profile
+                                    </button>`
+                                }
+                            </div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; margin-bottom: 8px;">
+                                ${version.loaders ? version.loaders.map(loader => {
+                                    const loaderColors = {
+                                        'fabric': '#DBB98F',
+                                        'forge': '#3E4758',
+                                        'neoforge': '#F28500',
+                                        'quilt': '#9B59B6'
+                                    };
+                                    const bgColor = loaderColors[loader.toLowerCase()] || 'var(--gold)';
+                                    return `<span style="background: ${bgColor}; color: ${loader.toLowerCase() === 'forge' ? 'white' : 'var(--bg-dark)'}; padding: 3px 8px; border-radius: 4px; font-weight: 600;">${loader}</span>`;
+                                }).join('') : ''}
+                            </div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 4px; font-size: 10px; margin-bottom: 8px;">
+                                ${version.game_versions ? version.game_versions.slice(0, 8).map(gv => 
+                                    `<span style="background: var(--bg-medium); color: var(--text-secondary); padding: 2px 6px; border-radius: 3px;">${gv}</span>`
+                                ).join('') : ''}
+                                ${version.game_versions && version.game_versions.length > 8 ? 
+                                    `<span style="color: var(--text-secondary);">+${version.game_versions.length - 8} more</span>` : ''
+                                }
+                            </div>
+                            <div style="display: flex; gap: 15px; color: var(--text-secondary); font-size: 11px;">
+                                <span>📅 ${new Date(version.published).toLocaleDateString()}</span>
+                                ${version.downloads ? `<span>⬇️ ${formatNumber(version.downloads)}</span>` : ''}
+                            </div>
+                        </div>
+                    `}).join('')}
+                </div>`
+            }
+        </div>
+    `;
+}
+
+function renderGalleryTab(mod) {
+    // Gallery/Screenshots - falls verfügbar
+    const gallery = mod.gallery || [];
+
+    if (gallery.length === 0) {
+        return `
+            <div style="background: var(--bg-medium); padding: 60px 24px; border-radius: 12px; text-align: center;">
+                <div style="font-size: 48px; margin-bottom: 15px;">🖼️</div>
+                <h3 style="margin: 0 0 10px 0; font-size: 18px; color: var(--text-primary);">No Images Available</h3>
+                <p style="color: var(--text-secondary); font-size: 14px;">
+                    This project doesn't have any gallery images yet.
+                </p>
+            </div>
+        `;
+    }
+
+    return `
+        <div style="background: var(--bg-medium); padding: 20px; border-radius: 12px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px;">
+                ${gallery.map((img, index) => `
+                    <div style="border-radius: 8px; overflow: hidden; cursor: pointer; position: relative;"
+                         onclick="openGalleryImage('${img.url || img}', ${index})">
+                        <img src="${img.url || img}" alt="${img.title || `Screenshot ${index + 1}`}" 
+                             style="width: 100%; height: 180px; object-fit: cover; display: block; transition: transform 0.3s;"
+                             onmouseover="this.style.transform='scale(1.05)'"
+                             onmouseout="this.style.transform='scale(1)'"
+                             onerror="this.parentElement.style.display='none'">
+                        ${img.title ? `
+                            <div style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.8)); padding: 10px;">
+                                <span style="color: white; font-size: 12px;">${img.title}</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+async function switchModDetailsTab(tab) {
+    currentModDetailsTab = tab;
+
+    // Re-render nur den Tab-Content, nicht die ganze Seite
+    if (currentModDetails) {
+        const { mod, versions } = currentModDetails;
+
+        // Sammle alle einzigartigen Loader und MC-Versionen
+        const allLoaders = new Set();
+        const allMcVersions = new Set();
+        versions.forEach(v => {
+            if (v.loaders) v.loaders.forEach(l => allLoaders.add(l.toLowerCase()));
+            if (v.game_versions) v.game_versions.forEach(gv => allMcVersions.add(gv));
+        });
+
+        // Sortiere MC-Versionen
+        const sortedMcVersions = Array.from(allMcVersions).sort((a, b) => {
+            const partsA = a.split('.').map(n => parseInt(n) || 0);
+            const partsB = b.split('.').map(n => parseInt(n) || 0);
+            for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+                const diff = (partsB[i] || 0) - (partsA[i] || 0);
+                if (diff !== 0) return diff;
+            }
+            return 0;
+        });
+
+        // Update Tab buttons
+        document.querySelectorAll('.mod-details-tab').forEach(btn => {
+            const isActive = btn.textContent.toLowerCase().includes(tab);
+            btn.style.background = isActive ? 'var(--gold)' : 'transparent';
+            btn.style.color = isActive ? 'var(--bg-dark)' : 'var(--text-secondary)';
+        });
+
+        // Update content
+        const tabContent = document.getElementById('mod-details-tab-content');
+        if (tabContent) {
+            tabContent.innerHTML = '<div class="loading"><div class="spinner" style="margin: 20px auto;"></div></div>';
+            const content = await renderModDetailsTabContent(mod, versions, allLoaders, sortedMcVersions);
+            tabContent.innerHTML = content;
+
+            // Setze Dropdown-Werte explizit nach dem Rendern (für Versions-Tab)
+            if (tab === 'versions') {
+                setTimeout(() => {
+                    const loaderSelect = document.getElementById('version-filter-loader');
+                    const mcSelect = document.getElementById('version-filter-mc');
+
+                    if (loaderSelect && modDetailsVersionFilter.loader) {
+                        loaderSelect.value = modDetailsVersionFilter.loader;
+                        debugLog(`Set loader dropdown to: ${modDetailsVersionFilter.loader}`, 'info');
+                    }
+                    if (mcSelect && modDetailsVersionFilter.mcVersion) {
+                        mcSelect.value = modDetailsVersionFilter.mcVersion;
+                        debugLog(`Set MC version dropdown to: ${modDetailsVersionFilter.mcVersion}`, 'info');
+                    }
+                }, 50);
+            }
+        }
+    }
+}
+
+function filterModVersions() {
+    const loaderSelect = document.getElementById('version-filter-loader');
+    const mcSelect = document.getElementById('version-filter-mc');
+
+    modDetailsVersionFilter.loader = loaderSelect ? loaderSelect.value : '';
+    modDetailsVersionFilter.mcVersion = mcSelect ? mcSelect.value : '';
+
+    // Re-render versions tab
+    switchModDetailsTab('versions');
+}
+
+function toggleSnapshotFilter() {
+    modDetailsVersionFilter.includeSnapshots = !modDetailsVersionFilter.includeSnapshots;
+    // Re-render versions tab
+    switchModDetailsTab('versions');
+}
+
+function openGalleryImage(url, index) {
+    // Öffne Bild in neuem Tab oder Modal
+    window.open(url, '_blank');
+}
+
+// Einfacher Markdown zu HTML Konverter
+function formatMarkdown(text) {
+    if (!text) return '';
+
+    return text
+        // Headers
+        .replace(/^### (.*$)/gim, '<h4 style="color: var(--text-primary); margin: 20px 0 10px 0;">$1</h4>')
+        .replace(/^## (.*$)/gim, '<h3 style="color: var(--text-primary); margin: 20px 0 10px 0;">$1</h3>')
+        .replace(/^# (.*$)/gim, '<h2 style="color: var(--text-primary); margin: 20px 0 10px 0;">$1</h2>')
+        // Bold & Italic
+        .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong style="color: var(--text-primary);">$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        // Links
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color: var(--gold);">$1</a>')
+        // Images
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; border-radius: 8px; margin: 10px 0;">')
+        // Code blocks
+        .replace(/```[\s\S]*?```/g, match => {
+            const code = match.replace(/```\w*\n?/g, '').replace(/```/g, '');
+            return `<pre style="background: var(--bg-dark); padding: 15px; border-radius: 8px; overflow-x: auto; font-family: monospace; font-size: 13px; margin: 10px 0;"><code>${code}</code></pre>`;
+        })
+        // Inline code
+        .replace(/`([^`]+)`/g, '<code style="background: var(--bg-dark); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 13px;">$1</code>')
+        // Lists
+        .replace(/^\s*[-*]\s+(.*)$/gim, '<li style="margin-left: 20px;">$1</li>')
+        // Line breaks
+        .replace(/\n\n/g, '</p><p style="margin: 10px 0;">')
+        .replace(/\n/g, '<br>');
+}
+
+async function installModVersion(modId, versionId) {
+    if (!currentProfile) {
+        alert('Please select a profile first');
+        return;
+    }
+
+    try {
+        debugLog(`Installing mod version ${versionId} to profile ${currentProfile.id}`);
+
+        await invoke('install_mod', {
+            profileId: currentProfile.id,
+            modId: modId,
+            versionId: versionId,
+            source: currentModDetails.source
+        });
+
+        debugLog('Mod installed successfully!', 'success');
+        alert('Mod installed successfully!');
+
+        // Reload mod details to update install status
+        if (currentModDetails) {
+            await showModDetails(modId, currentModDetails.source);
+        }
+    } catch (error) {
+        debugLog('Failed to install mod: ' + error, 'error');
+        alert('Failed to install mod: ' + error);
+    }
+}
+
+function backFromModDetails() {
+    if (modDetailsFromBrowser) {
+        // Kam vom Mod Browser
+        switchPage('mods');
+        modDetailsFromBrowser = false;
+    } else {
+        // Kam vom Profile Content Menu - verwende gleiche Logik wie backToProfileFromModBrowser
+        if (currentProfile && currentProfile.id) {
+            const profileId = currentProfile.id; // Speichere ID bevor currentProfile gelöscht wird
+            skipLoadProfiles = true; // Überspringe loadProfiles() um Flash zu vermeiden
+            switchPage('profiles');
+            // Zeige direkt die Detail-Ansicht (kein setTimeout mehr nötig!)
+            showProfileDetails(profileId);
+        } else {
+            // Kein Profil gesetzt, gehe zur Hauptübersicht
+            switchPage('profiles');
+        }
+    }
+    currentModDetails = null;
+}
+
+// Legacy-Funktion für Rückwärtskompatibilität
+function backToModBrowser() {
+    backFromModDetails();
 }
 

@@ -348,7 +348,18 @@ pub async fn get_installed_mods(profile_id: String) -> Result<Vec<InstalledMod>,
         return Ok(Vec::new());
     }
 
+    // Erstelle modinfos/ Ordner und migriere alte Metadaten
+    let modinfos_dir = profile.game_dir.join("modinfos");
+    if let Err(e) = std::fs::create_dir_all(&modinfos_dir) {
+        tracing::warn!("Failed to create modinfos directory: {}", e);
+    } else {
+        // Migriere alte .jar.meta.json Dateien aus mods/ nach modinfos/
+        migrate_old_metadata(&mods_dir, &modinfos_dir);
+    }
     let mut installed_mods = Vec::new();
+
+    // Erstelle modinfos/ Ordner falls nicht vorhanden
+    let modinfos_dir = profile.game_dir.join("modinfos");
 
     let entries = std::fs::read_dir(&mods_dir).map_err(|e| e.to_string())?;
 
@@ -367,18 +378,21 @@ pub async fn get_installed_mods(profile_id: String) -> Result<Vec<InstalledMod>,
 
                 let disabled = filename.ends_with(".disabled");
 
-                // Versuche Metadaten-Datei zu lesen
-                let meta_path = if disabled {
-                    // Für .disabled Dateien: filename.disabled -> filename.jar.meta.json
-                    let base = filename.trim_end_matches(".disabled");
-                    mods_dir.join(format!("{}.meta.json", base))
+                // Suche Metadaten im modinfos/ Ordner
+                let meta_filename = if disabled {
+                    // Für .disabled Dateien: filename.disabled -> filename.json
+                    let base = filename.trim_end_matches(".disabled").trim_end_matches(".jar");
+                    format!("{}.json", base)
                 } else {
-                    path.with_extension("jar.meta.json")
+                    // Für normale JARs: filename.jar -> filename.json
+                    filename.trim_end_matches(".jar").to_string() + ".json"
                 };
+
+                let meta_path = modinfos_dir.join(&meta_filename);
 
                 let (mut name, mut version, mut mod_id, mut icon_url) = (None, None, None, None);
 
-                // Versuche Metadaten zu laden
+                // Versuche Metadaten zu laden aus modinfos/
                 if meta_path.exists() {
                     if let Ok(meta_content) = std::fs::read_to_string(&meta_path) {
                         if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&meta_content) {
@@ -536,6 +550,74 @@ pub async fn delete_mod(profile_id: String, filename: String) -> Result<(), Stri
 
     std::fs::remove_file(&mod_path).map_err(|e| e.to_string())?;
     tracing::info!("Mod deleted: {}", filename);
+
+    // Lösche auch die Metadaten-Datei aus modinfos/
+    let meta_filename = filename.trim_end_matches(".jar").to_string() + ".json";
+    let meta_path = profile.game_dir.join("modinfos").join(&meta_filename);
+
+    if meta_path.exists() {
+        if let Err(e) = std::fs::remove_file(&meta_path) {
+            tracing::warn!("Failed to delete metadata file: {}", e);
+        } else {
+            tracing::info!("Metadata deleted: {}", meta_filename);
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_resourcepack(profile_id: String, name: String) -> Result<(), String> {
+    use crate::core::profiles::ProfileManager;
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    let rp_path = profile.game_dir.join("resourcepacks").join(&name);
+
+    if !rp_path.exists() {
+        return Err(format!("Resource Pack nicht gefunden: {}", name));
+    }
+
+    // Prüfe ob es ein Ordner oder eine Datei ist
+    if rp_path.is_dir() {
+        std::fs::remove_dir_all(&rp_path).map_err(|e| e.to_string())?;
+    } else {
+        std::fs::remove_file(&rp_path).map_err(|e| e.to_string())?;
+    }
+
+    tracing::info!("Resource Pack deleted: {}", name);
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_shaderpack(profile_id: String, name: String) -> Result<(), String> {
+    use crate::core::profiles::ProfileManager;
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    let sp_path = profile.game_dir.join("shaderpacks").join(&name);
+
+    if !sp_path.exists() {
+        return Err(format!("Shader Pack nicht gefunden: {}", name));
+    }
+
+    // Prüfe ob es ein Ordner oder eine Datei ist
+    if sp_path.is_dir() {
+        std::fs::remove_dir_all(&sp_path).map_err(|e| e.to_string())?;
+    } else {
+        std::fs::remove_file(&sp_path).map_err(|e| e.to_string())?;
+    }
+
+    tracing::info!("Shader Pack deleted: {}", name);
 
     Ok(())
 }
@@ -1093,6 +1175,144 @@ fn parse_option_line(line: &str) -> Option<(String, String)> {
         Some((key, value))
     } else {
         None
+    }
+}
+
+// ==================== WORLDS ====================
+
+#[tauri::command]
+pub async fn get_worlds(profile_id: String) -> Result<Vec<crate::core::minecraft::worlds::WorldInfo>, String> {
+    use crate::core::profiles::ProfileManager;
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    crate::core::minecraft::worlds::get_worlds(&profile.game_dir)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn launch_world(profile_id: String, world_name: String) -> Result<(), String> {
+    use crate::core::profiles::ProfileManager;
+    use crate::core::minecraft::MinecraftLauncher;
+    use crate::gui::auth::AUTH_STATE;
+
+    tracing::info!("Launching world '{}' for profile '{}'", world_name, profile_id);
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?
+        .clone();
+
+    // Hole aktiven Account
+    let state = AUTH_STATE.lock().await;
+    let active_uuid = state.active_account.clone()
+        .ok_or_else(|| "No active account".to_string())?;
+    let account = state.accounts.iter()
+        .find(|a| a.uuid == active_uuid)
+        .ok_or_else(|| "Account not found".to_string())?
+        .clone();
+    drop(state); // Unlock
+
+    // Starte Minecraft mit --quickPlaySingleplayer Argument
+    let launcher = MinecraftLauncher::new().map_err(|e| e.to_string())?;
+
+    launcher.launch_with_extra_args(
+        &profile,
+        &account.username,
+        &account.uuid,
+        Some(&account.access_token),
+        vec!["--quickPlaySingleplayer".to_string(), world_name]
+    ).await.map_err(|e| e.to_string())
+}
+
+// ==================== SERVERS ====================
+
+#[tauri::command]
+pub async fn get_servers(profile_id: String) -> Result<Vec<crate::core::minecraft::worlds::ServerInfo>, String> {
+    use crate::core::profiles::ProfileManager;
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    crate::core::minecraft::worlds::get_servers(&profile.game_dir)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn launch_server(profile_id: String, server_ip: String) -> Result<(), String> {
+    use crate::core::profiles::ProfileManager;
+    use crate::core::minecraft::MinecraftLauncher;
+    use crate::gui::auth::AUTH_STATE;
+
+    tracing::info!("Launching server '{}' for profile '{}'", server_ip, profile_id);
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?
+        .clone();
+
+    // Hole aktiven Account
+    let state = AUTH_STATE.lock().await;
+    let active_uuid = state.active_account.clone()
+        .ok_or_else(|| "No active account".to_string())?;
+    let account = state.accounts.iter()
+        .find(|a| a.uuid == active_uuid)
+        .ok_or_else(|| "Account not found".to_string())?
+        .clone();
+    drop(state); // Unlock
+
+    // Starte Minecraft mit --quickPlayMultiplayer Argument
+    let launcher = MinecraftLauncher::new().map_err(|e| e.to_string())?;
+
+    launcher.launch_with_extra_args(
+        &profile,
+        &account.username,
+        &account.uuid,
+        Some(&account.access_token),
+        vec!["--quickPlayMultiplayer".to_string(), server_ip]
+    ).await.map_err(|e| e.to_string())
+}
+
+/// Migriert alte .jar.meta.json Dateien aus mods/ nach modinfos/
+fn migrate_old_metadata(mods_dir: &std::path::Path, modinfos_dir: &std::path::Path) {
+    if let Ok(entries) = std::fs::read_dir(mods_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+
+            // Suche nach .jar.meta.json Dateien
+            if let Some(filename) = path.file_name() {
+                let filename_str = filename.to_string_lossy();
+
+                if filename_str.ends_with(".jar.meta.json") {
+                    // Neuer Dateiname: entferne ".jar.meta" und behalte nur ".json"
+                    let new_filename = filename_str
+                        .trim_end_matches(".jar.meta.json")
+                        .to_string() + ".json";
+
+                    let new_path = modinfos_dir.join(&new_filename);
+
+                    // Verschiebe die Datei
+                    if let Err(e) = std::fs::rename(&path, &new_path) {
+                        tracing::warn!("Failed to migrate metadata {}: {}", filename_str, e);
+                    } else {
+                        tracing::info!("✅ Migrated metadata: {} -> modinfos/{}", filename_str, new_filename);
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -86,14 +86,44 @@ pub async fn get_forge_versions(minecraft_version: String) -> Result<Vec<String>
 
 #[tauri::command]
 pub async fn get_neoforge_versions(minecraft_version: String) -> Result<Vec<String>, String> {
+    tracing::info!("🔍 GUI: Loading NeoForge versions for MC {}", minecraft_version);
+
     let client = crate::api::neoforge::NeoForgeClient::new()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            tracing::error!("❌ Failed to create NeoForge client: {}", e);
+            e.to_string()
+        })?;
 
     let versions = client.get_loader_versions(&minecraft_version)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            tracing::error!("❌ Failed to load NeoForge versions: {}", e);
+            e.to_string()
+        })?;
 
-    Ok(versions.into_iter().map(|v| v.version).collect())
+    let version_strings: Vec<String> = versions.into_iter().map(|v| v.version).collect();
+
+    tracing::info!("✅ GUI: Loaded {} NeoForge versions for MC {}", version_strings.len(), minecraft_version);
+    if !version_strings.is_empty() {
+        tracing::debug!("   First 3 versions: {:?}", version_strings.iter().take(3).collect::<Vec<_>>());
+    }
+
+    Ok(version_strings)
+}
+
+#[tauri::command]
+pub async fn get_system_memory() -> Result<u64, String> {
+    use sysinfo::System;
+
+    let mut sys = System::new_all();
+    sys.refresh_memory();
+
+    // Gib den Gesamt-RAM in MB zurück
+    let total_memory_mb = sys.total_memory() / 1024 / 1024;
+
+    tracing::debug!("System total memory: {} MB", total_memory_mb);
+
+    Ok(total_memory_mb)
 }
 
 #[tauri::command]

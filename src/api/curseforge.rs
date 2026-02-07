@@ -61,11 +61,13 @@ impl CurseForgeClient {
                 slug: cf_mod.slug,
                 name: cf_mod.name,
                 description: cf_mod.summary,
+                body: None,
                 icon_url: cf_mod.logo.map(|l| l.url),
                 author: cf_mod.authors.first()
                     .map(|a| a.name.clone())
                     .unwrap_or_else(|| "Unknown".to_string()),
                 downloads: cf_mod.download_count as u64,
+                followers: None,
                 categories: cf_mod.categories.into_iter()
                     .map(|c| c.name)
                     .collect(),
@@ -77,6 +79,11 @@ impl CurseForgeClient {
                 updated_at: cf_mod.date_modified,
                 client_side: None,
                 server_side: None,
+                source_url: None,
+                issues_url: None,
+                wiki_url: None,
+                discord_url: None,
+                gallery: vec![],
             }
         }).collect();
 
@@ -101,11 +108,13 @@ impl CurseForgeClient {
             slug: cf_mod.slug,
             name: cf_mod.name,
             description: cf_mod.summary,
+            body: None,
             icon_url: cf_mod.logo.map(|l| l.url),
             author: cf_mod.authors.first()
                 .map(|a| a.name.clone())
                 .unwrap_or_else(|| "Unknown".to_string()),
             downloads: cf_mod.download_count as u64,
+            followers: None,
             categories: cf_mod.categories.into_iter()
                 .map(|c| c.name)
                 .collect(),
@@ -119,6 +128,11 @@ impl CurseForgeClient {
             updated_at: cf_mod.date_modified,
             client_side: None,
             server_side: None,
+            source_url: None,
+            issues_url: None,
+            wiki_url: None,
+            discord_url: None,
+            gallery: vec![],
         })
     }
 }

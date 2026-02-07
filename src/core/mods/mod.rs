@@ -84,6 +84,12 @@ impl ModManager {
                 .await?;
 
             tracing::info!("✅ Mod file downloaded successfully: {:?}", dest);
+
+            // META-INF Entfernung deaktiviert - nested JARs sind wichtiger als Signatur-Konflikte
+            // Die meisten Mods funktionieren auch mit Signaturen
+            // if let Err(e) = remove_meta_inf(&dest).await {
+            //     tracing::warn!("Failed to remove META-INF from {}: {}", file.filename, e);
+            // }
         } else {
             tracing::warn!("No files found for mod version!");
             anyhow::bail!("No downloadable files found for this mod version");
@@ -123,3 +129,80 @@ impl ModManager {
         Ok(())
     }
 }
+
+/// Entfernt nur Signatur-Dateien aus META-INF, behält aber nested JARs und Manifests
+async fn remove_meta_inf(jar_path: &Path) -> Result<()> {
+    use std::io::{Read, Write};
+    use zip::write::FileOptions;
+
+    // Lese die originale JAR
+    let jar_file = std::fs::File::open(jar_path)?;
+    let mut archive = zip::ZipArchive::new(jar_file)?;
+
+    // Erstelle temporäre Datei
+    let temp_path = jar_path.with_extension("jar.tmp");
+    let temp_file = std::fs::File::create(&temp_path)?;
+    let mut zip_writer = zip::ZipWriter::new(temp_file);
+
+    let mut removed_count = 0;
+    let mut kept_count = 0;
+
+    // Kopiere alle Dateien, aber überspringe nur Signatur-Dateien
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let name = file.name().to_string();
+
+        // Überspringe NUR Signatur-Dateien, aber behalte:
+        // - META-INF/jars/ (nested JARs für Fabric API Modules)
+        // - META-INF/MANIFEST.MF (Mod-Metadaten)
+        // - META-INF/mods.toml (Forge Mods)
+        // - META-INF/neoforge.mods.toml (NeoForge Mods)
+        let should_skip = name.starts_with("META-INF/") && (
+            name.ends_with(".SF") ||   // Signature File
+            name.ends_with(".DSA") ||  // Digital Signature
+            name.ends_with(".RSA") ||  // RSA Signature
+            name.ends_with(".EC")      // Elliptic Curve Signature
+        );
+
+        if should_skip {
+            tracing::debug!("Removing signature file: {}", name);
+            removed_count += 1;
+            continue;
+        }
+
+        if name.starts_with("META-INF/jars/") {
+            tracing::debug!("Keeping nested JAR: {}", name);
+            kept_count += 1;
+        }
+
+        // Kopiere alle anderen Dateien
+        let options = FileOptions::default()
+            .compression_method(file.compression())
+            .unix_permissions(file.unix_mode().unwrap_or(0o755));
+
+        if name.ends_with('/') {
+            // Ordner
+            zip_writer.add_directory(&name, options)?;
+        } else {
+            // Datei
+            zip_writer.start_file(&name, options)?;
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer)?;
+            zip_writer.write_all(&buffer)?;
+        }
+    }
+
+    zip_writer.finish()?;
+    drop(archive);
+
+    if removed_count > 0 {
+        tracing::info!("Removed {} signature files, kept {} nested JARs", removed_count, kept_count);
+    }
+
+    // Ersetze originale Datei mit bereinigter Version
+    tokio::fs::remove_file(jar_path).await?;
+    tokio::fs::rename(&temp_path, jar_path).await?;
+
+    Ok(())
+}
+

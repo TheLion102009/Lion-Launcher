@@ -38,6 +38,7 @@ fn main() {
             gui::get_quilt_versions,
             gui::get_forge_versions,
             gui::get_neoforge_versions,
+            gui::get_system_memory,
             // Profiles
             gui::get_profiles,
             gui::create_profile,
@@ -45,7 +46,9 @@ fn main() {
             gui::update_profile,
             gui::launch_profile,
             // Mods - Browser
+            gui::get_modrinth_categories,
             gui::search_mods,
+            gui::get_mod_info,
             gui::get_mod_versions,
             gui::install_mod,
             gui::uninstall_mod,
@@ -60,12 +63,20 @@ fn main() {
             gui::get_installed_resourcepacks,
             gui::search_resourcepacks,
             gui::install_resourcepack,
+            gui::delete_resourcepack,
             // Shader Packs
             gui::search_shaderpacks,
             gui::install_shaderpack,
             gui::get_installed_shaderpacks,
+            gui::delete_shaderpack,
             // Modpacks
             gui::search_modpacks,
+            // Worlds
+            gui::get_worlds,
+            gui::launch_world,
+            // Servers
+            gui::get_servers,
+            gui::launch_server,
             // Auth
             gui::auth::get_accounts,
             gui::auth::get_active_account,

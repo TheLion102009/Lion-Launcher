@@ -1,11 +1,12 @@
 #![allow(dead_code)]
 
 use crate::core::auth::{MinecraftAuth, AuthState, DeviceCodeFlow, get_head_url};
+pub use crate::core::auth::MinecraftAccount;
 use tokio::sync::Mutex;
 use once_cell::sync::Lazy;
 
-// Global Auth State
-static AUTH_STATE: Lazy<Mutex<AuthState>> = Lazy::new(|| {
+// Global Auth State - pub(crate) für interne Verwendung
+pub(crate) static AUTH_STATE: Lazy<Mutex<AuthState>> = Lazy::new(|| {
     Mutex::new(load_auth_state().unwrap_or_default())
 });
 

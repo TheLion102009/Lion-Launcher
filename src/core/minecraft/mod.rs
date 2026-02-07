@@ -2,10 +2,13 @@
 
 mod installer;
 mod neoforge;
+mod forge;
+pub mod worlds;
 
 use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::cell::RefCell;
 use serde::Deserialize;
 use crate::types::profile::Profile;
 use crate::core::download::DownloadManager;
@@ -13,6 +16,11 @@ use crate::config::defaults;
 
 const MOJANG_MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const RESOURCES_URL: &str = "https://resources.download.minecraft.net";
+
+// Thread-local storage für extra Launch-Argumente (für Quick Play)
+thread_local! {
+    static EXTRA_LAUNCH_ARGS: RefCell<Vec<String>> = RefCell::new(Vec::new());
+}
 
 pub struct MinecraftLauncher {
     download_manager: DownloadManager,
@@ -135,6 +143,39 @@ impl MinecraftLauncher {
         Ok(Self {
             download_manager: DownloadManager::new()?,
         })
+    }
+
+    /// Startet Minecraft mit zusätzlichen Argumenten (z.B. für Quick Play)
+    pub async fn launch_with_extra_args(
+        &self,
+        profile: &Profile,
+        username: &str,
+        uuid: &str,
+        access_token: Option<&str>,
+        extra_args: Vec<String>
+    ) -> Result<()> {
+        // Speichere extra_args im Profile-Kontext für später
+        // Da die launch-Methode komplex ist, setzen wir die extra_args als Environment-Variable
+        // die dann von den Launch-Methoden gelesen werden kann
+
+        // Alternativ: Wir rufen launch() auf und fügen die Argumente nachher hinzu
+        // Das ist einfacher als die gesamte Launch-Logik zu refaktorieren
+
+        tracing::info!("Launching with extra args: {:?}", extra_args);
+
+        // Setze extra args als statische Variable (thread-local)
+        EXTRA_LAUNCH_ARGS.with(|args| {
+            *args.borrow_mut() = extra_args;
+        });
+
+        let result = self.launch(profile, username, uuid, access_token).await;
+
+        // Clear extra args
+        EXTRA_LAUNCH_ARGS.with(|args| {
+            args.borrow_mut().clear();
+        });
+
+        result
     }
 
     pub async fn launch(&self, profile: &Profile, username: &str, uuid: &str, access_token: Option<&str>) -> Result<()> {
@@ -393,7 +434,19 @@ impl MinecraftLauncher {
         let install_result = if is_neoforge {
             self.install_neoforge_complete(&loader_version, libraries_dir, &mc_client_lib_path, version).await?
         } else {
-            self.install_forge_complete(version, &loader_version, libraries_dir, client_jar).await?
+            // Verwende den neuen ForgeInstaller
+            let forge_installer = forge::ForgeInstaller::new(self.download_manager.clone());
+            let result = forge_installer.install_forge_complete(version, &loader_version, libraries_dir, client_jar).await?;
+            
+            // Konvertiere in ForgeInstallResult
+            ForgeInstallResult {
+                main_class: result.main_class,
+                classpath: result.classpath,
+                module_path: result.module_path,
+                jvm_args: result.jvm_args,
+                game_args: result.game_args,
+                srg_jar_path: None, // Forge benötigt keine SRG-JAR
+            }
         };
 
         let java_path = self.find_java()?;
@@ -412,22 +465,76 @@ impl MinecraftLauncher {
         cmd.arg("-XX:MaxGCPauseMillis=50");
         cmd.arg("-XX:G1HeapRegionSize=32M");
 
-        // Module System Argumente - KRITISCH für NeoForge/Forge
-        // Diese können bereits -p und --add-modules enthalten!
-        let jvm_has_module_path = install_result.jvm_args.iter().any(|a| a == "-p" || a.starts_with("-p "));
+        // KRITISCH: Sortiere JVM-Args nach Typ!
+        // System Properties (-D) MÜSSEN ZUERST kommen, damit ModLauncher sie sieht!
+        let mut system_properties = Vec::new();
+        let mut module_args = Vec::new();
+        let mut module_path_from_args: Option<String> = None;
+        let mut other_args = Vec::new();
 
-        for arg in &install_result.jvm_args {
+        let mut i = 0;
+        while i < install_result.jvm_args.len() {
+            let arg = &install_result.jvm_args[i];
+
+            if arg.starts_with("-D") {
+                // System Property
+                system_properties.push(arg.clone());
+            } else if arg == "-p" || arg == "--module-path" {
+                // Module Path mit Wert im nächsten Arg
+                if i + 1 < install_result.jvm_args.len() {
+                    module_path_from_args = Some(install_result.jvm_args[i + 1].clone());
+                    i += 1; // Überspringe den Wert
+                }
+            } else if arg.starts_with("--add-") || arg.starts_with("--patch-") {
+                // Module System Args (--add-opens, --add-modules, etc.)
+                module_args.push(arg.clone());
+            } else {
+                // Andere JVM Args
+                other_args.push(arg.clone());
+            }
+
+            i += 1;
+        }
+
+        // KRITISCH: System Properties ZUERST hinzufügen!
+        tracing::info!("Adding {} system properties...", system_properties.len());
+        for prop in &system_properties {
+            cmd.arg(prop);
+        }
+
+        // Dann andere Args
+        for arg in &other_args {
             cmd.arg(arg);
         }
 
-        // Wenn es einen Modulpfad gibt UND die JVM-Args keinen haben, füge -p hinzu
-        if !install_result.module_path.is_empty() && !jvm_has_module_path {
-            tracing::info!("Using module path with {} entries", install_result.module_path.len());
-            cmd.arg("-p").arg(install_result.module_path.join(":"));
-            // Lade alle Module aus dem Modulpfad
-            cmd.arg("--add-modules").arg("ALL-MODULE-PATH");
-        } else if jvm_has_module_path {
-            tracing::info!("Module path already in JVM args, not adding again");
+        // Dann Module System Args
+        for arg in &module_args {
+            cmd.arg(arg);
+        }
+
+        // Module Path: Kombiniere aus JVM-Args und install_result
+        let final_module_path = if let Some(ref mp_from_args) = module_path_from_args {
+            if !install_result.module_path.is_empty() {
+                // Kombiniere beide
+                let combined = format!("{}:{}", mp_from_args, install_result.module_path.join(":"));
+                tracing::info!("Combining module paths: {} entries", combined.split(':').count());
+                combined
+            } else {
+                mp_from_args.clone()
+            }
+        } else {
+            install_result.module_path.join(":")
+        };
+
+        // Füge Module Path hinzu wenn vorhanden
+        if !final_module_path.is_empty() {
+            tracing::info!("Using module path with {} entries", final_module_path.split(':').count());
+            cmd.arg("-p").arg(&final_module_path);
+
+            // Lade alle Module
+            if !module_args.iter().any(|a| a.contains("--add-modules")) {
+                cmd.arg("--add-modules").arg("ALL-MODULE-PATH");
+            }
         }
 
         // Classpath - KRITISCH: Die Minecraft-JAR MUSS im Classpath sein!
@@ -465,16 +572,73 @@ impl MinecraftLauncher {
             tracing::warn!("Minecraft-JAR might not be in classpath - NeoForge loads it via --gameJar");
         }
 
-        cmd.arg("-cp").arg(&combined_classpath);
+        // KRITISCH für Forge 1.21.6+:
+        // Forge verwendet das Java Module System und muss über -m gestartet werden!
+        // Die Main-Class ist im Modul net.minecraftforge.bootstrap
+        let is_forge_module = install_result.main_class.contains("ForgeBootstrap");
 
-        // Debug: Classpath speichern
-        let debug_path = game_dir.join("classpath_debug.txt");
-        std::fs::write(&debug_path, combined_classpath.replace(":", "\n")).ok();
-        tracing::info!("Classpath saved to: {:?}", debug_path);
+        if is_forge_module && !is_neoforge {
+            // Forge 1.21.6+ - Start über Module System
+            tracing::info!("🔧 Using Java Module System for Forge 1.21.6+");
 
-        // Main Class
-        tracing::info!("Main class: {}", install_result.main_class);
-        cmd.arg(&install_result.main_class);
+            // Die bootstrap.jar MUSS im Module-Path sein
+            let bootstrap_jar = libraries_dir.join("net/minecraftforge/bootstrap/2.1.8/bootstrap-2.1.8.jar");
+            let bootstrap_api_jar = libraries_dir.join("net/minecraftforge/bootstrap-api/2.1.8/bootstrap-api-2.1.8.jar");
+
+            // Baue den Module-Path mit ALLEN notwendigen JARs
+            let mut forge_module_path = Vec::new();
+
+            // KRITISCH: Bootstrap JARs zuerst!
+            if bootstrap_jar.exists() {
+                forge_module_path.push(bootstrap_jar.display().to_string());
+            } else {
+                tracing::error!("❌ Bootstrap JAR not found at: {:?}", bootstrap_jar);
+            }
+
+            if bootstrap_api_jar.exists() {
+                forge_module_path.push(bootstrap_api_jar.display().to_string());
+            }
+
+            // Füge alle anderen Module-JARs hinzu
+            for m in &install_result.module_path {
+                if !forge_module_path.contains(m) {
+                    forge_module_path.push(m.clone());
+                }
+            }
+
+            // Module-Path setzen
+            if !forge_module_path.is_empty() {
+                let module_path_str = forge_module_path.join(":");
+                tracing::info!("Module path: {} entries", forge_module_path.len());
+                cmd.arg("-p").arg(&module_path_str);
+            }
+
+            // Classpath für NICHT-Module Libraries
+            if !combined_classpath.is_empty() {
+                cmd.arg("-cp").arg(&combined_classpath);
+            }
+
+            // Debug: Module-Path speichern
+            let module_debug_path = game_dir.join("modulepath_debug.txt");
+            std::fs::write(&module_debug_path, forge_module_path.join("\n")).ok();
+
+            // KRITISCH: Main-Class über -m (Module) starten!
+            // Format: -m <module>/<main-class>
+            tracing::info!("Main module: net.minecraftforge.bootstrap/net.minecraftforge.bootstrap.ForgeBootstrap");
+            cmd.arg("-m").arg("net.minecraftforge.bootstrap/net.minecraftforge.bootstrap.ForgeBootstrap");
+        } else {
+            // NeoForge oder ältere Forge - klassischer Start über Classpath
+            cmd.arg("-cp").arg(&combined_classpath);
+
+            // Debug: Classpath speichern
+            let debug_path = game_dir.join("classpath_debug.txt");
+            std::fs::write(&debug_path, combined_classpath.replace(":", "\n")).ok();
+            tracing::info!("Classpath saved to: {:?}", debug_path);
+
+            // Main Class
+            tracing::info!("Main class: {}", install_result.main_class);
+            cmd.arg(&install_result.main_class);
+        }
 
         // KRITISCH: Game Arguments für NeoForge (--fml.*, --launchTarget, etc.)
         // Diese müssen NACH der Main-Class kommen!
@@ -535,6 +699,13 @@ impl MinecraftLauncher {
         cmd.arg("--uuid").arg(uuid);
         cmd.arg("--accessToken").arg(token);
         cmd.arg("--userType").arg(user_type);
+
+        // Extra args (z.B. für Quick Play)
+        EXTRA_LAUNCH_ARGS.with(|args| {
+            for arg in args.borrow().iter() {
+                cmd.arg(arg);
+            }
+        });
 
         cmd.current_dir(game_dir);
         cmd.stdout(Stdio::inherit());
@@ -614,6 +785,13 @@ impl MinecraftLauncher {
         cmd.arg("--accessToken").arg(token);
         cmd.arg("--userType").arg(user_type);
 
+        // Extra args (z.B. für Quick Play)
+        EXTRA_LAUNCH_ARGS.with(|args| {
+            for arg in args.borrow().iter() {
+                cmd.arg(arg);
+            }
+        });
+
         cmd.current_dir(game_dir);
         cmd.stdout(Stdio::inherit());
         cmd.stderr(Stdio::inherit());
@@ -640,10 +818,41 @@ impl MinecraftLauncher {
 
     /// Entfernt doppelte Einträge aus dem Classpath
     fn deduplicate_classpath(classpath: &str) -> String {
-        use std::collections::HashSet;
+        use std::collections::{HashSet, HashMap};
 
-        let mut seen = HashSet::new();
+        let mut seen_paths = HashSet::new();
+        let mut seen_libraries: HashMap<String, String> = HashMap::new(); // library_name -> full_path
         let mut unique_entries = Vec::new();
+
+        // Extrahiere den Library-Namen aus einem JAR-Pfad
+        // z.B. "guava-33.3.1-jre.jar" -> "guava"
+        // z.B. "asm-9.6.jar" -> "asm"
+        let extract_library_name = |path: &str| -> Option<String> {
+            let filename = path.split('/').last()?;
+            // Entferne .jar Endung
+            let name = filename.strip_suffix(".jar")?;
+            // Entferne Version und Klassifier (z.B. -33.3.1-jre, -9.6, -natives-linux)
+            // Regex-ähnliches Pattern: alles vor der ersten Ziffer nach einem Bindestrich
+            let parts: Vec<&str> = name.split('-').collect();
+            if parts.is_empty() {
+                return Some(name.to_string());
+            }
+
+            // Finde den ersten Teil der eine Versionsnummer ist (beginnt mit Ziffer)
+            let mut lib_name_parts = Vec::new();
+            for part in parts {
+                if part.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                    break;
+                }
+                lib_name_parts.push(part);
+            }
+
+            if lib_name_parts.is_empty() {
+                Some(name.to_string())
+            } else {
+                Some(lib_name_parts.join("-"))
+            }
+        };
 
         for entry in classpath.split(':') {
             let entry = entry.trim();
@@ -651,14 +860,34 @@ impl MinecraftLauncher {
                 continue;
             }
 
-            // WICHTIG: Verwende den VOLLSTÄNDIGEN Pfad als Schlüssel!
-            // Unterschiedliche JARs (z.B. client-srg.jar vs minecraft-client.jar)
-            // müssen beide im Classpath bleiben
-            if seen.insert(entry.to_string()) {
-                unique_entries.push(entry.to_string());
-            } else {
+            // 1. Prüfe ob exakt gleicher Pfad bereits vorhanden
+            if !seen_paths.insert(entry.to_string()) {
                 tracing::debug!("Removing duplicate classpath entry: {}", entry);
+                continue;
             }
+
+            // 2. Prüfe ob eine andere Version der gleichen Library bereits vorhanden
+            if let Some(lib_name) = extract_library_name(entry) {
+                // Bestimmte Libraries die bekannt für Konflikte sind
+                let conflict_libraries = [
+                    "guava", "failureaccess", "asm", "asm-commons", "asm-tree",
+                    "asm-util", "asm-analysis", "jtracy", "gson", "netty",
+                    "commons-io", "commons-lang3", "log4j"
+                ];
+
+                let is_conflict_library = conflict_libraries.iter()
+                    .any(|&lib| lib_name.eq_ignore_ascii_case(lib) || lib_name.starts_with(&format!("{}-", lib)));
+
+                if is_conflict_library {
+                    if let Some(existing) = seen_libraries.get(&lib_name.to_lowercase()) {
+                        tracing::debug!("Skipping duplicate library {} (already have {})", entry, existing);
+                        continue;
+                    }
+                    seen_libraries.insert(lib_name.to_lowercase(), entry.to_string());
+                }
+            }
+
+            unique_entries.push(entry.to_string());
         }
 
         let result = unique_entries.join(":");
@@ -1188,205 +1417,6 @@ impl MinecraftLauncher {
         })
     }
 
-    /// Installiert Forge vollständig und gibt das Ergebnis zurück
-    async fn install_forge_complete(&self, mc_version: &str, forge_version: &str, libraries_dir: &Path, client_jar: &Path) -> Result<ForgeInstallResult> {
-        use crate::api::forge::ForgeClient;
-        use std::io::Read;
-
-        let forge_client = ForgeClient::new()?;
-        tracing::info!("Installing Forge {}-{} (complete)", mc_version, forge_version);
-
-        let installer_url = forge_client.get_installer_url(mc_version, forge_version);
-        let installer_path = libraries_dir.join(format!("forge-{}-{}-installer.jar", mc_version, forge_version));
-
-        if installer_path.exists() && !Self::is_valid_zip(&installer_path) {
-            tokio::fs::remove_file(&installer_path).await.ok();
-        }
-
-        if !installer_path.exists() {
-            tracing::info!("Downloading Forge installer from: {}", installer_url);
-            tokio::fs::create_dir_all(installer_path.parent().unwrap()).await?;
-            self.download_manager.download_with_hash(&installer_url, &installer_path, None).await?;
-        }
-
-        // Extrahiere version.json
-        let (version_json, jars_data) = {
-            let file = std::fs::File::open(&installer_path)?;
-            let mut archive = zip::ZipArchive::new(file)?;
-
-            let version_json = {
-                if let Ok(mut entry) = archive.by_name("version.json") {
-                    let mut data = String::new();
-                    entry.read_to_string(&mut data)?;
-                    Some(data)
-                } else {
-                    None
-                }
-            };
-
-            let mut jars_data: Vec<(PathBuf, Vec<u8>)> = Vec::new();
-            let mut jar_names: Vec<(String, PathBuf)> = Vec::new();
-
-            for i in 0..archive.len() {
-                if let Ok(entry) = archive.by_index(i) {
-                    let name = entry.name().to_string();
-                    if name.starts_with("maven/") && name.ends_with(".jar") {
-                        let rel_path = name.strip_prefix("maven/").unwrap();
-                        let dest = libraries_dir.join(rel_path);
-                        if !dest.exists() {
-                            jar_names.push((name, dest));
-                        }
-                    }
-                }
-            }
-
-            for (name, dest) in jar_names {
-                if let Ok(mut entry) = archive.by_name(&name) {
-                    let mut data = Vec::new();
-                    entry.read_to_end(&mut data)?;
-                    jars_data.push((dest, data));
-                }
-            }
-
-            (version_json, jars_data)
-        };
-
-        let version_json = version_json.ok_or_else(|| anyhow::anyhow!("version.json not found"))?;
-
-        #[derive(serde::Deserialize)]
-        struct ForgeVersion {
-            #[serde(rename = "mainClass")]
-            main_class: String,
-            libraries: Vec<ForgeLib>,
-            arguments: Option<ForgeArguments>,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct ForgeArguments {
-            jvm: Option<Vec<serde_json::Value>>,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct ForgeLib {
-            name: String,
-            downloads: Option<ForgeDownloads>,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct ForgeDownloads {
-            artifact: Option<ForgeArtifact>,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct ForgeArtifact {
-            url: String,
-            path: String,
-            sha1: Option<String>,
-        }
-
-        let version: ForgeVersion = serde_json::from_str(&version_json)?;
-        tracing::info!("Forge main class: {}", version.main_class);
-
-        // JVM args
-        let mut jvm_args = Vec::new();
-
-        if let Some(args) = &version.arguments {
-            if let Some(jvm) = &args.jvm {
-                for arg in jvm {
-                    if let Some(s) = arg.as_str() {
-                        let processed = s
-                            .replace("${library_directory}", &libraries_dir.display().to_string())
-                            .replace("${classpath_separator}", ":")
-                            .replace("${version_name}", forge_version);
-                        jvm_args.push(processed);
-                    }
-                }
-            }
-        }
-
-        if jvm_args.is_empty() {
-            jvm_args.extend(vec![
-                "--add-opens=java.base/java.util.jar=ALL-UNNAMED".to_string(),
-                "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED".to_string(),
-                "--add-opens=java.base/java.nio.file=ALL-UNNAMED".to_string(),
-                "--add-opens=java.base/java.io=ALL-UNNAMED".to_string(),
-                "--add-opens=java.base/java.lang=ALL-UNNAMED".to_string(),
-                "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED".to_string(),
-                "--add-exports=java.base/sun.security.util=ALL-UNNAMED".to_string(),
-                format!("-Dminecraft.client.jar={}", client_jar.display()),
-                format!("-DlibraryDirectory={}", libraries_dir.display()),
-                "-DignoreList=bootstraplauncher,securejarhandler,asm-commons,asm-util,asm-analysis,asm-tree,asm,client-extra,fmlcore,javafmllanguage,lowcodelanguage,mclanguage,forge-".to_string(),
-                "-Dfml.earlyprogresswindow=false".to_string(),
-            ]);
-        }
-
-        // Extrahiere JARs
-        for (dest, data) in jars_data {
-            tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
-            tokio::fs::write(&dest, data).await?;
-        }
-
-        // Lade Libraries
-        let mut classpath = Vec::new();
-        let mut module_path = Vec::new();
-
-        for lib in &version.libraries {
-            let lib_path = if let Some(downloads) = &lib.downloads {
-                if let Some(artifact) = &downloads.artifact {
-                    let dest = libraries_dir.join(&artifact.path);
-                    if !dest.exists() && !artifact.url.is_empty() {
-                        tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
-                        self.download_manager.download_with_hash(&artifact.url, &dest, artifact.sha1.as_deref()).await.ok();
-                    }
-                    dest
-                } else {
-                    continue;
-                }
-            } else {
-                let maven_path = Self::maven_to_path(&lib.name);
-                let dest = libraries_dir.join(&maven_path);
-                if !dest.exists() {
-                    for url in &[
-                        format!("https://maven.minecraftforge.net/{}", maven_path),
-                        format!("https://repo1.maven.org/maven2/{}", maven_path),
-                        format!("https://libraries.minecraft.net/{}", maven_path),
-                    ] {
-                        if self.download_manager.download_with_hash(url, &dest, None).await.is_ok() {
-                            break;
-                        }
-                    }
-                }
-                dest
-            };
-
-            if lib_path.exists() {
-                let path_str = lib_path.display().to_string();
-                if lib.name.contains("bootstraplauncher") ||
-                   lib.name.contains("securejarhandler") ||
-                   lib.name.contains("jarjar") {
-                    module_path.push(path_str);
-                } else {
-                    classpath.push(path_str);
-                }
-            }
-        }
-
-        // Forge verwendet auch Game-Args für --launchTarget
-        let game_args = vec![
-            "--launchTarget".to_string(),
-            "forgeclient".to_string(),
-        ];
-
-        Ok(ForgeInstallResult {
-            main_class: version.main_class,
-            classpath,
-            module_path,
-            jvm_args,
-            game_args,
-            srg_jar_path: None, // Altes Forge braucht keine SRG-JAR
-        })
-    }
-
     /// Fabric Loader installieren und (Classpath, MainClass) zurückgeben
     async fn install_fabric(&self, mc_version: &str, libraries_dir: &Path) -> Result<(String, String)> {
         use crate::api::fabric::FabricClient;
@@ -1513,14 +1543,15 @@ impl MinecraftLauncher {
         }
         classpath_entries.push(hashed_dest.display().to_string());
 
-        // Intermediary
+        // Intermediary (von Fabric Maven, nicht Quilt!)
+        // Quilt verwendet die Fabric Intermediary-Mappings!
         let intermediary_maven = &loader.intermediary.maven;
         let intermediary_path = maven_to_path(intermediary_maven);
-        let intermediary_url = format!("https://maven.quiltmc.org/repository/release/{}", intermediary_path);
+        let intermediary_url = format!("https://maven.fabricmc.net/{}", intermediary_path);
         let intermediary_dest = libraries_dir.join(&intermediary_path);
 
         if !intermediary_dest.exists() {
-            tracing::info!("Downloading Quilt intermediary...");
+            tracing::info!("Downloading Fabric intermediary mappings (for Quilt)...");
             tokio::fs::create_dir_all(intermediary_dest.parent().unwrap()).await?;
             self.download_manager.download_with_hash(&intermediary_url, &intermediary_dest, None).await?;
         }

@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use crate::api::client::ApiClient;
 use crate::types::mod_info::{ModInfo, ModVersion, ModSource, ModSearchQuery, ModFile, FileHashes, ModDependency, DependencyType};
 
@@ -18,6 +18,12 @@ impl ModrinthClient {
         })
     }
 
+    pub async fn get_categories(&self) -> Result<Vec<ModrinthCategory>> {
+        let url = format!("{}/tag/category", MODRINTH_API_BASE);
+        let categories: Vec<ModrinthCategory> = self.client.get_json(&url).await?;
+        Ok(categories)
+    }
+
     pub async fn search_mods(&self, query: &ModSearchQuery) -> Result<Vec<ModInfo>> {
         // Sortierung für Modrinth API
         let index = match query.sort_by {
@@ -27,10 +33,17 @@ impl ModrinthClient {
             crate::types::mod_info::SortOption::Relevance => "relevance",
         };
 
+        // Bei leerer Query verwende "" (Modrinth gibt dann alle Mods zurück)
+        let search_query = if query.query.is_empty() {
+            "".to_string()
+        } else {
+            query.query.clone()
+        };
+
         let mut url = format!(
             "{}/search?query={}&limit={}&offset={}&index={}",
             MODRINTH_API_BASE,
-            urlencoding::encode(&query.query),
+            urlencoding::encode(&search_query),
             query.limit,
             query.offset,
             index
@@ -47,7 +60,12 @@ impl ModrinthClient {
 
         if let Some(loader) = &query.loader {
             if !loader.is_empty() {
-                facets.push(format!("[\"categories:{}\"]", loader));
+                // Quilt ist Fabric-kompatibel, zeige beide
+                if loader == "quilt" {
+                    facets.push("[\"categories:quilt\",\"categories:fabric\"]".to_string());
+                } else {
+                    facets.push(format!("[\"categories:{}\"]", loader));
+                }
             }
         }
 
@@ -72,9 +90,11 @@ impl ModrinthClient {
             slug: hit.slug.clone(),
             name: hit.title,
             description: hit.description,
+            body: None,
             icon_url: Some(hit.icon_url),
             author: hit.author,
             downloads: hit.downloads as u64,
+            followers: None,
             categories: hit.categories,
             source: ModSource::Modrinth,
             versions: hit.versions.clone(),
@@ -84,6 +104,11 @@ impl ModrinthClient {
             updated_at: hit.date_modified,
             client_side: hit.client_side,
             server_side: hit.server_side,
+            source_url: None,
+            issues_url: None,
+            wiki_url: None,
+            discord_url: None,
+            gallery: vec![],
         }).collect();
 
         Ok(mods)
@@ -98,9 +123,11 @@ impl ModrinthClient {
             slug: project.slug.clone(),
             name: project.title,
             description: project.description,
+            body: project.body,
             icon_url: project.icon_url,
             author: project.team.unwrap_or_default(),
             downloads: project.downloads as u64,
+            followers: project.followers.map(|f| f as u64),
             categories: project.categories,
             source: ModSource::Modrinth,
             versions: project.versions,
@@ -110,6 +137,15 @@ impl ModrinthClient {
             updated_at: project.updated,
             client_side: project.client_side,
             server_side: project.server_side,
+            source_url: project.source_url,
+            issues_url: project.issues_url,
+            wiki_url: project.wiki_url,
+            discord_url: project.discord_url,
+            gallery: project.gallery.into_iter().map(|img| crate::types::mod_info::GalleryImage {
+                url: img.url,
+                title: img.title,
+                description: img.description,
+            }).collect(),
         })
     }
 
@@ -145,6 +181,8 @@ impl ModrinthClient {
                 },
             }).collect(),
             published: v.date_published,
+            version_type: Some(v.version_type),
+            downloads: Some(v.downloads as u64),
         }).collect();
 
         Ok(mod_versions)
@@ -180,9 +218,13 @@ struct ModrinthProject {
     slug: String,
     title: String,
     description: String,
+    #[serde(default)]
+    body: Option<String>,
     icon_url: Option<String>,
     team: Option<String>,
     downloads: i64,
+    #[serde(default)]
+    followers: Option<i64>,
     categories: Vec<String>,
     versions: Vec<String>,
     game_versions: Vec<String>,
@@ -192,6 +234,27 @@ struct ModrinthProject {
     client_side: Option<String>,
     #[serde(default)]
     server_side: Option<String>,
+    #[serde(default)]
+    source_url: Option<String>,
+    #[serde(default)]
+    issues_url: Option<String>,
+    #[serde(default)]
+    wiki_url: Option<String>,
+    #[serde(default)]
+    discord_url: Option<String>,
+    #[serde(default)]
+    gallery: Vec<ModrinthGalleryImage>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct ModrinthGalleryImage {
+    url: String,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    ordering: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -205,6 +268,10 @@ struct ModrinthVersion {
     files: Vec<ModrinthFile>,
     dependencies: Vec<ModrinthDependency>,
     date_published: String,
+    #[serde(default)]
+    version_type: String,
+    #[serde(default)]
+    downloads: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -227,3 +294,12 @@ struct ModrinthDependency {
     project_id: Option<String>,
     dependency_type: String,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModrinthCategory {
+    pub icon: String,
+    pub name: String,
+    pub project_type: String,
+    pub header: String,
+}
+

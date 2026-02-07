@@ -8,9 +8,13 @@ pub struct ModInfo {
     pub slug: String,
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    pub body: Option<String>,
     pub icon_url: Option<String>,
     pub author: String,
     pub downloads: u64,
+    #[serde(default)]
+    pub followers: Option<u64>,
     pub categories: Vec<String>,
     pub source: ModSource,
     pub versions: Vec<String>,
@@ -22,6 +26,25 @@ pub struct ModInfo {
     pub client_side: Option<String>,
     #[serde(default)]
     pub server_side: Option<String>,
+    #[serde(default)]
+    pub source_url: Option<String>,
+    #[serde(default)]
+    pub issues_url: Option<String>,
+    #[serde(default)]
+    pub wiki_url: Option<String>,
+    #[serde(default)]
+    pub discord_url: Option<String>,
+    #[serde(default)]
+    pub gallery: Vec<GalleryImage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GalleryImage {
+    pub url: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +65,10 @@ pub struct ModVersion {
     pub files: Vec<ModFile>,
     pub dependencies: Vec<ModDependency>,
     pub published: String,
+    #[serde(default)]
+    pub version_type: Option<String>,
+    #[serde(default)]
+    pub downloads: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

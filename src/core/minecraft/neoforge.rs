@@ -312,6 +312,9 @@ pub async fn install_neoforge(
         "coremods",               // Teil von NeoForge
         "modlauncher",            // Bereits geladen
         "neoforge",               // Natürlich!
+        "guava",                  // Konflikt mit NeoForge's guava
+        "failureaccess",          // Teil von guava, Konflikt
+        "jtracy",                 // Doppeltes Modul
     ];
 
     for vanilla_lib in vanilla_classpath.split(':') {
@@ -551,7 +554,6 @@ fn find_srg_jar(mc_version: &str, neoform_version: &str, libraries_dir: &Path) -
 
 /// Verifiziert dass eine JAR-Datei eine bestimmte Klasse enthält
 fn verify_jar_has_class(jar_path: &Path, class_path: &str) -> Result<bool> {
-    use std::io::Read;
 
     let file = std::fs::File::open(jar_path)?;
     let mut archive = zip::ZipArchive::new(file)?;
