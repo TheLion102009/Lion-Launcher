@@ -1,5 +1,5 @@
 {
-  "productName": "Lion-Launcher",
+  "productName": "Lion Launcher",
   "version": "0.1.0",
   "identifier": "com.lionlauncher.dev",
   "build": {
@@ -10,10 +10,13 @@
     "windows": [
       {
         "title": "Lion Launcher",
-        "width": 800,
-        "height": 600,
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "center": true
       }
     ],
     "security": {
@@ -23,6 +26,50 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "category": "Game"
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "category": "Game",
+    "shortDescription": "Ein moderner Minecraft Launcher",
+    "longDescription": "Lion Launcher ist ein moderner, schneller Minecraft Launcher mit Unterstützung für Fabric, Quilt, Forge und NeoForge. Er bietet eine intuitive Benutzeroberfläche, einfache Mod-Installation und umfassende Profilverwaltung.",
+    "copyright": "© 2026 Lion Launcher",
+    "publisher": "Lion Launcher Team",
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      },
+      "deb": {
+        "depends": ["libgtk-3-0", "libwebkit2gtk-4.1-0", "libayatana-appindicator3-1"],
+        "section": "games",
+        "priority": "optional"
+      },
+      "rpm": {
+        "release": "1",
+        "epoch": 0
+      }
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "nsis": {
+        "displayLanguageSelector": true,
+        "languages": ["German", "English"],
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "icons/icon.png"
+      },
+      "wix": null
+    },
+    "macOS": {
+      "entitlements": null,
+      "exceptionDomain": "",
+      "frameworks": [],
+      "minimumSystemVersion": "10.13"
+    }
   }
 }

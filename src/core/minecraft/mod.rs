@@ -928,7 +928,7 @@ impl MinecraftLauncher {
     }
 
     /// Installiert NeoForge vollständig und gibt das Ergebnis zurück
-    async fn install_neoforge_complete(&self, neoforge_version: &str, libraries_dir: &Path, client_jar: &Path, mc_version: &str) -> Result<ForgeInstallResult> {
+    async fn install_neoforge_complete(&self, neoforge_version: &str, libraries_dir: &Path, _client_jar: &Path, mc_version: &str) -> Result<ForgeInstallResult> {
         use crate::api::neoforge::NeoForgeClient;
         use std::io::Read;
 
@@ -1028,7 +1028,7 @@ impl MinecraftLauncher {
         }
 
         // Extrahiere version.json aus dem Installer
-        let (version_json, jvm_args_json, jars_data) = {
+        let (version_json, _jvm_args_json, jars_data) = {
             let file = std::fs::File::open(&installer_path)?;
             let mut archive = zip::ZipArchive::new(file)?;
 
@@ -1179,7 +1179,7 @@ impl MinecraftLauncher {
         // KRITISCH: Suche die SRG-JAR in mehreren möglichen Pfaden
         tracing::info!("🔍 Suche SRG-JAR für NeoForge...");
 
-        let srg_jar_path = libraries_dir.join(format!(
+        let _srg_jar_path = libraries_dir.join(format!(
             "net/minecraft/client/{}-20240808.144430/client-{}-20240808.144430-srg.jar",
             mc_version, mc_version
         ));

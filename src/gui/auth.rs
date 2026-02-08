@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use crate::core::auth::{MinecraftAuth, AuthState, DeviceCodeFlow, get_head_url};
-pub use crate::core::auth::MinecraftAccount;
 use tokio::sync::Mutex;
 use once_cell::sync::Lazy;
 

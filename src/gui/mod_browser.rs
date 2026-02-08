@@ -429,6 +429,7 @@ pub async fn install_resourcepack(
     #[derive(serde::Deserialize)]
     struct Version {
         id: String,
+        #[allow(dead_code)]
         name: String,
         version_number: String,
         game_versions: Vec<String>,
@@ -440,6 +441,7 @@ pub async fn install_resourcepack(
         url: String,
         filename: String,
         primary: bool,
+        #[allow(dead_code)]
         size: u64,
     }
 
@@ -617,6 +619,7 @@ pub async fn install_shaderpack(
     #[derive(serde::Deserialize)]
     struct Version {
         id: String,
+        #[allow(dead_code)]
         version_number: String,
         game_versions: Vec<String>,
         files: Vec<File>,
@@ -772,6 +775,7 @@ pub async fn search_modpacks(
 }
 
 /// Entfernt nur Signatur-Dateien aus einer ZIP-Datei (Resource Pack, Shader Pack, etc.)
+#[allow(dead_code)]
 async fn remove_meta_inf_from_zip(zip_path: &std::path::Path) -> Result<(), String> {
     use std::io::{Read, Write};
     use zip::write::FileOptions;

@@ -1,0 +1,32 @@
+# Cargo Cross-Compilation Konfiguration für Lion Launcher
+
+# Windows Cross-Compilation mit MinGW
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+ar = "x86_64-w64-mingw32-ar"
+
+# Alternativ: Windows Cross-Compilation mit MSVC (benötigt lld)
+[target.x86_64-pc-windows-msvc]
+linker = "lld-link"
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# Linux ARM64 Cross-Compilation
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+
+# macOS Cross-Compilation (benötigt osxcross)
+[target.x86_64-apple-darwin]
+linker = "x86_64-apple-darwin-clang"
+
+[target.aarch64-apple-darwin]
+linker = "aarch64-apple-darwin-clang"
+
+# Build-Optimierungen
+[build]
+# Parallele Codegen-Units für schnellere Debug-Builds
+# jobs = 6
+
+# Rustflags für alle Targets
+[target.'cfg(all())']
+# rustflags = ["-C", "link-arg=-fuse-ld=lld"]  # Nutze LLD Linker wenn verfügbar
+

@@ -72,7 +72,7 @@ fn filter_matching_versions(all_versions: &[String], mc_version: &str) -> Vec<St
         return Vec::new();
     }
 
-    let major = mc_parts[0]; // "1"
+    let _major = mc_parts[0]; // "1"
     let minor = mc_parts[1]; // "21" oder "20" oder "19"
     let patch = mc_parts.get(2).unwrap_or(&"0"); // "2" oder "1" oder "0"
 

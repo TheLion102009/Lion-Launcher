@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::io::Read;
 use crate::core::download::DownloadManager;
