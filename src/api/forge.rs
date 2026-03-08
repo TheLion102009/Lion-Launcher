@@ -24,7 +24,7 @@ impl ForgeClient {
         let versions = self.get_all_versions().await?;
         
         // Filtere nach Minecraft-Version
-        let filtered: Vec<ForgeVersion> = versions
+        let mut filtered: Vec<ForgeVersion> = versions
             .into_iter()
             .filter(|v| v.mc_version == minecraft_version)
             .collect();
@@ -32,6 +32,9 @@ impl ForgeClient {
         if filtered.is_empty() {
             bail!("Keine Forge-Versionen für Minecraft {} gefunden", minecraft_version);
         }
+
+        // Sortiere neueste zuerst (nach Forge-Version absteigend)
+        filtered.sort_by(|a, b| Self::compare_version_strings(&b.forge_version, &a.forge_version));
 
         Ok(filtered)
     }

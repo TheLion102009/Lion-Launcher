@@ -14,6 +14,19 @@ mod types;
 mod config;
 
 fn main() {
+    // WebKitGTK 2.50+ mit NVIDIA-Treibern versucht GBM/EGL DMA-BUF Rendering,
+    // was mit proprietären NVIDIA-Treibern und vielen Setups zu SIGABRT führt.
+    // Diese Variablen müssen VOR der WebKit-Initialisierung gesetzt werden.
+    #[cfg(target_os = "linux")]
+    {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        // Sicherstellen, dass DISPLAY gesetzt ist (für X11-Sessions)
+        if std::env::var("DISPLAY").is_err() {
+            std::env::set_var("DISPLAY", ":0");
+        }
+    }
+
     tracing_subscriber::fmt::init();
 
     tauri::Builder::default()

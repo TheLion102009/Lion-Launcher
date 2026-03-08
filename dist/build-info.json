@@ -1,42 +1,79 @@
 {
   "version": "0.1.0",
-  "build_date": "2026-02-08",
+  "build_date": "2026-02-08T01:27:00Z",
+  "compiler": {
+    "rustc": "1.85+",
+    "targets": ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu"]
+  },
   "builds": [
     {
       "platform": "windows",
       "arch": "x86_64",
       "filename": "Lion-Launcher-windows-x64.exe",
+      "size_bytes": 7442432,
       "size_mb": 7.1,
-      "sha256": "9aecbce4fb8c0204f49a8ca97b33a28822624fba93615f8cb5d9463923b73872"
+      "sha256": "ad5a6ecc2d1168db299324e402c702f296c1d5c04f280f56b201ce2a272a2b71",
+      "cross_compiled": true,
+      "toolchain": "MinGW-w64"
     },
     {
       "platform": "linux",
       "arch": "x86_64",
       "filename": "Lion-Launcher-linux-x64",
+      "size_bytes": 8069120,
       "size_mb": 7.7,
-      "sha256": "f723035fee7ad62fb49cb23f7b9a6aef57c4073d328d45f9dac7b5445bd24fa4"
+      "sha256": "072c82d29dca1e93dac64ad031e0af6ea06cf28a7dd69cac777e5e021527098b",
+      "cross_compiled": false,
+      "toolchain": "native"
     }
   ],
   "features": [
     "Minecraft 1.20.2 - 1.21.11 Support",
     "Fabric Support (full)",
-    "Quilt Support (full)",
-    "NeoForge Support (full)",
-    "Forge Support (experimental)",
+    "Quilt Support (full with Fabric fallback)",
+    "NeoForge Support (full, MC 1.20.2+)",
+    "Forge Support (experimental, MC < 1.21.6)",
     "Microsoft Account Login",
     "Offline Accounts",
     "Mod Browser (Modrinth)",
     "Resource Packs & Shader Packs",
     "Profile Management",
     "Dark/Light Theme",
-    "Multiple Accent Colors"
+    "8 Accent Colors",
+    "3D Skin Preview",
+    "Memory Configuration"
   ],
   "requirements": {
     "os": ["Windows 10/11 (64-bit)", "Linux (64-bit)"],
     "ram_min": "4 GB",
     "ram_recommended": "8 GB",
     "disk_space": "500 MB + Minecraft data",
-    "java": "Java 21 (auto-detected)"
+    "java": "Java 21 (auto-detected)",
+    "linux_extras": ["GTK 3", "WebKit2GTK 4.1"]
+  },
+  "supported_loaders": {
+    "vanilla": {
+      "versions": "1.20.2 - 1.21.11",
+      "status": "stable"
+    },
+    "fabric": {
+      "versions": "1.20.2 - 1.21.11",
+      "status": "stable",
+      "recommended": true
+    },
+    "quilt": {
+      "versions": "1.20.2 - 1.21.11",
+      "status": "stable",
+      "fallback": "fabric"
+    },
+    "neoforge": {
+      "versions": "1.20.2 - 1.21.11",
+      "status": "stable"
+    },
+    "forge": {
+      "versions": "< 1.21.6",
+      "status": "experimental"
+    }
   }
 }
 

@@ -360,6 +360,18 @@ impl MinecraftLauncher {
             &version_info.asset_index.id,
         );
 
+        // Display-Umgebungsvariablen weitergeben (verhindert GBM/EGL-Fallback → SIGABRT)
+        if let Ok(display) = std::env::var("DISPLAY") {
+            cmd.env("DISPLAY", display);
+        }
+        if let Ok(wd) = std::env::var("WAYLAND_DISPLAY") {
+            cmd.env("WAYLAND_DISPLAY", wd);
+        }
+        if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
+            cmd.env("XDG_RUNTIME_DIR", xdg);
+        }
+        cmd.env("_JAVA_AWT_WM_NONREPARENTING", "1");
+
         tracing::info!("✅ Starting NeoForge...");
 
         // Starte das Spiel
@@ -384,7 +396,25 @@ impl MinecraftLauncher {
         Ok(())
     }
 
-    /// Launch für NeoForge und Forge mit korrektem Modulpfad
+    /// Launch für Forge mit korrektem Modulpfad.
+    /// Verwendet die version.json aus dem Forge-Installer als einzige Quelle der Wahrheit.
+    /// Alle JVM/Game-Args werden 1:1 übernommen und Platzhalter korrekt ersetzt.
+    /// Launch für Forge (modern + legacy).
+    ///
+    /// Für Forge 1.13+ mit ForgeBootstrap:
+    /// ┌──────────────────────────────────────────────────────────────────────┐
+    /// │  java                                                                │
+    /// │    -Xmx... -Xms... -Djava.library.path=...                          │
+    /// │    [JVM-args aus version.json]                                       │
+    /// │    -cp bootstrap.jar:bootstrap-api.jar                               │
+    /// │    net.minecraftforge.bootstrap.ForgeBootstrap                       │
+    /// │    --module-path [alle anderen Forge-JARs]                           │
+    /// │    --add-modules ALL-MODULE-PATH                                     │
+    /// │    [game-args]                                                       │
+    /// └──────────────────────────────────────────────────────────────────────┘
+    ///
+    /// ForgeBootstrap.main() baut dann INTERN den richtigen Java-Modul-Kontext auf.
+    /// NICHT via `-m net.minecraftforge.bootstrap/...` starten!
     async fn launch_neoforge_or_forge(
         &self,
         profile: &Profile,
@@ -400,333 +430,418 @@ impl MinecraftLauncher {
         access_token: Option<&str>,
     ) -> Result<()> {
         let version = &profile.minecraft_version;
-        let loader = &profile.loader.loader;
-        let is_neoforge = matches!(loader, crate::types::version::ModLoader::NeoForge);
 
-        tracing::info!("=== {} Launch ===", if is_neoforge { "NeoForge" } else { "Forge" });
+        tracing::info!("=== Forge Launch ===");
 
         // Loader-Version auflösen
         let loader_version = if profile.loader.version == "latest" || profile.loader.version.is_empty() {
-            if is_neoforge {
-                self.resolve_latest_neoforge_version(version).await?
-            } else {
-                self.resolve_latest_forge_version(version).await?
-            }
+            self.resolve_latest_forge_version(version).await?
         } else {
             profile.loader.version.clone()
         };
 
-        tracing::info!("Using loader version: {}", loader_version);
+        tracing::info!("Using Forge version: {}", loader_version);
 
-        // WICHTIG: Kopiere/Symlink die Minecraft-JAR in das Libraries-Verzeichnis
-        // NeoForge erwartet sie dort als net/minecraft/VERSION/minecraft-client-VERSION.jar
-        let mc_client_lib_path = libraries_dir.join(format!(
-            "net/minecraft/{0}/minecraft-client-{0}.jar", version
-        ));
-
-        if !mc_client_lib_path.exists() {
-            tracing::info!("Copying Minecraft client JAR to libraries: {:?}", mc_client_lib_path);
-            tokio::fs::create_dir_all(mc_client_lib_path.parent().unwrap()).await?;
-            tokio::fs::copy(client_jar, &mc_client_lib_path).await?;
+        // fml.toml schreiben: EarlyDisplay deaktivieren.
+        // earlyWindowControl=true + NVIDIA/GLX → "BadValue" bei allen GL-Profilen (3.2–4.6).
+        // earlyWindowProvider="none" deaktiviert das GLFW-Fenster komplett.
+        {
+            let config_dir = game_dir.join("config");
+            tokio::fs::create_dir_all(&config_dir).await.ok();
+            let fml_toml = config_dir.join("fml.toml");
+            let content = "\
+#FML config - managed by Lion-Launcher
+earlyWindowControl = false
+earlyWindowProvider = \"none\"
+earlyWindowHeight = 480
+earlyWindowWidth = 854
+earlyWindowMaximized = false
+earlyWindowFBScale = 1
+earlyWindowSkipGLVersions = []
+earlyWindowLogHelpMessage = false
+earlyWindowSquir = false
+earlyWindowShowCPU = false
+versionCheck = true
+defaultConfigPath = \"defaultconfigs\"
+disableOptimizedDFU = true
+maxThreads = -1
+";
+            tokio::fs::write(&fml_toml, content).await.ok();
+            tracing::info!("Wrote fml.toml (earlyWindowControl=false) to {:?}", fml_toml);
         }
 
-        // Installiere Loader und hole die Konfiguration
-        let install_result = if is_neoforge {
-            self.install_neoforge_complete(&loader_version, libraries_dir, &mc_client_lib_path, version).await?
-        } else {
-            // Verwende den neuen ForgeInstaller
-            let forge_installer = forge::ForgeInstaller::new(self.download_manager.clone());
-            let result = forge_installer.install_forge_complete(version, &loader_version, libraries_dir, client_jar).await?;
-            
-            // Konvertiere in ForgeInstallResult
-            ForgeInstallResult {
-                main_class: result.main_class,
-                classpath: result.classpath,
-                module_path: result.module_path,
-                jvm_args: result.jvm_args,
-                game_args: result.game_args,
-                srg_jar_path: None, // Forge benötigt keine SRG-JAR
+        // Forge installieren
+        let forge_installer = forge::ForgeInstaller::new(self.download_manager.clone());
+        let install_result = forge_installer.install_forge_complete(
+            version, &loader_version, libraries_dir, client_jar
+        ).await?;
+
+        // Natives-Verzeichnis leeren und neu befüllen
+        if natives_dir.exists() {
+            tokio::fs::remove_dir_all(natives_dir).await.ok();
+        }
+        tokio::fs::create_dir_all(natives_dir).await?;
+        let os = Self::get_os();
+
+        // Nur natives-JARs extrahieren die explizit von Forge oder Vanilla referenziert werden.
+        // KEINE blinde Suche im libraries-Verzeichnis — das würde alle LWJGL-Versionen mischen!
+        //
+        // Quellen:
+        // 1. install_result.native_jars: natives-JARs aus der Forge version.json
+        // 2. vanilla_classpath: natives-JARs die download_libraries heruntergeladen hat
+        //    (da download_libraries natives aus CP filtert, sind sie NICHT im vanilla_classpath —
+        //     aber die JARs liegen auf Disk und können über den bekannten Pfad gefunden werden)
+
+        // ── Natives extrahieren ──────────────────────────────────────────────────
+        // Quelle 1: Forge-natives aus version.json (install_result.native_jars)
+        for jar_path in &install_result.native_jars {
+            let path = std::path::Path::new(jar_path);
+            let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let is_my_os = (os == "linux" && (fname.contains("natives-linux") || fname.contains("linux")))
+                || (os == "windows" && fname.contains("natives-windows"))
+                || (os == "osx" && (fname.contains("natives-osx") || fname.contains("natives-macos")));
+            if is_my_os && path.exists() {
+                tracing::info!("Extracting Forge native: {}", fname);
+                self.extract_native(path, natives_dir)?;
             }
+        }
+
+        // Quelle 2: Natives direkt aus version_info.libraries ableiten.
+        // Das deckt LWJGL, jtracy (MC 1.21.11+) und alle anderen Vanilla-Natives ab.
+        // download_libraries hat diese JARs bereits heruntergeladen, aber aus dem CP gefiltert.
+        let native_os_suffix = match os.as_str() {
+            "linux"   => "natives-linux",
+            "windows" => "natives-windows",
+            "osx"     => "natives-macos",
+            _         => "natives-linux",
         };
+        for lib in &version_info.libraries {
+            if let Some(rules) = &lib.rules {
+                if !self.check_rules(rules) { continue; }
+            }
+            if let Some(dl) = &lib.downloads {
+                if let Some(art) = &dl.artifact {
+                    if art.path.contains(native_os_suffix) {
+                        let native_path = libraries_dir.join(&art.path);
+                        if native_path.exists() {
+                            let fname = native_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                            tracing::info!("Extracting Vanilla native: {}", fname);
+                            self.extract_native(&native_path, natives_dir)?;
+                        }
+                    }
+                }
+                // Altes Format (classifiers)
+                if let Some(classifiers) = &dl.classifiers {
+                    let key = format!("natives-{}", os);
+                    if let Some(nat) = classifiers.get(&key) {
+                        let native_path = libraries_dir.join(&nat.path);
+                        if native_path.exists() {
+                            let fname = native_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                            tracing::info!("Extracting Vanilla native (legacy): {}", fname);
+                            self.extract_native(&native_path, natives_dir)?;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Quelle 3: Direkte Suche im libraries-Verzeichnis nach natives-linux JARs.
+        // Fallback wenn Quellen 1+2 nichts fanden (z.B. frischer Download).
+        let extracted = std::fs::read_dir(natives_dir)
+            .map(|d| d.count()).unwrap_or(0);
+        if extracted == 0 {
+            tracing::warn!("No natives extracted from classpath — scanning libraries dir");
+            if let Ok(entries) = walkdir_lwjgl_natives(libraries_dir, &os) {
+                for native_path in entries {
+                    let fname = native_path.file_name()
+                        .and_then(|n| n.to_str()).unwrap_or("");
+                    tracing::info!("Fallback: Extracting native {}", fname);
+                    self.extract_native(&native_path, natives_dir)?;
+                }
+            }
+        }
+
+        tracing::info!("Natives directory populated: {} files",
+            std::fs::read_dir(natives_dir).map(|d| d.count()).unwrap_or(0));
+
+        // options.txt: fullscreen deaktivieren um Absturz-Loop nach unfertigem Start zu verhindern.
+        // Minecraft speichert "fullscreen:true" und versucht beim nächsten Start sofort
+        // Fullscreen zu aktivieren — ohne GL-Context → Absturz → Loop.
+        {
+            let options_file = game_dir.join("options.txt");
+            if options_file.exists() {
+                if let Ok(content) = tokio::fs::read_to_string(&options_file).await {
+                    if content.contains("fullscreen:true") {
+                        let patched = content.replace("fullscreen:true", "fullscreen:false");
+                        tokio::fs::write(&options_file, patched).await.ok();
+                        tracing::info!("Patched options.txt: fullscreen→false");
+                    }
+                }
+            }
+        }
 
         let java_path = self.find_java()?;
         let memory_mb = profile.memory_mb.unwrap_or(4096);
-
-        let mut cmd = Command::new(&java_path);
-
-        // Basis JVM-Argumente
-        cmd.arg(format!("-Xmx{}M", memory_mb));
-        cmd.arg(format!("-Xms{}M", memory_mb / 2));
-        cmd.arg(format!("-Djava.library.path={}", natives_dir.display()));
-        cmd.arg("-XX:+UseG1GC");
-        cmd.arg("-XX:+UnlockExperimentalVMOptions");
-        cmd.arg("-XX:G1NewSizePercent=20");
-        cmd.arg("-XX:G1ReservePercent=20");
-        cmd.arg("-XX:MaxGCPauseMillis=50");
-        cmd.arg("-XX:G1HeapRegionSize=32M");
-
-        // KRITISCH: Sortiere JVM-Args nach Typ!
-        // System Properties (-D) MÜSSEN ZUERST kommen, damit ModLauncher sie sieht!
-        let mut system_properties = Vec::new();
-        let mut module_args = Vec::new();
-        let mut module_path_from_args: Option<String> = None;
-        let mut other_args = Vec::new();
-
-        let mut i = 0;
-        while i < install_result.jvm_args.len() {
-            let arg = &install_result.jvm_args[i];
-
-            if arg.starts_with("-D") {
-                // System Property
-                system_properties.push(arg.clone());
-            } else if arg == "-p" || arg == "--module-path" {
-                // Module Path mit Wert im nächsten Arg
-                if i + 1 < install_result.jvm_args.len() {
-                    module_path_from_args = Some(install_result.jvm_args[i + 1].clone());
-                    i += 1; // Überspringe den Wert
-                }
-            } else if arg.starts_with("--add-") || arg.starts_with("--patch-") {
-                // Module System Args (--add-opens, --add-modules, etc.)
-                module_args.push(arg.clone());
-            } else {
-                // Andere JVM Args
-                other_args.push(arg.clone());
-            }
-
-            i += 1;
-        }
-
-        // KRITISCH: System Properties ZUERST hinzufügen!
-        tracing::info!("Adding {} system properties...", system_properties.len());
-        for prop in &system_properties {
-            cmd.arg(prop);
-        }
-
-        // Dann andere Args
-        for arg in &other_args {
-            cmd.arg(arg);
-        }
-
-        // Dann Module System Args
-        for arg in &module_args {
-            cmd.arg(arg);
-        }
-
-        // Module Path: Kombiniere aus JVM-Args und install_result
-        let final_module_path = if let Some(ref mp_from_args) = module_path_from_args {
-            if !install_result.module_path.is_empty() {
-                // Kombiniere beide
-                let combined = format!("{}:{}", mp_from_args, install_result.module_path.join(":"));
-                tracing::info!("Combining module paths: {} entries", combined.split(':').count());
-                combined
-            } else {
-                mp_from_args.clone()
-            }
-        } else {
-            install_result.module_path.join(":")
-        };
-
-        // Füge Module Path hinzu wenn vorhanden
-        if !final_module_path.is_empty() {
-            tracing::info!("Using module path with {} entries", final_module_path.split(':').count());
-            cmd.arg("-p").arg(&final_module_path);
-
-            // Lade alle Module
-            if !module_args.iter().any(|a| a.contains("--add-modules")) {
-                cmd.arg("--add-modules").arg("ALL-MODULE-PATH");
-            }
-        }
-
-        // Classpath - KRITISCH: Die Minecraft-JAR MUSS im Classpath sein!
-        // Für NeoForge: Verwende die SRG-JAR aus install_result
-        let minecraft_jar_for_classpath = if is_neoforge {
-            // Verwende die SRG-JAR aus install_result (wurde dort gesetzt)
-            if let Some(ref srg_jar_path) = install_result.srg_jar_path {
-                tracing::info!("✅ Using SRG-JAR in classpath: {}", srg_jar_path);
-                srg_jar_path.clone()
-            } else {
-                tracing::warn!("⚠️ Keine SRG-JAR in install_result, verwende client_jar");
-                client_jar.display().to_string()
-            }
-        } else {
-            client_jar.display().to_string()
-        };
-
-        // Baue den Classpath: Minecraft-JAR + NeoForge-Libraries + Vanilla-Libraries
-        let combined_classpath = if install_result.classpath.is_empty() {
-            format!("{}:{}", minecraft_jar_for_classpath, vanilla_classpath)
-        } else {
-            let combined = format!("{}:{}:{}",
-                minecraft_jar_for_classpath,
-                install_result.classpath.join(":"),
-                vanilla_classpath
-            );
-            Self::deduplicate_classpath(&combined)
-        };
-
-        // WICHTIG: Prüfe ob Minecraft-JAR im Classpath ist
-        let has_minecraft_jar = combined_classpath.contains("minecraft") || combined_classpath.contains(&client_jar.display().to_string());
-        tracing::info!("Classpath contains Minecraft JAR: {}", has_minecraft_jar);
-
-        if !has_minecraft_jar && is_neoforge {
-            tracing::warn!("Minecraft-JAR might not be in classpath - NeoForge loads it via --gameJar");
-        }
-
-        // KRITISCH für Forge 1.21.6+:
-        // Forge verwendet das Java Module System und muss über -m gestartet werden!
-        // Die Main-Class ist im Modul net.minecraftforge.bootstrap
-        let is_forge_module = install_result.main_class.contains("ForgeBootstrap");
-
-        if is_forge_module && !is_neoforge {
-            // Forge 1.21.6+ - Start über Module System
-            tracing::info!("🔧 Using Java Module System for Forge 1.21.6+");
-
-            // Die bootstrap.jar MUSS im Module-Path sein
-            let bootstrap_jar = libraries_dir.join("net/minecraftforge/bootstrap/2.1.8/bootstrap-2.1.8.jar");
-            let bootstrap_api_jar = libraries_dir.join("net/minecraftforge/bootstrap-api/2.1.8/bootstrap-api-2.1.8.jar");
-
-            // Baue den Module-Path mit ALLEN notwendigen JARs
-            let mut forge_module_path = Vec::new();
-
-            // KRITISCH: Bootstrap JARs zuerst!
-            if bootstrap_jar.exists() {
-                forge_module_path.push(bootstrap_jar.display().to_string());
-            } else {
-                tracing::error!("❌ Bootstrap JAR not found at: {:?}", bootstrap_jar);
-            }
-
-            if bootstrap_api_jar.exists() {
-                forge_module_path.push(bootstrap_api_jar.display().to_string());
-            }
-
-            // Füge alle anderen Module-JARs hinzu
-            for m in &install_result.module_path {
-                if !forge_module_path.contains(m) {
-                    forge_module_path.push(m.clone());
-                }
-            }
-
-            // Module-Path setzen
-            if !forge_module_path.is_empty() {
-                let module_path_str = forge_module_path.join(":");
-                tracing::info!("Module path: {} entries", forge_module_path.len());
-                cmd.arg("-p").arg(&module_path_str);
-            }
-
-            // Classpath für NICHT-Module Libraries
-            if !combined_classpath.is_empty() {
-                cmd.arg("-cp").arg(&combined_classpath);
-            }
-
-            // Debug: Module-Path speichern
-            let module_debug_path = game_dir.join("modulepath_debug.txt");
-            std::fs::write(&module_debug_path, forge_module_path.join("\n")).ok();
-
-            // KRITISCH: Main-Class über -m (Module) starten!
-            // Format: -m <module>/<main-class>
-            tracing::info!("Main module: net.minecraftforge.bootstrap/net.minecraftforge.bootstrap.ForgeBootstrap");
-            cmd.arg("-m").arg("net.minecraftforge.bootstrap/net.minecraftforge.bootstrap.ForgeBootstrap");
-        } else {
-            // NeoForge oder ältere Forge - klassischer Start über Classpath
-            cmd.arg("-cp").arg(&combined_classpath);
-
-            // Debug: Classpath speichern
-            let debug_path = game_dir.join("classpath_debug.txt");
-            std::fs::write(&debug_path, combined_classpath.replace(":", "\n")).ok();
-            tracing::info!("Classpath saved to: {:?}", debug_path);
-
-            // Main Class
-            tracing::info!("Main class: {}", install_result.main_class);
-            cmd.arg(&install_result.main_class);
-        }
-
-        // KRITISCH: Game Arguments für NeoForge (--fml.*, --launchTarget, etc.)
-        // Diese müssen NACH der Main-Class kommen!
-        for arg in &install_result.game_args {
-            cmd.arg(arg);
-        }
-
-        // launchTarget für Forge/NeoForge
-        if install_result.main_class.contains("BootstrapLauncher") || install_result.main_class.contains("modlauncher") {
-            // Nur hinzufügen wenn nicht bereits in game_args
-            if !install_result.game_args.iter().any(|a| a.contains("launchTarget")) {
-                cmd.arg("--launchTarget").arg("forgeclient");
-            }
-        }
-
-        // KRITISCH: Für NeoForge muss --gameJar auf die SRG-JAR zeigen
-        // Dies muss NACH den NeoForge-Args aber VOR den Vanilla-Args kommen
-        if is_neoforge {
-            let game_jar = if let Some(ref srg_jar_path) = install_result.srg_jar_path {
-                // Verwende die SRG-JAR aus dem install_result
-                tracing::info!("✅ Verwende SRG-JAR aus install_result: {}", srg_jar_path);
-                srg_jar_path.clone()
-            } else {
-                // Fallback: Versuche die SRG-JAR zu finden
-                tracing::warn!("⚠️ Keine SRG-JAR in install_result, suche selbst...");
-                let possible_paths = vec![
-                    libraries_dir.join(format!("net/minecraft/client/{}-20240808.144430/client-{}-20240808.144430-srg.jar",
-                        version, version)),
-                    libraries_dir.join(format!("net/neoforged/neoforge/{}/client-{}-srg.jar",
-                        loader_version, version)),
-                ];
-
-                let mut found_srg = None;
-                for path in &possible_paths {
-                    if path.exists() {
-                        tracing::info!("✅ SRG-JAR gefunden: {:?}", path);
-                        found_srg = Some(path.display().to_string());
-                        break;
-                    }
-                }
-
-                found_srg.ok_or_else(|| anyhow::anyhow!("❌ SRG-JAR nicht gefunden! NeoForge benötigt diese Datei."))?
-            };
-
-            tracing::info!("✅ Setze --gameJar auf: {}", game_jar);
-            cmd.arg("--gameJar").arg(game_jar);
-        }
-
         let token = access_token.unwrap_or("0");
         let user_type = if access_token.is_some() && token != "0" { "msa" } else { "legacy" };
 
-        // Vanilla-Argumente in der korrekten Reihenfolge
-        cmd.arg("--username").arg(username);
-        cmd.arg("--version").arg(version);
-        cmd.arg("--gameDir").arg(game_dir);
-        cmd.arg("--assetsDir").arg(assets_dir);
-        cmd.arg("--assetIndex").arg(&version_info.asset_index.id);
-        cmd.arg("--uuid").arg(uuid);
-        cmd.arg("--accessToken").arg(token);
-        cmd.arg("--userType").arg(user_type);
+        // Platzhalter in JVM-Args ersetzen
+        let resolved_jvm_args: Vec<String> = install_result.jvm_args.iter()
+            .map(|arg| forge::resolve_arg_placeholders(
+                arg, libraries_dir, natives_dir, game_dir, assets_dir,
+                &version_info.asset_index.id, version, uuid, token, user_type, username,
+            ))
+            .collect();
 
-        // Extra args (z.B. für Quick Play)
+        // Platzhalter in Game-Args ersetzen
+        let resolved_game_args: Vec<String> = install_result.game_args.iter()
+            .map(|arg| forge::resolve_arg_placeholders(
+                arg, libraries_dir, natives_dir, game_dir, assets_dir,
+                &version_info.asset_index.id, version, uuid, token, user_type, username,
+            ))
+            .collect();
+
+        tracing::info!("JVM args resolved: {}", resolved_jvm_args.len());
+        tracing::info!("Game args resolved: {}", resolved_game_args.len());
+
+        let mut cmd = Command::new(&java_path);
+
+        // ── Linux/NVIDIA Umgebungs-Fixes ─────────────────────────────────────────
+        // Kontext: NVIDIA Kernel-Modul und Userspace-Treiber können unterschiedliche
+        // Versionen haben (z.B. nach Kernel-Update ohne Reboot). Das bricht GLX mit
+        // "BadValue X_GLXCreateNewContext". LWJGL/GLFW kann aber über EGL-X11 rendern.
+        //
+        // DISPLAY muss explizit gesetzt sein – Tauri-Kindprozesse erben env nicht immer.
+        cmd.env("DISPLAY", std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string()));
+        if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
+            cmd.env("XDG_RUNTIME_DIR", xdg);
+        }
+        // NVIDIA-Treiber für GLX explizit wählen (nicht Mesa-Fallback)
+        cmd.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia");
+        // NVIDIA EGL-Treiber explizit (für LWJGL EGL-Pfad)
+        cmd.env("__EGL_VENDOR_LIBRARY_FILENAMES", "/usr/lib/x86_64-linux-gnu/libEGL_nvidia.so.0");
+        // Threaded Optimizations AUS – verursacht BadValue bei Context-Create
+        cmd.env("__GL_THREADED_OPTIMIZATIONS", "0");
+        // Kein indirektes Rendering (würde Software-Fallback erzwingen)
+        cmd.env("LIBGL_ALWAYS_INDIRECT", "0");
+        // Reparenting-WM Fix: verhindert GLXBadDrawable beim Fensterwechsel
+        cmd.env("_JAVA_AWT_WM_NONREPARENTING", "1");
+        // Mesa-Overrides entfernen – interferieren mit NVIDIA-Treiber
+        cmd.env_remove("MESA_GL_VERSION_OVERRIDE");
+        cmd.env_remove("MESA_GLSL_VERSION_OVERRIDE");
+        cmd.env_remove("LIBGL_DRIVERS_PATH");
+        // LWJGL: EGL-X11 Plattform statt Standard-GLX wählen
+        // Das umgeht den GLX BadValue Bug bei NVIDIA Version-Mismatch
+        cmd.env("LIBGL_KOPPER_DISABLE", "1");
+        // ────────────────────────────────────────────────────────────────────────
+
+        // === BASIS JVM-ARGUMENTE ===
+        cmd.arg(format!("-Xmx{}M", memory_mb));
+        cmd.arg(format!("-Xms{}M", memory_mb / 2));
+        // Beide Properties setzen: LWJGL im Forge SECURE-BOOTSTRAP ModuleLayer
+        // ignoriert java.library.path und liest stattdessen org.lwjgl.librarypath
+        cmd.arg(format!("-Djava.library.path={}", natives_dir.display()));
+        cmd.arg(format!("-Dorg.lwjgl.librarypath={}", natives_dir.display()));
+        // Forge EarlyDisplay auf Linux deaktivieren: vermeidet GLFW BadValue-Fehler
+        // durch das frühe OpenGL-Fenster das Forge vor dem eigentlichen MC öffnet.
+        // GLFW versucht dort alle GL-Profile 4.6..3.2 und scheitert auf NVIDIA/GLX.
+        cmd.arg("-Dfml.earlyprogresswindow=false");
+        cmd.arg("-Dforge.earlyprogresswindow=false");
+
+        // DNS-Fix: Forge's SecureBootstrap ModuleLayer exportiert jdk.naming.dns nicht.
+        // Das führt zu "NoInitialContextException: Cannot instantiate DnsContextFactory"
+        // beim Server-Pingen auf dem Multiplayer-Screen. Mit --add-modules wird das
+        // Modul explizit in den Boot-Layer hinzugefügt, bevor Forge seinen ModuleLayer baut.
+        cmd.arg("--add-modules=jdk.naming.dns");
+        // --add-opens damit javax.naming.spi auf com.sun.jndi.dns zugreifen darf
+        cmd.arg("--add-opens=jdk.naming.dns/com.sun.jndi.dns=java.naming");
+
+        // JVM-Args aus version.json (ohne -p / --module-path - das bauen wir selbst)
+        for arg in &resolved_jvm_args {
+            if arg != "-p" && arg != "--module-path" && !arg.starts_with("--module-path=") {
+                cmd.arg(arg);
+            }
+        }
+
+        if install_result.is_bootstrap {
+            // === FORGE BOOTSTRAP START (Forge 1.13+) ===
+            //
+            // ForgeBootstrap.main() → Bootstrap.selectBootModules() liest ALLE JARs
+            // aus dem AppClassLoader (Classpath) und baut intern selbst den ModuleLayer.
+            // Deshalb müssen ALLE Forge-JARs im -cp sein — nicht in --module-path.
+            //
+            // Vanilla-Classpath: JARs entfernen die Forge bereits mitbringt (Versions-Konflikte)
+            fn artifact_base(fname: &str) -> &str {
+                let name = fname.strip_suffix(".jar").unwrap_or(fname);
+                let bytes = name.as_bytes();
+                let mut pos = 0;
+                for i in 0..name.len() {
+                    if bytes[i] == b'-' && i + 1 < name.len() && bytes[i+1].is_ascii_digit() {
+                        pos = i;
+                        break;
+                    }
+                }
+                if pos > 0 { &name[..pos] } else { name }
+            }
+
+            // Basis-Namen aller Forge-JARs sammeln
+            let forge_bases: std::collections::HashSet<&str> = install_result.bootstrap_classpath
+                .iter()
+                .chain(install_result.classpath.iter())
+                .map(|p| artifact_base(
+                    std::path::Path::new(p).file_name()
+                        .and_then(|n| n.to_str()).unwrap_or("")
+                ))
+                .collect();
+
+            // Vanilla-CP filtern: Konflikte mit Forge-JARs und Natives entfernen
+            let filtered_vanilla: Vec<&str> = vanilla_classpath.split(':')
+                .filter(|e| {
+                    if e.is_empty() { return false; }
+                    let fname = std::path::Path::new(e)
+                        .file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if fname.contains("-natives-") { return false; }
+                    let base = artifact_base(fname);
+                    if forge_bases.contains(base) {
+                        tracing::debug!("Filtering vanilla JAR (conflicts with forge): {}", fname);
+                        return false;
+                    }
+                    true
+                })
+                .collect();
+
+            // Classpath aufbauen:
+            // bootstrap_classpath (alle Forge-JARs) + classpath (mcp_config etc.)
+            // + client.jar + gefilterter Vanilla-CP
+            let mut cp_parts: Vec<String> = Vec::new();
+            cp_parts.extend(install_result.bootstrap_classpath.iter().cloned());
+            cp_parts.extend(install_result.classpath.iter().cloned());
+            cp_parts.push(client_jar.display().to_string());
+            cp_parts.extend(filtered_vanilla.iter().map(|s| s.to_string()));
+
+            // Deduplizieren
+            let mut seen_cp = std::collections::HashSet::new();
+            cp_parts.retain(|p| seen_cp.insert(p.clone()));
+
+            let bootstrap_cp = cp_parts.join(":");
+            tracing::info!("Bootstrap classpath: {} JARs ({} forge + {} vanilla)",
+                cp_parts.len(),
+                install_result.bootstrap_classpath.len() + install_result.classpath.len(),
+                filtered_vanilla.len()
+            );
+
+            cmd.arg("-cp").arg(&bootstrap_cp);
+
+            // Main-Class: ForgeBootstrap direkt via Classpath (NICHT -m !)
+            tracing::info!("Starting: {}", install_result.main_class);
+            cmd.arg(&install_result.main_class);
+
+
+        } else {
+            // === LEGACY FORGE (BootstrapLauncher, pre-1.13ish) ===
+            let forge_cp_str = install_result.classpath.join(":");
+            let full_cp = Self::deduplicate_classpath(&format!(
+                "{}:{}:{}",
+                forge_cp_str,
+                client_jar.display(),
+                vanilla_classpath
+            ));
+            cmd.arg("-cp").arg(&full_cp);
+            cmd.arg(&install_result.main_class);
+        }
+
+        // === GAME-ARGUMENTE ===
+        for arg in &resolved_game_args {
+            cmd.arg(arg);
+        }
+
+        let has_arg = |name: &str| resolved_game_args.iter().any(|a| a == name);
+
+        if !has_arg("--gameJar") {
+            // KRITISCH: Forge braucht die GEPATCHTE Client-JAR, nicht das Original!
+            // ForgeProdLaunchHandler sucht Minecraft.class in dieser JAR.
+            cmd.arg("--gameJar").arg(&install_result.patched_client_jar);
+        }
+        if !has_arg("--fml.forgeVersion") {
+            cmd.arg("--fml.forgeVersion").arg(&install_result.forge_version);
+        }
+        if !has_arg("--fml.mcVersion") {
+            cmd.arg("--fml.mcVersion").arg(version);
+        }
+        if !has_arg("--fml.forgeGroup") {
+            cmd.arg("--fml.forgeGroup").arg("net.minecraftforge");
+        }
+        if !has_arg("--fml.mcpVersion") {
+            cmd.arg("--fml.mcpVersion").arg(&install_result.mcp_version);
+        }
+        if !has_arg("--username") {
+            cmd.arg("--username").arg(username);
+        }
+        if !has_arg("--version") {
+            cmd.arg("--version").arg(version);
+        }
+        if !has_arg("--gameDir") {
+            cmd.arg("--gameDir").arg(game_dir);
+        }
+        if !has_arg("--assetsDir") {
+            cmd.arg("--assetsDir").arg(assets_dir);
+        }
+        if !has_arg("--assetIndex") {
+            cmd.arg("--assetIndex").arg(&version_info.asset_index.id);
+        }
+        if !has_arg("--uuid") {
+            cmd.arg("--uuid").arg(uuid);
+        }
+        if !has_arg("--accessToken") {
+            cmd.arg("--accessToken").arg(token);
+        }
+        if !has_arg("--userType") {
+            cmd.arg("--userType").arg(user_type);
+        }
+
+        // Extra-Args
         EXTRA_LAUNCH_ARGS.with(|args| {
             for arg in args.borrow().iter() {
                 cmd.arg(arg);
             }
         });
 
+        // Debug-Kommando speichern
+        let debug_cmd_path = game_dir.join("java_command_debug.txt");
+        let full_cmd_str = format!("{} {}",
+            cmd.get_program().to_string_lossy(),
+            cmd.get_args()
+                .map(|a| {
+                    let s = a.to_string_lossy().to_string();
+                    if s.contains(' ') { format!("\"{}\"", s) } else { s }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        std::fs::write(&debug_cmd_path, &full_cmd_str).ok();
+        tracing::info!("Java command saved to: {:?}", debug_cmd_path);
+
+        // Starte den Prozess
         cmd.current_dir(game_dir);
         cmd.stdout(Stdio::inherit());
         cmd.stderr(Stdio::inherit());
 
-        tracing::info!("Launching {} {}...", if is_neoforge { "NeoForge" } else { "Forge" }, loader_version);
+        tracing::info!("Launching Forge {} for MC {}...", loader_version, version);
 
         let mut child = cmd.spawn()?;
         let pid = child.id();
-        tracing::info!("Started with PID: {}", pid);
+        tracing::info!("Forge started with PID: {}", pid);
 
         tokio::spawn(async move {
             match child.wait() {
                 Ok(status) => {
                     if status.success() {
-                        tracing::info!("Minecraft (PID {}) exited successfully", pid);
+                        tracing::info!("Forge (PID {}) exited successfully", pid);
                     } else {
-                        tracing::warn!("Minecraft (PID {}) exited with status: {}", pid, status);
+                        tracing::warn!("Forge (PID {}) exited with status: {}", pid, status);
                     }
                 }
-                Err(e) => tracing::error!("Error waiting for Minecraft: {}", e),
+                Err(e) => tracing::error!("Error waiting for Forge: {}", e),
             }
         });
 
@@ -920,10 +1035,13 @@ impl MinecraftLauncher {
         let client = ForgeClient::new()?;
         let versions = client.get_loader_versions(mc_version).await?;
 
-        // Nehme die erste (neueste) Version
-        let version = versions.first()
+        // Bevorzuge empfohlene Version, sonst die neueste (versions sind bereits neueste-zuerst sortiert)
+        let version = versions.iter()
+            .find(|v| v.recommended)
+            .or_else(|| versions.first())
             .ok_or_else(|| anyhow::anyhow!("No Forge version found for MC {}", mc_version))?;
 
+        tracing::info!("Resolved Forge version for {}: {} (recommended: {})", mc_version, version.forge_version, version.recommended);
         Ok(version.forge_version.clone())
     }
 
@@ -2124,19 +2242,39 @@ impl MinecraftLauncher {
                         tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
                         self.download_manager.download_with_hash(&art.url, &dest, Some(&art.sha1)).await?;
                     }
-                    cp.push(dest.display().to_string());
+
+                    // Modernes Format (1.19+): natives-JARs haben "natives-<os>" im Pfad
+                    // z.B. lwjgl-3.3.3-natives-linux.jar → extrahieren, NICHT in Classpath
+                    let is_native_jar = art.path.contains("natives-linux")
+                        || art.path.contains("natives-windows")
+                        || art.path.contains("natives-osx")
+                        || art.path.contains("natives-macos");
+
+                    if is_native_jar {
+                        // Nur Linux-Natives auf Linux extrahieren
+                        if (os == "linux" && art.path.contains("natives-linux"))
+                            || (os == "windows" && art.path.contains("natives-windows"))
+                            || (os == "osx" && (art.path.contains("natives-osx") || art.path.contains("natives-macos")))
+                        {
+                            tracing::debug!("Extracting native: {}", lib.name);
+                            self.extract_native(&dest, natives_dir)?;
+                        }
+                        // Natives kommen NICHT in den Classpath
+                    } else {
+                        cp.push(dest.display().to_string());
+                    }
                 } else {
                     tracing::debug!("Library {} has no artifact", lib.name);
                 }
 
-                // Natives handling
-                if let Some(natives) = &lib.natives {
-                    if let Some(key) = natives.get(&os) {
+                // Altes Format (pre-1.19): classifiers mit "natives-linux" key
+                if let Some(natives_map) = &lib.natives {
+                    if let Some(key) = natives_map.get(&os) {
                         if let Some(cls) = &dl.classifiers {
                             if let Some(nat) = cls.get(key) {
                                 let dest = lib_dir.join(&nat.path);
                                 if !dest.exists() {
-                                    tracing::info!("Downloading native: {}", lib.name);
+                                    tracing::info!("Downloading native (legacy): {}", lib.name);
                                     tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
                                     self.download_manager.download_with_hash(&nat.url, &dest, Some(&nat.sha1)).await?;
                                 }
@@ -2184,15 +2322,47 @@ impl MinecraftLauncher {
     }
 
     fn extract_native(&self, jar: &Path, dir: &Path) -> Result<()> {
-        let file = std::fs::File::open(jar)?;
-        let mut archive = zip::ZipArchive::new(file)?;
+        let file = match std::fs::File::open(jar) {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!("Cannot open native JAR {:?}: {}", jar, e);
+                return Ok(());
+            }
+        };
+        let mut archive = match zip::ZipArchive::new(file) {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::warn!("Cannot read native JAR {:?}: {}", jar, e);
+                return Ok(());
+            }
+        };
+
         for i in 0..archive.len() {
             let mut f = archive.by_index(i)?;
             let name = f.name().to_string();
-            if name.starts_with("META-INF") || name.ends_with('/') { continue; }
-            if name.ends_with(".so") || name.ends_with(".dll") || name.ends_with(".dylib") {
-                let dest = dir.join(Path::new(&name).file_name().unwrap());
-                std::io::copy(&mut f, &mut std::fs::File::create(&dest)?)?;
+
+            // Überspringe Verzeichnisse und META-INF
+            if name.ends_with('/') || name.starts_with("META-INF") { continue; }
+
+            // Extrahiere .so / .dll / .dylib aus BELIEBIGEN Unterverzeichnissen (flach)
+            // LWJGL 3.3.3 packt sie in linux/x64/org/lwjgl/liblwjgl.so
+            let native_ext = name.ends_with(".so")
+                || name.ends_with(".dll")
+                || name.ends_with(".dylib");
+            if !native_ext { continue; }
+
+            // Nur den Dateinamen (letztes Pfad-Segment) verwenden
+            let file_name = std::path::Path::new(&name)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&name);
+
+            let dest = dir.join(file_name);
+            if !dest.exists() {
+                tracing::debug!("Extracting: {} -> {:?}", name, dest);
+                if let Ok(mut out) = std::fs::File::create(&dest) {
+                    std::io::copy(&mut f, &mut out)?;
+                }
             }
         }
         Ok(())
@@ -2248,3 +2418,54 @@ impl MinecraftLauncher {
         true
     }
 }
+
+/// Sucht alle natives-JARs für das gegebene OS im libraries-Verzeichnis.
+/// Inkludiert LWJGL, jtracy (Mojang 1.21.11+) und andere Minecraft-natives.
+fn walkdir_lwjgl_natives(dir: &Path, os: &str) -> std::io::Result<Vec<PathBuf>> {
+    let suffix = match os {
+        "linux"   => "-natives-linux.jar",
+        "windows" => "-natives-windows.jar",
+        "osx"     => "-natives-macos.jar",
+        _         => "-natives-linux.jar",
+    };
+    // Alle relevanten natives inkl. jtracy (ab MC 1.21.11) und LWJGL
+    let all = walkdir_find_natives(dir, suffix)?;
+    Ok(all.into_iter().filter(|p| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| {
+                n.starts_with("lwjgl")
+                    || n.contains("glfw")
+                    || n.contains("openal")
+                    || n.contains("jemalloc")
+                    || n.contains("stb")
+                    || n.contains("freetype")
+                    || n.contains("jtracy")   // Mojang Tracy profiler (MC 1.21.11+)
+                    || n.contains("tinyfd")
+            })
+            .unwrap_or(false)
+    }).collect())
+}
+
+/// Durchsucht `dir` rekursiv nach JARs die `suffix` im Dateinamen haben.
+fn walkdir_find_natives(dir: &Path, suffix: &str) -> std::io::Result<Vec<PathBuf>> {
+    let mut results = Vec::new();
+    if !dir.is_dir() { return Ok(results); }
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            if let Ok(mut sub) = walkdir_find_natives(&path, suffix) {
+                results.append(&mut sub);
+            }
+        } else if path.file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.ends_with(suffix))
+            .unwrap_or(false)
+        {
+            results.push(path);
+        }
+    }
+    Ok(results)
+}
+
