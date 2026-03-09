@@ -10,6 +10,7 @@
     <div class="container">
         <!-- Sidebar -->
         <div class="sidebar">
+            <div class="sidebar-logo">🦁 Lion Launcher</div>
             <div class="nav-item active" data-page="profiles">Profiles</div>
             <div class="nav-item" data-page="mods">Content Browser</div>
             <div class="nav-item" data-page="skins">Skins</div>
@@ -18,17 +19,12 @@
             
             <!-- Account Display -->
             <div id="account-display" onclick="switchPage('settings')" 
-                 style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-light); border-radius: 8px; cursor: pointer; transition: all 0.3s; margin-top: 10px;">
-                <img id="account-head" src="https://mc-heads.net/avatar/MHF_Steve/40" 
+                 style="display: flex; align-items: center; justify-content: center; padding: 10px; background: var(--bg-light); border-radius: 8px; cursor: pointer; transition: all 0.3s; margin-top: 10px;">
+                <img id="account-head" src="https://mc-heads.net/avatar/MHF_Steve/40"
                      alt="Skin" style="width: 40px; height: 40px; border-radius: 4px; image-rendering: pixelated;">
-                <div style="flex: 1; min-width: 0;">
-                    <div id="account-name" style="font-weight: bold; color: var(--text-primary); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                        Nicht angemeldet
-                    </div>
-                    <div id="account-type" style="font-size: 11px; color: var(--text-secondary);">
-                        Klicke zum Anmelden
-                    </div>
-                </div>
+                <!-- Name und Typ ausgeblendet für cleanes Design -->
+                <div id="account-name" style="display:none;">Nicht angemeldet</div>
+                <div id="account-type" style="display:none;">Klicke zum Anmelden</div>
             </div>
         </div>
 
@@ -37,9 +33,7 @@
             <!-- Profiles Page -->
             <div id="page-profiles" class="page">
                 <div class="header">
-                    <h1 style="display: flex; align-items: center; gap: 15px; font-size: 32px;">
-                        🦁 Lion Launcher
-                    </h1>
+                    <h1>Profiles</h1>
                 </div>
                 <div class="content">
                     <div class="profiles-grid" id="profiles-grid">

@@ -125,6 +125,21 @@ body {
     border-bottom: 2px solid var(--gold);
 }
 
+/* Sidebar-Logo oben links */
+.sidebar-logo {
+    font-size: 29px;
+    font-weight: bold;
+    color: var(--gold);
+    text-align: left;
+    height: 58px;
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+    overflow: visible;
+    flex-shrink: 0;
+}
+
+
 .nav-item {
     padding: 12px 20px;
     margin: 5px 0;
@@ -150,14 +165,20 @@ body {
 
 .header {
     background-color: var(--bg-medium);
-    padding: 20px;
+    padding: 36px 20px 20px 20px;
     border-bottom: none;
     position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
-
 
 .header h1 {
     color: var(--gold);
+    font-size: 20px;
+    font-weight: 600;
+    text-align: center;
+    width: 100%;
 }
 
 .content {

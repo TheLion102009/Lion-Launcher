@@ -328,6 +328,17 @@ impl MinecraftLauncher {
 
         tracing::info!("🚀 Launching NeoForge {} for Minecraft {}", loader_version, version);
 
+        // Wichtige Verzeichnisse sicherstellen
+        tokio::fs::create_dir_all(game_dir.join("mods")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("config")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("logs")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("saves")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("resourcepacks")).await.ok();
+        tracing::info!("mods/ dir: {:?} ({} files)",
+            game_dir.join("mods"),
+            std::fs::read_dir(game_dir.join("mods")).map(|d| d.count()).unwrap_or(0)
+        );
+
         // Finde Java
         let java_path = self.find_java()?;
 
@@ -441,6 +452,25 @@ impl MinecraftLauncher {
         };
 
         tracing::info!("Using Forge version: {}", loader_version);
+
+        // KRITISCH: mods/-Verzeichnis sicherstellen.
+        // Forge sucht Mods ausschließlich in ${gameDir}/mods/.
+        // Ohne dieses Verzeichnis lädt Forge KEINE Mods – auch wenn die JARs im Cache sind.
+        let mods_dir = game_dir.join("mods");
+        tokio::fs::create_dir_all(&mods_dir).await?;
+        tracing::info!("Mods directory: {:?} ({} files)",
+            mods_dir,
+            std::fs::read_dir(&mods_dir).map(|d| d.count()).unwrap_or(0)
+        );
+
+        // Weitere wichtige Forge-Verzeichnisse sicherstellen
+        tokio::fs::create_dir_all(game_dir.join("config")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("logs")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("saves")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("resourcepacks")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("shaderpacks")).await.ok();
+
+        tracing::info!("Final Forge version: {}", loader_version);
 
         // fml.toml schreiben: EarlyDisplay deaktivieren.
         // earlyWindowControl=true + NVIDIA/GLX → "BadValue" bei allen GL-Profilen (3.2–4.6).
@@ -594,7 +624,23 @@ maxThreads = -1
             .collect();
 
         // Platzhalter in Game-Args ersetzen
-        let resolved_game_args: Vec<String> = install_result.game_args.iter()
+        // --gameJar aus game_args filtern: Wir setzen ihn immer explizit auf die gepatchte JAR.
+        // Der Platzhalter-Wert aus version.json zeigt auf die falsche (ungepatchte) JAR.
+        let mut game_args_filtered: Vec<String> = Vec::new();
+        let mut skip_next = false;
+        for arg in &install_result.game_args {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            if arg == "--gameJar" {
+                skip_next = true;
+                continue;
+            }
+            game_args_filtered.push(arg.clone());
+        }
+
+        let resolved_game_args: Vec<String> = game_args_filtered.iter()
             .map(|arg| forge::resolve_arg_placeholders(
                 arg, libraries_dir, natives_dir, game_dir, assets_dir,
                 &version_info.asset_index.id, version, uuid, token, user_type, username,
@@ -648,6 +694,19 @@ maxThreads = -1
         cmd.arg("-Dfml.earlyprogresswindow=false");
         cmd.arg("-Dforge.earlyprogresswindow=false");
 
+        // Forge Patch-Toleranz: Ignoriere Diskrepanzen beim Patching und ungültige Zertifikate.
+        // Notwendig für Forge 56.x/57.x (MC 1.21.6/1.21.7) wo die field_to_method.js-Coremods
+        // fehlschlagen weil Mojang das "fluid"-Feld in FlowingFluidBlock nicht mehr private gemacht hat.
+        // Ohne diese Flags lädt FML die Mods möglicherweise im "reduced mode".
+        cmd.arg("-Dfml.ignoreInvalidMinecraftCertificates=true");
+        cmd.arg("-Dfml.ignorePatchDiscrepancies=true");
+        // Weitere Toleranz-Flags für Forge 56.x/57.x Coremod-Fehler:
+        // Verhindert dass FML bei Transformationsfehlern in einen eingeschränkten Modus wechselt
+        cmd.arg("-Dfml.noGPGCheck=true");
+        cmd.arg("-Dforge.logging.console.level=error");
+        // Verhindert dass Transformationsfehler die Mod-Loading-Pipeline unterbrechen
+        cmd.arg("-Dfml.earlywindow.headless=true");
+
         // DNS-Fix: Forge's SecureBootstrap ModuleLayer exportiert jdk.naming.dns nicht.
         // Das führt zu "NoInitialContextException: Cannot instantiate DnsContextFactory"
         // beim Server-Pingen auf dem Multiplayer-Screen. Mit --add-modules wird das
@@ -655,6 +714,13 @@ maxThreads = -1
         cmd.arg("--add-modules=jdk.naming.dns");
         // --add-opens damit javax.naming.spi auf com.sun.jndi.dns zugreifen darf
         cmd.arg("--add-opens=jdk.naming.dns/com.sun.jndi.dns=java.naming");
+
+        // --add-opens für Forge-Coremods (SecureJarHandler, ASMAPI etc.)
+        // Notwendig für Forge 56.x/57.x wo die Bytecode-Transformation
+        // auf interne Java-Module zugreifen muss.
+        cmd.arg("--add-opens=java.base/java.util.jar=cpw.mods.securejarhandler");
+        cmd.arg("--add-opens=java.base/sun.security.util=ALL-UNNAMED");
+        cmd.arg("--add-opens=java.base/sun.security.pkcs=ALL-UNNAMED");
 
         // JVM-Args aus version.json (ohne -p / --module-path - das bauen wir selbst)
         for arg in &resolved_jvm_args {
@@ -757,11 +823,11 @@ maxThreads = -1
 
         let has_arg = |name: &str| resolved_game_args.iter().any(|a| a == name);
 
-        if !has_arg("--gameJar") {
-            // KRITISCH: Forge braucht die GEPATCHTE Client-JAR, nicht das Original!
-            // ForgeProdLaunchHandler sucht Minecraft.class in dieser JAR.
-            cmd.arg("--gameJar").arg(&install_result.patched_client_jar);
-        }
+        // --gameJar: IMMER die gepatchte JAR verwenden (aus install_result.patched_client_jar).
+        // ForgeProdLaunchHandler sucht Minecraft.class in dieser JAR.
+        // Wir haben --gameJar bereits aus game_args gefiltert, also können wir ihn direkt setzen.
+        cmd.arg("--gameJar").arg(&install_result.patched_client_jar);
+        tracing::info!("--gameJar: {:?}", install_result.patched_client_jar.display());
         if !has_arg("--fml.forgeVersion") {
             cmd.arg("--fml.forgeVersion").arg(&install_result.forge_version);
         }
@@ -1032,13 +1098,38 @@ maxThreads = -1
     async fn resolve_latest_forge_version(&self, mc_version: &str) -> Result<String> {
         use crate::api::forge::ForgeClient;
 
+        // Bekannte crashende Forge-Versionen – werden bei automatischer Auflösung übersprungen
+        // Format: (mc_version, forge_version)
+        let known_broken: &[(&str, &str)] = &[
+            // 1.21.11-61.0.0: FieldToMethodTransformer crash beim Bootstrap
+            ("1.21.11", "61.0.0"),
+            // 1.21.7-57.0.3: field_to_method.js Coremod-Fehler → Mods werden nicht geladen
+            ("1.21.7", "57.0.3"),
+            // 1.21.6-56.0.9: field_to_method.js Coremod-Fehler + MC_OFF-Classpath-Problem
+            ("1.21.6", "56.0.9"),
+        ];
+
         let client = ForgeClient::new()?;
         let versions = client.get_loader_versions(mc_version).await?;
 
-        // Bevorzuge empfohlene Version, sonst die neueste (versions sind bereits neueste-zuerst sortiert)
-        let version = versions.iter()
+        // Filtere bekannte kaputte Versionen heraus
+        let usable_versions: Vec<_> = versions.iter()
+            .filter(|v| {
+                !known_broken.iter().any(|(mc, fv)| *mc == mc_version && *fv == v.forge_version)
+            })
+            .collect();
+
+        let search_in = if usable_versions.is_empty() {
+            tracing::warn!("All Forge versions for {} are on the broken list, falling back to latest", mc_version);
+            versions.iter().collect::<Vec<_>>()
+        } else {
+            usable_versions
+        };
+
+        // Bevorzuge empfohlene Version, sonst die neueste stabile (versions sind bereits neueste-zuerst sortiert)
+        let version = search_in.iter()
             .find(|v| v.recommended)
-            .or_else(|| versions.first())
+            .or_else(|| search_in.first())
             .ok_or_else(|| anyhow::anyhow!("No Forge version found for MC {}", mc_version))?;
 
         tracing::info!("Resolved Forge version for {}: {} (recommended: {})", mc_version, version.forge_version, version.recommended);
