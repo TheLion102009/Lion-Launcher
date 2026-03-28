@@ -9,7 +9,6 @@ use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::cell::RefCell;
-use serde::Deserialize;
 use crate::types::profile::Profile;
 use crate::core::download::DownloadManager;
 use crate::config::defaults;
@@ -19,36 +18,42 @@ const RESOURCES_URL: &str = "https://resources.download.minecraft.net";
 
 // Thread-local storage für extra Launch-Argumente (für Quick Play)
 thread_local! {
-    static EXTRA_LAUNCH_ARGS: RefCell<Vec<String>> = RefCell::new(Vec::new());
+    static EXTRA_LAUNCH_ARGS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 pub struct MinecraftLauncher {
     download_manager: DownloadManager,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct VersionManifest {
     versions: Vec<VersionEntry>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct VersionEntry {
     id: String,
     url: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
+#[allow(non_snake_case)]
 struct VersionInfo {
     id: String,
-    #[serde(rename = "mainClass")]
-    main_class: String,
+    mainClass: String,
     libraries: Vec<Library>,
     downloads: GameDownloads,
-    #[serde(rename = "assetIndex")]
-    asset_index: AssetIndexInfo,
+    assetIndex: AssetIndexInfo,
+    javaVersion: Option<JavaVersionInfo>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
+#[allow(non_snake_case)]
+struct JavaVersionInfo {
+    majorVersion: u32,
+}
+
+#[derive(Debug, serde::Deserialize)]
 struct Library {
     name: String,
     downloads: Option<LibraryDownloads>,
@@ -56,54 +61,54 @@ struct Library {
     natives: Option<std::collections::HashMap<String, String>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct LibraryDownloads {
     artifact: Option<Artifact>,
     classifiers: Option<std::collections::HashMap<String, Artifact>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct Artifact {
     path: String,
     sha1: String,
     url: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct Rule {
     action: String,
     os: Option<OsRule>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct OsRule {
     name: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct GameDownloads {
     client: DownloadInfo,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct DownloadInfo {
     sha1: String,
     url: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct AssetIndexInfo {
     id: String,
     sha1: String,
     url: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct AssetIndex {
     objects: std::collections::HashMap<String, AssetObject>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct AssetObject {
     hash: String,
 }
@@ -216,7 +221,7 @@ impl MinecraftLauncher {
 
         // Assets
         tracing::info!("Checking assets...");
-        self.download_assets(&version_info.asset_index, &assets_dir).await?;
+        self.download_assets(&version_info.assetIndex, &assets_dir).await?;
 
         // NeoForge/Forge verwendet einen speziellen Launch-Mechanismus
         if matches!(loader, crate::types::version::ModLoader::NeoForge) {
@@ -283,7 +288,7 @@ impl MinecraftLauncher {
             }
             crate::types::version::ModLoader::Vanilla => {
                 let cp = format!("{}:{}", classpath, client_jar.display());
-                (version_info.main_class.clone(), cp)
+                (version_info.mainClass.clone(), cp)
             }
             _ => unreachable!()
         };
@@ -305,6 +310,7 @@ impl MinecraftLauncher {
     }
 
     /// Launch für NeoForge mit der neuen neoforge.rs Implementation
+    #[allow(clippy::too_many_arguments)]
     async fn launch_neoforge_new(
         &self,
         profile: &Profile,
@@ -339,8 +345,10 @@ impl MinecraftLauncher {
             std::fs::read_dir(game_dir.join("mods")).map(|d| d.count()).unwrap_or(0)
         );
 
-        // Finde Java
-        let java_path = self.find_java()?;
+        // Finde Java – verwende die von Mojang angegebene Mindestversion (mindestens 21 für NeoForge)
+        let required_java = version_info.javaVersion.as_ref().map(|j| j.majorVersion).unwrap_or(21).max(21);
+        tracing::info!("Required Java version: {}", required_java);
+        let java_path = self.ensure_java_installed(required_java).await?;
 
         // Installiere NeoForge (mit Vanilla-Libraries)
         let installation = neoforge::install_neoforge(
@@ -368,7 +376,7 @@ impl MinecraftLauncher {
             uuid,
             token,
             version,
-            &version_info.asset_index.id,
+            &version_info.assetIndex.id,
         );
 
         // Display-Umgebungsvariablen weitergeben (verhindert GBM/EGL-Fallback → SIGABRT)
@@ -426,6 +434,7 @@ impl MinecraftLauncher {
     ///
     /// ForgeBootstrap.main() baut dann INTERN den richtigen Java-Modul-Kontext auf.
     /// NICHT via `-m net.minecraftforge.bootstrap/...` starten!
+    #[allow(clippy::too_many_arguments)]
     async fn launch_neoforge_or_forge(
         &self,
         profile: &Profile,
@@ -501,6 +510,11 @@ maxThreads = -1
         }
 
         // Forge installieren
+        // Java ZUERST sicherstellen, damit find_java_binary() im Installer die richtige Version findet
+        let required_java = version_info.javaVersion.as_ref().map(|j| j.majorVersion).unwrap_or(17).max(17);
+        tracing::info!("Required Java version for Forge: {}", required_java);
+        let java_path = self.ensure_java_installed(required_java).await?;
+
         let forge_installer = forge::ForgeInstaller::new(self.download_manager.clone());
         let install_result = forge_installer.install_forge_complete(
             version, &loader_version, libraries_dir, client_jar
@@ -610,7 +624,6 @@ maxThreads = -1
             }
         }
 
-        let java_path = self.find_java()?;
         let memory_mb = profile.memory_mb.unwrap_or(4096);
         let token = access_token.unwrap_or("0");
         let user_type = if access_token.is_some() && token != "0" { "msa" } else { "legacy" };
@@ -619,7 +632,7 @@ maxThreads = -1
         let resolved_jvm_args: Vec<String> = install_result.jvm_args.iter()
             .map(|arg| forge::resolve_arg_placeholders(
                 arg, libraries_dir, natives_dir, game_dir, assets_dir,
-                &version_info.asset_index.id, version, uuid, token, user_type, username,
+                &version_info.assetIndex.id, version, uuid, token, user_type, username,
             ))
             .collect();
 
@@ -643,7 +656,7 @@ maxThreads = -1
         let resolved_game_args: Vec<String> = game_args_filtered.iter()
             .map(|arg| forge::resolve_arg_placeholders(
                 arg, libraries_dir, natives_dir, game_dir, assets_dir,
-                &version_info.asset_index.id, version, uuid, token, user_type, username,
+                &version_info.assetIndex.id, version, uuid, token, user_type, username,
             ))
             .collect();
 
@@ -853,7 +866,7 @@ maxThreads = -1
             cmd.arg("--assetsDir").arg(assets_dir);
         }
         if !has_arg("--assetIndex") {
-            cmd.arg("--assetIndex").arg(&version_info.asset_index.id);
+            cmd.arg("--assetIndex").arg(&version_info.assetIndex.id);
         }
         if !has_arg("--uuid") {
             cmd.arg("--uuid").arg(uuid);
@@ -915,6 +928,7 @@ maxThreads = -1
     }
 
     /// Standard-Launch für Fabric/Quilt/Vanilla
+    #[allow(clippy::too_many_arguments)]
     async fn launch_standard(
         &self,
         profile: &Profile,
@@ -929,7 +943,10 @@ maxThreads = -1
         uuid: &str,
         access_token: Option<&str>,
     ) -> Result<()> {
-        let java_path = self.find_java()?;
+        // Verwende die von Mojang angegebene Java-Version (aus version.json javaVersion.majorVersion)
+        let required_java = version_info.javaVersion.as_ref().map(|j| j.majorVersion).unwrap_or(21);
+        tracing::info!("Required Java version: {}", required_java);
+        let java_path = self.ensure_java_installed(required_java).await?;
         let memory_mb = profile.memory_mb.unwrap_or(4096);
         let loader = &profile.loader.loader;
 
@@ -961,7 +978,7 @@ maxThreads = -1
         cmd.arg("--version").arg(&profile.minecraft_version);
         cmd.arg("--gameDir").arg(game_dir);
         cmd.arg("--assetsDir").arg(assets_dir);
-        cmd.arg("--assetIndex").arg(&version_info.asset_index.id);
+        cmd.arg("--assetIndex").arg(&version_info.assetIndex.id);
         cmd.arg("--uuid").arg(uuid);
         cmd.arg("--accessToken").arg(token);
         cmd.arg("--userType").arg(user_type);
@@ -1009,7 +1026,7 @@ maxThreads = -1
         // z.B. "guava-33.3.1-jre.jar" -> "guava"
         // z.B. "asm-9.6.jar" -> "asm"
         let extract_library_name = |path: &str| -> Option<String> {
-            let filename = path.split('/').last()?;
+            let filename = path.split('/').next_back()?;
             // Entferne .jar Endung
             let name = filename.strip_suffix(".jar")?;
             // Entferne Version und Klassifier (z.B. -33.3.1-jre, -9.6, -natives-linux)
@@ -1182,7 +1199,7 @@ maxThreads = -1
             tracing::info!("🔨 Running NeoForge installer to create SRG-mapped client JAR...");
             tracing::info!("This may take 1-2 minutes on first launch...");
 
-            let java_path = self.find_java()?;
+            let java_path = self.ensure_java_installed(21).await?;
             // Der Installer erwartet das .minecraft-ähnliche Verzeichnis (parent von libraries)
             let launcher_dir = libraries_dir.parent().unwrap();
 
@@ -1290,12 +1307,11 @@ maxThreads = -1
 
         // Parse version.json
         #[derive(serde::Deserialize)]
+        #[allow(non_snake_case)]
         struct NeoForgeVersion {
             id: Option<String>,
-            #[serde(rename = "mainClass")]
-            main_class: String,
-            #[serde(rename = "inheritsFrom")]
-            inherits_from: Option<String>,
+            mainClass: String,
+            inheritsFrom: Option<String>,
             libraries: Vec<NeoForgeLib>,
             arguments: Option<NeoForgeArguments>,
         }
@@ -1325,7 +1341,7 @@ maxThreads = -1
         }
 
         let version: NeoForgeVersion = serde_json::from_str(&version_json)?;
-        tracing::info!("NeoForge main class: {}", version.main_class);
+        tracing::info!("NeoForge main class: {}", version.mainClass);
         tracing::info!("NeoForge has {} libraries", version.libraries.len());
 
         // Extrahiere JVM-Argumente aus version.json
@@ -1363,12 +1379,12 @@ maxThreads = -1
         for lib in &version.libraries {
             if lib.name.contains("fmlcore") {
                 // Format: net.neoforged.fancymodloader:fmlcore:VERSION
-                if let Some(v) = lib.name.split(':').last() {
+                if let Some(v) = lib.name.split(':').next_back() {
                     fml_version = v.to_string();
                 }
             }
             if lib.name.contains("neoform") {
-                if let Some(v) = lib.name.split(':').last() {
+                if let Some(v) = lib.name.split(':').next_back() {
                     neoform_version = v.to_string();
                 }
             }
@@ -1416,7 +1432,7 @@ maxThreads = -1
         if !srg_exists {
             tracing::info!("🔨 SRG-JAR nicht gefunden! Führe NeoForge-Installer aus...");
 
-            let java_path = self.find_java()?;
+            let java_path = self.ensure_java_installed(21).await?;
             let launcher_dir = libraries_dir.parent().unwrap();
 
             // Erstelle launcher_profiles.json falls nicht vorhanden
@@ -1617,7 +1633,7 @@ maxThreads = -1
         }
 
         Ok(ForgeInstallResult {
-            main_class: version.main_class,
+            main_class: version.mainClass,
             classpath,
             module_path,
             jvm_args,
@@ -1808,11 +1824,10 @@ maxThreads = -1
         let installer_path = libraries_dir.join(format!("forge-{}-{}-installer.jar", mc_version, forge_version));
 
         // Prüfe ob existierende Datei gültig ist
-        if installer_path.exists() {
-            if !Self::is_valid_zip(&installer_path) {
+        if installer_path.exists()
+            && !Self::is_valid_zip(&installer_path) {
                 tracing::warn!("Existing Forge installer is corrupted, re-downloading...");
                 tokio::fs::remove_file(&installer_path).await.ok();
-            }
         }
 
         if !installer_path.exists() {
@@ -1929,9 +1944,9 @@ maxThreads = -1
         };
 
         #[derive(serde::Deserialize)]
+        #[allow(non_snake_case)]
         struct ForgeVersion {
-            #[serde(rename = "mainClass")]
-            main_class: String,
+            mainClass: String,
             libraries: Vec<ForgeLib>,
         }
 
@@ -1954,7 +1969,7 @@ maxThreads = -1
         }
 
         let version: ForgeVersion = serde_json::from_str(&version_json)?;
-        tracing::info!("Forge main class: {}", version.main_class);
+        tracing::info!("Forge main class: {}", version.mainClass);
         tracing::info!("Forge has {} libraries", version.libraries.len());
 
         let mut classpath_entries = Vec::new();
@@ -2017,7 +2032,7 @@ maxThreads = -1
             }
         }
 
-        Ok((classpath_entries, version.main_class))
+        Ok((classpath_entries, version.mainClass))
     }
 
     /// NeoForge Loader installieren und (Classpath, MainClass) zurückgeben
@@ -2041,11 +2056,10 @@ maxThreads = -1
         let installer_path = libraries_dir.join(format!("neoforge-{}-installer.jar", neoforge_version));
 
         // Prüfe ob existierende Datei gültig ist
-        if installer_path.exists() {
-            if !Self::is_valid_zip(&installer_path) {
+        if installer_path.exists()
+            && !Self::is_valid_zip(&installer_path) {
                 tracing::warn!("Existing NeoForge installer is corrupted, re-downloading...");
                 tokio::fs::remove_file(&installer_path).await.ok();
-            }
         }
 
         if !installer_path.exists() {
@@ -2191,9 +2205,9 @@ maxThreads = -1
         };
 
         #[derive(serde::Deserialize)]
+        #[allow(non_snake_case)]
         struct NeoForgeVersion {
-            #[serde(rename = "mainClass")]
-            main_class: String,
+            mainClass: String,
             libraries: Vec<NeoForgeLib>,
         }
 
@@ -2216,7 +2230,7 @@ maxThreads = -1
         }
 
         let version: NeoForgeVersion = serde_json::from_str(&version_json)?;
-        let original_main_class = version.main_class.clone();
+        let original_main_class = version.mainClass.clone();
         tracing::info!("NeoForge original main class: {}", original_main_class);
         tracing::info!("NeoForge has {} libraries", version.libraries.len());
 
@@ -2398,7 +2412,7 @@ maxThreads = -1
         let total = idx.objects.len();
         let mut done = 0;
 
-        for (_, asset) in &idx.objects {
+        for asset in idx.objects.values() {
             let pre = &asset.hash[..2];
             let dest = obj_dir.join(pre).join(&asset.hash);
             if !dest.exists() {
@@ -2460,9 +2474,16 @@ maxThreads = -1
     }
 
     fn find_java(&self) -> Result<String> {
+        // 1. JAVA_HOME
         if let Ok(home) = std::env::var("JAVA_HOME") {
             let p = PathBuf::from(&home).join("bin").join(if cfg!(windows) { "java.exe" } else { "java" });
             if p.exists() { return Ok(p.display().to_string()); }
+        }
+
+        // 2. Launcher's own managed Java
+        let java_bin = defaults::java_dir().join("bin").join(if cfg!(windows) { "java.exe" } else { "java" });
+        if java_bin.exists() {
+            return Ok(java_bin.display().to_string());
         }
 
         let paths = if cfg!(target_os = "linux") {
@@ -2488,6 +2509,138 @@ maxThreads = -1
         }
 
         bail!("Java not found! Install Java 17+")
+    }
+
+    async fn ensure_java_installed(&self, required_major: u32) -> Result<String> {
+        let java_bin_name = if cfg!(windows) { "java.exe" } else { "java" };
+        // 1. JAVA_HOME
+        if let Ok(home) = std::env::var("JAVA_HOME") {
+            let p = PathBuf::from(&home).join("bin").join(java_bin_name);
+            if p.exists() && Self::java_major_version(&p.display().to_string()).await >= required_major {
+                return Ok(p.display().to_string());
+            }
+        }
+        // 2. Launcher-managed Java
+        let java_dir = defaults::java_dir();
+        let java_bin = java_dir.join("bin").join(java_bin_name);
+        if java_bin.exists() {
+            let installed = Self::java_major_version(&java_bin.display().to_string()).await;
+            if installed >= required_major {
+                tracing::info!("Using managed Java {}: {}", installed, java_bin.display());
+                return Ok(java_bin.display().to_string());
+            }
+            tracing::info!("Managed Java {} too old (need {}), re-downloading...", installed, required_major);
+            tokio::fs::remove_dir_all(&java_dir).await.ok();
+        }
+        // 3. System paths
+        let system_paths: &[&str] = if cfg!(target_os = "linux") {
+            &[
+                "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+                "/usr/lib/jvm/java-17-openjdk-amd64/bin/java",
+                "/usr/lib/jvm/java-21-openjdk/bin/java",
+                "/usr/lib/jvm/java-17-openjdk/bin/java",
+                "/usr/bin/java",
+            ]
+        } else {
+            &["java"]
+        };
+        for p in system_paths {
+            if Path::new(p).exists()
+                && Self::java_major_version(p).await >= required_major
+            {
+                return Ok(p.to_string());
+            }
+        }
+        if tokio::process::Command::new("java").arg("-version").output().await.is_ok()
+            && Self::java_major_version("java").await >= required_major
+        {
+            return Ok("java".to_string());
+        }
+        // 4. Auto-download from Adoptium
+        tracing::info!("Downloading Java {} from Adoptium...", required_major);
+        tokio::fs::create_dir_all(&java_dir).await?;
+        self.download_java(&java_dir, required_major).await?;
+        if java_bin.exists() {
+            tracing::info!("Java {} installed: {}", required_major, java_bin.display());
+            return Ok(java_bin.display().to_string());
+        }
+        bail!("Java {} installation failed. Please install Java {}+ manually.", required_major, required_major)
+    }
+    /// Returns the major version number of the given java binary (e.g. 21, 25).
+    /// Returns 0 if the version cannot be determined.
+    async fn java_major_version(java_bin: &str) -> u32 {
+        // java -version writes to stderr, e.g.: openjdk version "21.0.2" 2024-01-16
+        let Ok(out) = tokio::process::Command::new(java_bin)
+            .arg("-version")
+            .output().await
+        else { return 0; };
+        let text = String::from_utf8_lossy(&out.stderr);
+        for line in text.lines() {
+            if line.contains("version \"") {
+                if let Some(start) = line.find('"') {
+                    let rest = &line[start + 1..];
+                    if let Some(end) = rest.find('"') {
+                        let ver = &rest[..end];
+                        // "21.0.2" -> 21,  "1.8.0_392" -> 8
+                        let raw = ver.split('.').next().unwrap_or("0");
+                        let major: u32 = if raw == "1" {
+                            ver.split('.').nth(1).and_then(|s| s.parse().ok()).unwrap_or(0)
+                        } else {
+                            raw.parse().unwrap_or(0)
+                        };
+                        if major > 0 { return major; }
+                    }
+                }
+            }
+        }
+        0
+    }
+    async fn download_java(&self, java_dir: &Path, major: u32) -> Result<()> {
+        let os = if cfg!(target_os = "windows") { "windows" }
+                 else if cfg!(target_os = "macos") { "mac" }
+                 else { "linux" };
+        let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x64" };
+        let url = format!(
+            "https://api.adoptium.net/v3/binary/latest/{}/ga/{}/{}/jre/hotspot/normal/eclipse",
+            major, os, arch
+        );
+        tracing::info!("Downloading Java {} JRE from Adoptium...", major);
+        let archive_name = if cfg!(windows) { "java_download.zip" } else { "java_download.tar.gz" };
+        let archive_path = java_dir.parent().unwrap_or(java_dir).join(archive_name);
+        self.download_manager
+            .download_file(&url, &archive_path, None::<fn(u64, u64)>)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to download Java {}: {}", major, e))?;
+        tracing::info!("Extracting Java {}...", major);
+        if cfg!(windows) {
+            let status = tokio::process::Command::new("powershell")
+                .args(["-NoProfile", "-Command", &format!(
+                    "Expand-Archive -Path '{p}' -DestinationPath '{d}_tmp' -Force;                      $s=Get-ChildItem '{d}_tmp'|?{{$_.PSIsContainer}}|select -First 1;                      if($s){{Copy-Item \"$($s.FullName)\\*\" '{d}' -Recurse -Force}};                      Remove-Item '{d}_tmp' -Recurse -Force",
+                    p = archive_path.display(), d = java_dir.display()
+                )])
+                .status().await?;
+            if !status.success() { bail!("Failed to extract Java on Windows"); }
+        } else {
+            let status = tokio::process::Command::new("tar")
+                .args(["-xzf", &archive_path.display().to_string(),
+                       "--strip-components=1",
+                       "-C", &java_dir.display().to_string()])
+                .status().await?;
+            if !status.success() { bail!("Failed to extract Java archive with tar"); }
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let bin = java_dir.join("bin").join("java");
+            if bin.exists() {
+                let mut perms = std::fs::metadata(&bin)?.permissions();
+                perms.set_mode(0o755);
+                std::fs::set_permissions(&bin, perms)?;
+            }
+        }
+        tokio::fs::remove_file(&archive_path).await.ok();
+        tracing::info!("Java {} installation complete.", major);
+        Ok(())
     }
 
     fn get_os() -> String {

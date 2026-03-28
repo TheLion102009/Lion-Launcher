@@ -1,5 +1,10 @@
 # Cargo Cross-Compilation Konfiguration für Lion Launcher
 
+# Flatpak-Umgebung: Host-Systembibliotheken für pkg-config zugänglich machen
+# Wird benötigt damit webkit2gtk4.1 / javascriptcoregtk-4.1 gefunden wird
+[env]
+PKG_CONFIG_PATH = { value = "/run/host/usr/lib64/pkgconfig:/run/host/usr/lib/pkgconfig:/run/host/usr/share/pkgconfig", force = true }
+
 # Windows Cross-Compilation mit MinGW
 [target.x86_64-pc-windows-gnu]
 linker = "x86_64-w64-mingw32-gcc"

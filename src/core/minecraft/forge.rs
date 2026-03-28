@@ -152,7 +152,7 @@ impl ForgeInstaller {
                 if v.contains("-forge-") {
                     v.split("-forge-").nth(1).map(|s| s.to_string())
                 } else {
-                    v.split('-').last().map(|s| s.to_string())
+                    v.split('-').next_back().map(|s| s.to_string())
                 }
             })
             .unwrap_or_else(|| forge_version.to_string());
@@ -164,7 +164,7 @@ impl ForgeInstaller {
                 if lib.name.contains("mcp_config") || lib.name.contains("mcpConfig") {
                     let parts: Vec<&str> = lib.name.split(':').collect();
                     if let Some(ver) = parts.get(2) {
-                        if let Some(mcp) = ver.splitn(2, '-').nth(1) {
+                        if let Some(mcp) = ver.split_once('-').map(|x| x.1) {
                             return Some(mcp.to_string());
                         }
                         if ver.contains('.') && ver.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
@@ -423,6 +423,7 @@ impl ForgeInstaller {
     /// Diese müssen erst in den tatsächlichen Dateipfad aufgelöst werden.
     ///
     /// Rückgabe: Pfad zur Minecraft-Client-JAR die als --gameJar verwendet werden soll.
+    #[allow(clippy::too_many_arguments)]
     async fn run_processors(
         processors: &[Processor],
         data: &std::collections::HashMap<String, SidedData>,
@@ -574,7 +575,7 @@ impl ForgeInstaller {
                     if i > 0 && resolved_args[i-1].starts_with("--") {
                         resolved_args.remove(i);
                         if i > 0 { resolved_args.remove(i - 1); }
-                        if i > 0 { i -= 1; }
+                        i = i.saturating_sub(1);
                     } else {
                         resolved_args.remove(i);
                     }
@@ -854,12 +855,11 @@ impl ForgeInstaller {
         }
         for repo in &repos {
             let url = format!("{}/{}", repo, maven_path);
-            if dm.download_with_hash(&url, dest, None).await.is_ok() {
-                if dest.exists() && std::fs::metadata(dest).map(|m| m.len() > 0).unwrap_or(false) {
+            if dm.download_with_hash(&url, dest, None).await.is_ok()
+                && dest.exists() && std::fs::metadata(dest).map(|m| m.len() > 0).unwrap_or(false) {
                     tracing::debug!("Heruntergeladen von {}: {}", repo, maven_path);
                     return;
                 }
-            }
         }
         tracing::warn!("Konnte {} von keinem Maven-Repo herunterladen", maven_path);
     }
@@ -966,6 +966,11 @@ pub fn find_java_binary() -> String {
         let p = PathBuf::from(&home).join("bin").join("java");
         if p.exists() { return p.display().to_string(); }
     }
+    // Launcher-managed Java
+    let managed = crate::config::defaults::java_dir().join("bin").join("java");
+    if managed.exists() {
+        return managed.display().to_string();
+    }
     for p in &[
         "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
         "/usr/lib/jvm/java-21-openjdk/bin/java",
@@ -977,6 +982,7 @@ pub fn find_java_binary() -> String {
     "java".to_string()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn resolve_arg_placeholders(
     arg: &str,
     libraries_dir: &Path,

@@ -30,6 +30,10 @@ pub fn mods_cache_dir() -> PathBuf {
     launcher_dir().join("cache").join("mods")
 }
 
+pub fn java_dir() -> PathBuf {
+    launcher_dir().join("java")
+}
+
 pub fn shared_settings_file() -> PathBuf {
     launcher_dir().join("shared_options.txt")
 }

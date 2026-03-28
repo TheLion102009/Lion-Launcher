@@ -128,7 +128,7 @@ pub async fn install_mod(
     };
 
     // Hole alle Versionen der Mod
-    let all_versions = manager.get_mod_versions_raw(&mod_id, mod_source.clone())
+    let all_versions = manager.get_mod_versions_raw(&mod_id, mod_source)
         .await
         .map_err(|e| e.to_string())?;
 

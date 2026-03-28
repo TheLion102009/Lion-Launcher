@@ -25,7 +25,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["deb", "rpm"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -37,8 +37,7 @@
     "category": "Game",
     "shortDescription": "Ein moderner Minecraft Launcher",
     "longDescription": "Lion Launcher ist ein moderner, schneller Minecraft Launcher mit Unterstützung für Fabric, Quilt, Forge und NeoForge. Er bietet eine intuitive Benutzeroberfläche, einfache Mod-Installation und umfassende Profilverwaltung.",
-    "copyright": "© 2026 Lion Launcher",
-    "publisher": "Lion Launcher Team",
+    "publisher": "Thorben Hess",
     "linux": {
       "appimage": {
         "bundleMediaFramework": true

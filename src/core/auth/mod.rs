@@ -23,20 +23,12 @@ pub struct MinecraftAccount {
     pub is_microsoft: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthState {
     pub accounts: Vec<MinecraftAccount>,
     pub active_account: Option<String>, // UUID des aktiven Accounts
 }
 
-impl Default for AuthState {
-    fn default() -> Self {
-        Self {
-            accounts: Vec::new(),
-            active_account: None,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceCodeFlow {

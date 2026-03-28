@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use serde::Deserialize;
 
-/// NeoForge Installation und Launch-Logik
-/// Basierend auf PandoraLauncher und PrismLauncher Best Practices
+// NeoForge Installation und Launch-Logik
+// Basierend auf PandoraLauncher und PrismLauncher Best Practices
 
 /// Ermittelt die neueste NeoForge-Version für eine Minecraft-Version dynamisch von der API
 async fn get_latest_neoforge_version(mc_version: &str) -> Result<String> {
@@ -527,7 +527,7 @@ fn extract_neoform_version(version: &NeoForgeVersion) -> Result<String> {
 /// Findet die SRG-gemappte Minecraft-JAR mit der richtigen NeoForm-Version
 fn find_srg_jar(mc_version: &str, neoform_version: &str, libraries_dir: &Path) -> Result<PathBuf> {
     // Mögliche Pfade für die SRG-JAR (mit dynamischer NeoForm-Version!)
-    let possible_paths = vec![
+    let possible_paths = [
         libraries_dir.join(format!("net/minecraft/client/{}-{}/client-{}-{}-srg.jar",
             mc_version, neoform_version, mc_version, neoform_version)),
         libraries_dir.join(format!("net/minecraft/client/{}-{}/client-{}-{}-slim.jar",
@@ -570,6 +570,7 @@ fn verify_jar_has_class(jar_path: &Path, class_path: &str) -> Result<bool> {
 }
 
 /// Baut die vollständige Command-Line für den Start
+#[allow(clippy::too_many_arguments)]
 pub fn build_launch_command(
     installation: &NeoForgeInstallation,
     java_path: &str,

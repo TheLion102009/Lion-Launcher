@@ -45,7 +45,7 @@ pub async fn get_profile_logs(profile_id: String, log_type: String) -> Result<St
                 let mut entries: Vec<_> = std::fs::read_dir(&crash_dir)
                     .map_err(|e| e.to_string())?
                     .filter_map(|e| e.ok())
-                    .filter(|e| e.path().extension().map_or(false, |ext| ext == "txt"))
+                    .filter(|e| e.path().extension().is_some_and(|ext| ext == "txt"))
                     .collect();
                 entries.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
                 entries.last()
@@ -185,7 +185,7 @@ pub async fn repair_profile(profile_id: String) -> Result<(), String> {
     match loader {
         crate::types::version::ModLoader::NeoForge => {
             // Lösche NeoForge Installer
-            let pattern = format!("neoforge-");
+            let pattern = "neoforge-".to_string();
             if let Ok(entries) = std::fs::read_dir(&libraries_dir) {
                 for entry in entries.filter_map(|e| e.ok()) {
                     let name = entry.file_name().to_string_lossy().to_string();
@@ -466,7 +466,7 @@ fn extract_mod_info(clean_name: &str) -> (Option<String>, Option<String>, Option
             if version_part.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
                 let mod_id = name_part.split('-').next().map(|s| s.to_lowercase());
                 return (
-                    Some(name_part.replace('-', " ").replace('_', " ")),
+                    Some(name_part.replace(['-', '_'], " ")),
                     Some(format!("{}{}", version_part, &clean_name[mc_idx..])),
                     mod_id,
                 );
@@ -481,7 +481,7 @@ fn extract_mod_info(clean_name: &str) -> (Option<String>, Option<String>, Option
             let name_part = &clean_name[..idx];
             let mod_id = name_part.split('-').next().map(|s| s.to_lowercase());
             return (
-                Some(name_part.replace('-', " ").replace('_', " ")),
+                Some(name_part.replace(['-', '_'], " ")),
                 Some(potential_version.to_string()),
                 mod_id,
             );
@@ -490,7 +490,7 @@ fn extract_mod_info(clean_name: &str) -> (Option<String>, Option<String>, Option
 
     // Kein Muster gefunden
     let mod_id = clean_name.split('-').next().map(|s| s.to_lowercase());
-    (Some(clean_name.replace('-', " ").replace('_', " ")), None, mod_id)
+    (Some(clean_name.replace(['-', '_'], " ")), None, mod_id)
 }
 
 #[tauri::command]
@@ -655,8 +655,7 @@ pub async fn check_mod_updates(profile_id: String, _mc_version: String, _loader:
     for mod_info in mods {
         if let Some(mod_id) = &mod_info.mod_id {
             // Versuche Mod auf Modrinth zu finden
-            if let Ok(modrinth_info) = search_modrinth_by_name(mod_id).await {
-                if let Some(latest) = modrinth_info {
+            if let Ok(Some(latest)) = search_modrinth_by_name(mod_id).await {
                     let has_update = mod_info.version.as_ref()
                         .map(|v| v != &latest.version)
                         .unwrap_or(false);
@@ -670,7 +669,6 @@ pub async fn check_mod_updates(profile_id: String, _mc_version: String, _loader:
                             icon_url: latest.icon_url,
                         });
                     }
-                }
             }
         }
     }
@@ -996,8 +994,8 @@ pub async fn auto_sync_all_settings() -> Result<(), String> {
                 // Blacklist-Keys werden nur hinzugefügt wenn sie noch nicht existieren
                 if !is_blacklisted_key(&key) {
                     combined_values.insert(key, value);
-                } else if !combined_values.contains_key(&key) {
-                    combined_values.insert(key, value);
+                } else {
+                    combined_values.entry(key).or_insert(value);
                 }
             }
         }
@@ -1147,7 +1145,7 @@ fn merge_options_content(existing: &str, new_content: &str) -> String {
                 // Wenn Key in Blacklist ist und noch nicht existiert, füge ihn hinzu
                 // (für neue Profile)
                 if !settings.contains_key(&key) {
-                    settings.insert(key, value);
+                    settings.entry(key).or_insert(value);
                 }
             }
         }

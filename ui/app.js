@@ -1,3 +1,18 @@
+// Icon-Fehler-Handler – ausgelagert um Anführungszeichen-Probleme in HTML-Attributen zu vermeiden
+function handleIconError(el) {
+    el.onerror = null;
+    el.parentElement.innerHTML = '<span style="font-size: 22px;"><i class="bi bi-box"></i></span>';
+}
+function handleIconErrorLarge(el) {
+    el.onerror = null;
+    el.parentElement.innerHTML = '<div style="font-size: 48px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: var(--bg-dark); border-radius: 8px;"><i class="bi bi-box"></i></div>';
+}
+function handleIconErrorMedium(el) {
+    el.onerror = null;
+    const iconClass = el.dataset.fallbackIcon || 'bi-box';
+    el.parentElement.innerHTML = '<div style="font-size: 32px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;"><i class="bi ' + iconClass + '"></i></div>';
+}
+
 // Debug-Log-Funktion für visuelles Feedback
 function debugLog(message, type = 'info') {
     const time = new Date().toLocaleTimeString();
@@ -66,7 +81,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (grid) {
         grid.innerHTML = `
             <div style="grid-column: 1 / -1; text-align: center; padding: 40px;">
-                <div style="font-size: 36px; margin-bottom: 15px;">🦁</div>
+                <div style="font-size: 36px; margin-bottom: 15px;"><i class="bi bi-box2-heart"></i></div>
                 <p style="color: var(--gold);">Lion Launcher wird initialisiert...</p>
             </div>
         `;
@@ -103,7 +118,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (grid) {
             grid.innerHTML = `
                 <div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-secondary);">
-                    <div style="font-size: 36px; margin-bottom: 15px;">❌</div>
+                    <div style="font-size: 36px; margin-bottom: 15px; color: #f44336;"><i class="bi bi-x-circle-fill"></i></div>
                     <p>Fehler beim Starten: ${error}</p>
                 </div>
             `;
@@ -114,7 +129,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ==================== TOAST NOTIFICATIONS ====================
 function showToast(message, type = 'info', duration = 3000) {
     const toast = document.createElement('div');
-    const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : type === 'warning' ? '⚠️' : 'ℹ️';
+    const icon = type === 'success' ? '<i class="bi bi-check-circle-fill"></i>' : type === 'error' ? '<i class="bi bi-x-circle-fill"></i>' : type === 'warning' ? '<i class="bi bi-exclamation-triangle-fill"></i>' : '<i class="bi bi-info-circle-fill"></i>';
     const bgColor = type === 'success' ? '#4caf50' : type === 'error' ? '#f44336' : type === 'warning' ? '#ff9800' : 'var(--gold)';
 
     toast.style.cssText = `
@@ -266,17 +281,6 @@ function switchPage(page) {
         }
     }
 
-    // Aktualisiere Profilname im Mod-Browser
-    const profileNameSpan = document.getElementById('mod-browser-profile-name');
-    if (profileNameSpan) {
-        if (page === 'mods' && currentProfile) {
-            profileNameSpan.textContent = `für "${currentProfile.name}" (${currentProfile.minecraft_version} ${currentProfile.loader.loader})`;
-            profileNameSpan.style.display = 'inline';
-        } else {
-            profileNameSpan.textContent = '';
-            profileNameSpan.style.display = 'none';
-        }
-    }
 
     // Zeige/Verstecke Modpacks Button je nach Kontext
     const modpacksBtn = document.querySelector('[data-content-type="modpacks"]');
@@ -416,7 +420,7 @@ async function loadProfiles() {
         if (grid) {
             grid.innerHTML = `
                 <div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-secondary);">
-                    <div style="font-size: 36px; margin-bottom: 15px;">⚠️</div>
+                    <div style="font-size: 36px; margin-bottom: 15px; color: #ff9800;"><i class="bi bi-exclamation-triangle-fill"></i></div>
                     <p style="margin-bottom: 10px;">Fehler beim Laden der Profile</p>
                     <p style="font-size: 14px; color: #888;">${error}</p>
                     <button class="btn" onclick="loadProfiles()" style="margin-top: 20px;">
@@ -476,7 +480,7 @@ function renderProfiles() {
             <div class="profile-name">${profile.name}</div>
             <div class="profile-info">${loaderDisplay} ${profile.minecraft_version}</div>
             <button class="btn" onclick="event.stopPropagation(); launchProfile('${profile.id}')" 
-                    style="width: 100%; margin-top: 15px; font-size: 14px; padding: 12px;">▶ Play</button>
+                    style="width: 100%; margin-top: 15px; font-size: 14px; padding: 12px;"><i class="bi bi-play-fill"></i> Play</button>
         </div>
     `});
 
@@ -526,13 +530,13 @@ function showProfileContextMenu(event, profileId) {
              style="padding: 10px 20px; cursor: pointer; color: var(--text-primary); display: flex; align-items: center; gap: 10px;"
              onmouseover="this.style.background='var(--bg-light)'" 
              onmouseout="this.style.background='transparent'">
-            ⚙️ Einstellungen
+            <i class="bi bi-gear-fill"></i> Einstellungen
         </div>
         <div onclick="deleteProfile('${profileId}')" 
              style="padding: 10px 20px; cursor: pointer; color: #f44336; display: flex; align-items: center; gap: 10px;"
              onmouseover="this.style.background='var(--bg-light)'" 
              onmouseout="this.style.background='transparent'">
-            🗑️ Löschen
+            <i class="bi bi-trash"></i> Löschen
         </div>
     `;
 
@@ -636,10 +640,10 @@ async function openProfileSettings(profileId) {
             
             <!-- Header -->
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid var(--bg-light);">
-                <h2 style="color: var(--gold); margin: 0; font-size: 18px;">⚙️ Profil-Einstellungen</h2>
+                <h2 style="color: var(--gold); margin: 0; font-size: 18px;"><i class="bi bi-gear-fill"></i> Profil-Einstellungen</h2>
                 <button onclick="closeProfileSettingsModal('${profile.id}')" 
                         style="background: none; border: none; color: var(--text-secondary); font-size: 24px; cursor: pointer; padding: 0; line-height: 1;">
-                    ✕
+                    <i class="bi bi-x"></i>
                 </button>
             </div>
             
@@ -654,10 +658,10 @@ async function openProfileSettings(profileId) {
                     <div style="flex: 1;">
                         <input type="file" id="profile-icon-input" accept="image/*" onchange="previewProfileIcon(event)" style="display: none;">
                         <button class="btn btn-secondary" onclick="document.getElementById('profile-icon-input').click()" style="padding: 6px 12px; font-size: 12px;">
-                            📷 Bild
+                            <i class="bi bi-camera"></i> Bild
                         </button>
                         <button class="btn btn-secondary" onclick="clearProfileIcon()" style="padding: 6px 12px; font-size: 12px; margin-left: 5px;">
-                            ✕
+                            <i class="bi bi-x"></i>
                         </button>
                     </div>
                 </div>
@@ -798,7 +802,7 @@ async function openProfileSettings(profileId) {
                         <input type="text" value="${profile.game_dir}" readonly
                                style="flex: 1; padding: 10px; background: var(--bg-light); border: none; border-radius: 6px; color: var(--text-secondary); font-size: 12px;">
                         <button class="btn btn-secondary" onclick="openProfileFolder('${profile.id}')" style="padding: 10px 15px;">
-                            📁
+                            <i class="bi bi-folder"></i>
                         </button>
                     </div>
                 </div>
@@ -807,7 +811,7 @@ async function openProfileSettings(profileId) {
                 <div style="margin-bottom: 15px; background: var(--bg-light); padding: 15px; border-radius: 8px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div style="flex: 1;">
-                            <label style="display: block; color: var(--text-primary); font-size: 14px; font-weight: 500;">🔄 Settings synchronisieren</label>
+                            <label style="display: block; color: var(--text-primary); font-size: 14px; font-weight: 500;"><i class="bi bi-arrow-clockwise"></i> Settings synchronisieren</label>
                             <span style="color: var(--text-secondary); font-size: 11px; display: block; margin-top: 5px;">
                                 Synchronisiert Keybinds und Einstellungen automatisch zwischen allen Profilen.
                                 Die neueste Änderung hat Vorrang.
@@ -823,15 +827,15 @@ async function openProfileSettings(profileId) {
                 
                 <!-- Wartung / Reparatur -->
                 <div style="margin-bottom: 15px; background: rgba(255, 152, 0, 0.1); border: 1px solid #ff9800; padding: 15px; border-radius: 8px;">
-                    <label style="display: block; color: #ff9800; font-size: 14px; font-weight: 500; margin-bottom: 10px;">🔧 Wartung</label>
+                    <label style="display: block; color: #ff9800; font-size: 14px; font-weight: 500; margin-bottom: 10px;"><i class="bi bi-tools"></i> Wartung</label>
                     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                         <button class="btn btn-secondary" onclick="repairProfile('${profile.id}')" 
                                 style="padding: 8px 15px; font-size: 12px; display: flex; align-items: center; gap: 6px;">
-                            🔄 Installation reparieren
+                            <i class="bi bi-arrow-clockwise"></i> Installation reparieren
                         </button>
                         <button class="btn btn-secondary" onclick="clearProfileCache('${profile.id}')" 
                                 style="padding: 8px 15px; font-size: 12px; display: flex; align-items: center; gap: 6px;">
-                            🗑️ Cache leeren
+                            <i class="bi bi-trash"></i> Cache leeren
                         </button>
                     </div>
                     <span style="color: var(--text-secondary); font-size: 10px; display: block; margin-top: 8px;">
@@ -887,7 +891,7 @@ async function repairProfile(profileId) {
 
     // Bestätigungsdialog
     const confirmed = confirm(
-        `🔧 Installation reparieren?\n\n` +
+        `Installation reparieren?\n\n` +
         `Profil: ${profile.name}\n` +
         `Version: ${profile.minecraft_version}\n` +
         `Loader: ${profile.loader.loader}\n\n` +
@@ -898,16 +902,16 @@ async function repairProfile(profileId) {
     if (!confirmed) return;
 
     closeProfileSettingsModal();
-    showToast('🔄 Reparatur wird gestartet...', 'info', 3000);
+    showToast('Reparatur wird gestartet...', 'info', 3000);
     debugLog('Starting repair for profile: ' + profileId, 'info');
 
     try {
         await invoke('repair_profile', { profileId: profileId });
-        showToast('✅ Profil wurde erfolgreich repariert!', 'success', 4000);
+        showToast('Profil wurde erfolgreich repariert!', 'success', 4000);
         debugLog('Profile repair completed: ' + profileId, 'success');
     } catch (error) {
         debugLog('Failed to repair profile: ' + error, 'error');
-        showToast('❌ Reparatur fehlgeschlagen: ' + error, 'error', 5000);
+        showToast('Reparatur fehlgeschlagen: ' + error, 'error', 5000);
     }
 }
 
@@ -920,7 +924,7 @@ async function clearProfileCache(profileId) {
 
     // Bestätigungsdialog
     const confirmed = confirm(
-        `🗑️ Cache leeren?\n\n` +
+        `Cache leeren?\n\n` +
         `Profil: ${profile.name}\n\n` +
         `Dies löscht temporäre Dateien und den Shader-Cache.\n` +
         `Deine Mods, Welten und Einstellungen bleiben erhalten.`
@@ -928,16 +932,16 @@ async function clearProfileCache(profileId) {
 
     if (!confirmed) return;
 
-    showToast('🗑️ Cache wird geleert...', 'info', 2000);
+    showToast('Cache wird geleert...', 'info', 2000);
     debugLog('Clearing cache for profile: ' + profileId, 'info');
 
     try {
         await invoke('clear_profile_cache', { profileId: profileId });
-        showToast('✅ Cache wurde geleert!', 'success', 3000);
+        showToast('Cache wurde geleert!', 'success', 3000);
         debugLog('Cache cleared for profile: ' + profileId, 'success');
     } catch (error) {
         debugLog('Failed to clear cache: ' + error, 'error');
-        showToast('❌ Fehler: ' + error, 'error', 4000);
+        showToast('Fehler: ' + error, 'error', 4000);
     }
 }
 
@@ -1045,7 +1049,7 @@ async function launchProfile(profileId) {
     const modalHTML = `
         <div id="launch-progress-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 10000;">
             <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 10px; padding: 40px; text-align: center; min-width: 400px;">
-                <div style="font-size: 48px; margin-bottom: 20px;">▪</div>
+                <div style="font-size: 48px; margin-bottom: 20px;"><i class="bi bi-box"></i></div>
                 <h2 style="color: var(--gold); margin: 0 0 20px 0;">Minecraft wird vorbereitet...</h2>
                 <p style="color: var(--text-secondary); margin-bottom: 30px;" id="launch-status">
                     Lade Version-Info...
@@ -1082,7 +1086,7 @@ async function launchProfile(profileId) {
             username: currentUsername
         });
 
-        updateProgress('Minecraft gestartet! ✓', 100);
+        updateProgress('Minecraft gestartet!', 100);
         debugLog('Minecraft started successfully!', 'success');
 
         await new Promise(r => setTimeout(r, 1500));
@@ -1099,7 +1103,7 @@ async function launchProfile(profileId) {
         if (modal) {
             modal.innerHTML = `
                 <div style="background: var(--bg-dark); border: 2px solid #f44336; border-radius: 10px; padding: 40px; text-align: center; max-width: 500px;">
-                    <div style="font-size: 48px; margin-bottom: 20px;">❌</div>
+                    <div style="font-size: 48px; margin-bottom: 20px; color: #f44336;"><i class="bi bi-x-circle-fill"></i></div>
                     <h2 style="color: #f44336; margin: 0 0 20px 0;">Launch fehlgeschlagen</h2>
                     <p style="color: var(--text-secondary); margin-bottom: 20px; word-break: break-word;">
                         ${error}
@@ -1117,7 +1121,7 @@ function showMicrosoftLoginInfo() {
     const modalHTML = `
         <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;" onclick="this.remove()">
             <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 10px; padding: 30px; max-width: 600px; max-height: 80vh; overflow-y: auto;" onclick="event.stopPropagation()">
-                <h2 style="color: var(--gold); margin: 0 0 20px 0;">🔐 Microsoft-Login (Coming Soon)</h2>
+                <h2 style="color: var(--gold); margin: 0 0 20px 0;"><i class="bi bi-shield-lock"></i> Microsoft-Login (Coming Soon)</h2>
                 
                 <p style="color: var(--text-secondary); margin-bottom: 20px;">
                     Der Lion Launcher wird einen <strong style="color: var(--gold);">echten Microsoft-Login</strong> implementieren!
@@ -1136,16 +1140,16 @@ function showMicrosoftLoginInfo() {
                 <h3 style="color: var(--text-primary); margin-bottom: 10px;">Was bekommst du?</h3>
                 
                 <ul style="color: var(--text-secondary); margin: 0 0 20px 20px; line-height: 1.8;">
-                    <li>✅ <strong>Dein echter Minecraft-Account</strong></li>
-                    <li>✅ <strong>Zugriff auf gekaufte Skins & Capes</strong></li>
-                    <li>✅ <strong>Multiplayer auf allen Servern</strong></li>
-                    <li>✅ <strong>Realms-Support</strong></li>
-                    <li>✅ <strong>Account-Sicherheit</strong></li>
+                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Dein echter Minecraft-Account</strong></li>
+                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Zugriff auf gekaufte Skins & Capes</strong></li>
+                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Multiplayer auf allen Servern</strong></li>
+                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Realms-Support</strong></li>
+                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Account-Sicherheit</strong></li>
                 </ul>
                 
                 <div style="background: var(--bg-light); border-left: 4px solid #4CAF50; padding: 15px; margin-top: 20px;">
                     <p style="color: var(--text-primary); margin: 0 0 5px 0;">
-                        <strong>🔒 Sicherheit:</strong>
+                        <strong><i class="bi bi-lock"></i> Sicherheit:</strong>
                     </p>
                     <p style="color: var(--text-secondary); margin: 0; font-size: 14px;">
                         Dein Passwort wird <strong>NIE</strong> im Launcher gespeichert!<br>
@@ -1228,7 +1232,7 @@ function showProfileDetails(profileId) {
                 
                 <!-- Play Button -->
                 <button class="btn" onclick="launchProfile('${profile.id}')" style="padding: 15px 40px; font-size: 18px; flex-shrink: 0;">
-                    ▶ Play
+                    <i class="bi bi-play-fill"></i> Play
                 </button>
             </div>
 
@@ -1356,17 +1360,17 @@ function renderMainCategoryContent(categoryName, profile) {
                     <button class="content-sub-tab active" data-subtab="mods" onclick="switchContentSubTab('mods')" 
                             style="padding: 6px 14px; background: var(--bg-medium); border: 2px solid var(--gold); color: var(--text-primary); 
                                    cursor: pointer; border-radius: 6px; font-weight: 500; font-size: 12px; transition: all 0.2s;">
-                        ▪ Mods
+                        <i class="bi bi-puzzle"></i> Mods
                     </button>
                     <button class="content-sub-tab" data-subtab="resourcepacks" onclick="switchContentSubTab('resourcepacks')" 
                             style="padding: 6px 14px; background: var(--bg-medium); border: 2px solid var(--bg-light); color: var(--text-secondary); 
                                    cursor: pointer; border-radius: 6px; font-weight: 500; font-size: 12px; transition: all 0.2s;">
-                        ▪ Resource Packs
+                        <i class="bi bi-palette"></i> Resource Packs
                     </button>
                     <button class="content-sub-tab" data-subtab="shaderpacks" onclick="switchContentSubTab('shaderpacks')" 
                             style="padding: 6px 14px; background: var(--bg-medium); border: 2px solid var(--bg-light); color: var(--text-secondary); 
                                    cursor: pointer; border-radius: 6px; font-weight: 500; font-size: 12px; transition: all 0.2s;">
-                        ▪ Shader Packs
+                        <i class="bi bi-stars"></i> Shader Packs
                     </button>
                     <div style="flex: 1;"></div>
                     <button onclick="openContentBrowser('${profile.id}')" 
@@ -1454,13 +1458,13 @@ function renderLogsContent(profile) {
             <h3 style="color: var(--gold); margin: 0;">Minecraft Logs</h3>
             <div style="display: flex; gap: 10px;">
                 <button class="btn btn-secondary" onclick="copyLogsToClipboard()" style="padding: 8px 16px;" title="Logs kopieren">
-                    📋 Kopieren
+                    <i class="bi bi-clipboard"></i> Kopieren
                 </button>
                 <button class="btn btn-secondary" onclick="loadLogs('${profile.id}')" style="padding: 8px 16px;" title="Aktualisieren">
                     ↻ Aktualisieren
                 </button>
                 <button class="btn btn-secondary" onclick="openLogsFolder('${profile.id}')" style="padding: 8px 16px;" title="Ordner öffnen">
-                    📁 Ordner
+                    <i class="bi bi-folder"></i> Ordner
                 </button>
             </div>
         </div>
@@ -1470,17 +1474,17 @@ function renderLogsContent(profile) {
             <button class="log-type-tab active" data-logtype="latest" onclick="switchLogType('latest')" 
                     style="padding: 8px 16px; background: var(--bg-medium); border: 2px solid var(--gold); color: var(--text-primary); 
                            cursor: pointer; border-radius: 6px; font-weight: 500; font-size: 13px; transition: all 0.2s;">
-                📄 Latest
+                <i class="bi bi-file-text"></i> Latest
             </button>
             <button class="log-type-tab" data-logtype="debug" onclick="switchLogType('debug')" 
                     style="padding: 8px 16px; background: var(--bg-medium); border: 2px solid var(--bg-light); color: var(--text-secondary); 
                            cursor: pointer; border-radius: 6px; font-weight: 500; font-size: 13px; transition: all 0.2s;">
-                🔍 Debug
+                <i class="bi bi-search"></i> Debug
             </button>
             <button class="log-type-tab" data-logtype="crash" onclick="switchLogType('crash')" 
                     style="padding: 8px 16px; background: var(--bg-medium); border: 2px solid var(--bg-light); color: var(--text-secondary); 
                            cursor: pointer; border-radius: 6px; font-weight: 500; font-size: 13px; transition: all 0.2s;">
-                💥 Crash Reports
+                <i class="bi bi-lightning-charge"></i> Crash Reports
             </button>
         </div>
         
@@ -1545,13 +1549,13 @@ function renderProfileTabContent(tabName, profile) {
                     <h3 style="color: var(--gold); margin: 0;">Installierte Mods</h3>
                     <div style="display: flex; gap: 8px;">
                         <button class="btn btn-secondary" onclick="checkForModUpdates('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
-                            🔍 Updates
+                            <i class="bi bi-search"></i> Updates
                         </button>
                         <button class="btn btn-secondary" onclick="refreshInstalledMods('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
-                            🔄
+                            <i class="bi bi-arrow-clockwise"></i>
                         </button>
                         <button class="btn btn-secondary" onclick="openModsFolder('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
-                            📁
+                            <i class="bi bi-folder"></i>
                         </button>
                     </div>
                 </div>
@@ -1564,13 +1568,13 @@ function renderProfileTabContent(tabName, profile) {
                     </label>
                     <div style="flex: 1;"></div>
                     <button class="btn btn-secondary" onclick="bulkActivateMods('${profile.id}')" style="padding: 6px 12px; font-size: 11px;">
-                        ✅ Aktivieren
+                        <i class="bi bi-check-circle"></i> Aktivieren
                     </button>
                     <button class="btn btn-secondary" onclick="bulkDeactivateMods('${profile.id}')" style="padding: 6px 12px; font-size: 11px;">
-                        ⏸️ Deaktivieren
+                        <i class="bi bi-pause-circle"></i> Deaktivieren
                     </button>
                     <button class="btn btn-secondary" onclick="bulkDeleteMods('${profile.id}')" style="padding: 6px 12px; font-size: 11px; color: #f44336;">
-                        🗑️ Löschen
+                        <i class="bi bi-trash"></i> Löschen
                     </button>
                 </div>
                 
@@ -1590,10 +1594,10 @@ function renderProfileTabContent(tabName, profile) {
                     <h3 style="color: var(--gold); margin: 0;">Resource Packs</h3>
                     <div style="display: flex; gap: 8px;">
                         <button class="btn btn-secondary" onclick="refreshResourcePacks('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
-                            🔄
+                            <i class="bi bi-arrow-clockwise"></i>
                         </button>
                         <button class="btn btn-secondary" onclick="openResourcePacksFolder('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
-                            📁
+                            <i class="bi bi-folder"></i>
                         </button>
                     </div>
                 </div>
@@ -1613,10 +1617,10 @@ function renderProfileTabContent(tabName, profile) {
                     <h3 style="color: var(--gold); margin: 0;">Shader Packs</h3>
                     <div style="display: flex; gap: 8px;">
                         <button class="btn btn-secondary" onclick="refreshShaderPacks('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
-                            🔄
+                            <i class="bi bi-arrow-clockwise"></i>
                         </button>
                         <button class="btn btn-secondary" onclick="openShaderPacksFolder('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
-                            📁
+                            <i class="bi bi-folder"></i>
                         </button>
                     </div>
                 </div>
@@ -1633,13 +1637,13 @@ function renderProfileTabContent(tabName, profile) {
             stopModsWatcher();
             return `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h3 style="color: var(--gold); margin: 0;">🌍 Welten</h3>
+                    <h3 style="color: var(--gold); margin: 0;"><i class="bi bi-globe"></i> Welten</h3>
                     <div style="display: flex; gap: 8px;">
                         <button class="btn btn-secondary" onclick="refreshWorlds('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
-                            🔄
+                            <i class="bi bi-arrow-clockwise"></i>
                         </button>
                         <button class="btn btn-secondary" onclick="openWorldsFolder('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
-                            📁
+                            <i class="bi bi-folder"></i>
                         </button>
                     </div>
                 </div>
@@ -1656,10 +1660,10 @@ function renderProfileTabContent(tabName, profile) {
             stopModsWatcher();
             return `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h3 style="color: var(--gold); margin: 0;">🖥️ Server</h3>
+                    <h3 style="color: var(--gold); margin: 0;"><i class="bi bi-display"></i> Server</h3>
                     <div style="display: flex; gap: 8px;">
                         <button class="btn btn-secondary" onclick="refreshServers('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
-                            🔄
+                            <i class="bi bi-arrow-clockwise"></i>
                         </button>
                     </div>
                 </div>
@@ -1679,10 +1683,10 @@ function renderProfileTabContent(tabName, profile) {
                     <h3 style="color: var(--gold); margin: 0;">Minecraft Logs</h3>
                     <div style="display: flex; gap: 10px;">
                         <button class="btn btn-secondary" onclick="loadLogs('${profile.id}')" style="padding: 8px 20px;">
-                            🔄 Aktualisieren
+                            <i class="bi bi-arrow-clockwise"></i> Aktualisieren
                         </button>
                         <button class="btn btn-secondary" onclick="openLogsFolder('${profile.id}')" style="padding: 8px 20px;">
-                            📁 Ordner öffnen
+                            <i class="bi bi-folder"></i> Ordner öffnen
                         </button>
                     </div>
                 </div>
@@ -1791,7 +1795,7 @@ async function loadLogs(profileId) {
         if (!logs || logs.trim().length === 0) {
             targetElement.innerHTML = `
                 <div style="color: var(--text-secondary); text-align: center; padding: 40px;">
-                    📋 Keine ${currentLogType} Logs gefunden<br>
+                    <i class="bi bi-clipboard"></i> Keine ${currentLogType} Logs gefunden<br>
                     <span style="font-size: 11px; color: #666;">Starte Minecraft um Logs zu generieren</span>
                     <div style="margin-top: 15px; font-size: 10px; color: #555;">
                         Profile ID: ${profileId}
@@ -1886,18 +1890,18 @@ async function loadLogs(profileId) {
         debugLog('Failed to load logs: ' + error, 'error');
         targetElement.innerHTML = `
             <div style="text-align: left; padding: 20px;">
-                <div style="color: #f44336; margin-bottom: 15px;">❌ Fehler beim Laden der Logs</div>
+                <div style="color: #f44336; margin-bottom: 15px;"><i class="bi bi-x-circle-fill"></i> Fehler beim Laden der Logs</div>
                 <pre style="color: var(--text-secondary); white-space: pre-wrap; font-size: 11px; background: #1a1a1a; padding: 10px; border-radius: 5px;">${escapeHtml(String(error))}</pre>
                 <div style="margin-top: 15px; font-size: 10px; color: #666;">
                     Profile ID: ${profileId}<br>
                     Log Type: ${currentLogType}
                 </div>
                 <div style="margin-top: 20px; padding: 15px; background: rgba(255, 152, 0, 0.1); border: 1px solid #ff9800; border-radius: 8px;">
-                    <div style="color: #ff9800; font-weight: bold; margin-bottom: 10px;">💡 Tipps:</div>
+                    <div style="color: #ff9800; font-weight: bold; margin-bottom: 10px;"><i class="bi bi-lightbulb"></i> Tipps:</div>
                     <ul style="color: var(--text-secondary); font-size: 11px; margin: 0; padding-left: 20px;">
                         <li>Starte Minecraft und warte ein paar Sekunden</li>
-                        <li>Klicke dann auf 🔄 Aktualisieren</li>
-                        <li>Öffne den Logs-Ordner mit dem 📁-Button</li>
+                        <li>Klicke dann auf <i class="bi bi-arrow-clockwise"></i> Aktualisieren</li>
+                        <li>Öffne den Logs-Ordner mit dem <i class="bi bi-folder"></i>-Button</li>
                     </ul>
                 </div>
             </div>
@@ -1958,7 +1962,7 @@ async function copyLogsToClipboard() {
 
     try {
         await navigator.clipboard.writeText(currentRawLogs);
-        showToast('Logs in Zwischenablage kopiert! 📋', 'success', 2000);
+        showToast('Logs in Zwischenablage kopiert!', 'success', 2000);
         debugLog('Logs copied to clipboard: ' + currentRawLogs.length + ' characters', 'success');
     } catch (error) {
         debugLog('Failed to copy logs: ' + error, 'error');
@@ -2093,7 +2097,7 @@ async function loadInstalledMods(profileId) {
         if (!mods || mods.length === 0) {
             modsList.innerHTML = `
                 <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
-                    <div style="font-size: 48px; margin-bottom: 15px;">▪</div>
+                    <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-box"></i></div>
                     <p>Noch keine Mods installiert</p>
                     <p style="font-size: 14px; margin-top: 10px;">
                         Gehe zum <a href="#" onclick="switchPage('mods'); return false;" style="color: var(--gold);">Mod Browser</a> um Mods zu installieren
@@ -2126,8 +2130,8 @@ async function loadInstalledMods(profileId) {
                 <!-- Icon -->
                 <div style="width: 44px; height: 44px; background: var(--bg-light); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden;">
                     ${iconUrl
-                ? `<img src="${iconUrl}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 22px;\\'>▪</span>'">`
-                : `<span style="font-size: 22px;">▪</span>`
+                ? `<img src="${iconUrl}" style="width: 100%; height: 100%; object-fit: cover;" onerror="handleIconError(this)">`
+                : `<span style="font-size: 22px;"><i class="bi bi-box"></i></span>`
             }
                 </div>
                 
@@ -2150,7 +2154,7 @@ async function loadInstalledMods(profileId) {
                 <div style="display: flex; gap: 6px; flex-shrink: 0;">
                     <button class="btn btn-secondary" onclick="event.stopPropagation(); toggleMod('${profileId}', '${mod.filename}', ${mod.disabled})" 
                             style="padding: 5px 10px; font-size: 11px;" title="${mod.disabled ? 'Aktivieren' : 'Deaktivieren'}">
-                        ${mod.disabled ? '✓' : '||'}
+                        ${mod.disabled ? '<i class="bi bi-check"></i>' : '||'}
                     </button>
                     <button class="btn btn-secondary" onclick="event.stopPropagation(); deleteMod('${profileId}', '${mod.filename}')" 
                             style="padding: 5px 10px; font-size: 11px; color: #f44336;" title="Löschen">
@@ -2167,11 +2171,11 @@ async function loadInstalledMods(profileId) {
         debugLog('Failed to load installed mods: ' + error, 'error');
         modsList.innerHTML = `
             <div style="text-align: center; padding: 40px; color: #f44336;">
-                <div style="font-size: 48px; margin-bottom: 15px;">❌</div>
+                <div style="font-size: 48px; margin-bottom: 15px; color: #f44336;"><i class="bi bi-x-circle-fill"></i></div>
                 <p>Fehler beim Laden der Mods</p>
                 <p style="font-size: 12px; color: var(--text-secondary);">${error}</p>
                 <button class="btn btn-secondary" onclick="loadInstalledMods('${profileId}')" style="margin-top: 15px;">
-                    🔄 Erneut versuchen
+                    <i class="bi bi-arrow-clockwise"></i> Erneut versuchen
                 </button>
             </div>
         `;
@@ -2306,7 +2310,7 @@ async function loadModIcons(mods) {
                         if (card) {
                             const iconContainer = card.querySelector('div[style*="44px"]');
                             if (iconContainer) {
-                                iconContainer.innerHTML = `<img src="${data.hits[0].icon_url}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 22px;\\'>▪</span>'">`;
+                                iconContainer.innerHTML = `<img src="${data.hits[0].icon_url}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;" onerror="handleIconError(this)">`;
                             }
                         }
                     }
@@ -2347,7 +2351,7 @@ async function checkForModUpdates(profileId) {
         document.getElementById('update-check-modal').remove();
 
         if (!updates || updates.length === 0) {
-            alert('✅ Alle Mods sind aktuell!');
+            alert('Alle Mods sind aktuell!');
             return;
         }
 
@@ -2360,7 +2364,7 @@ async function checkForModUpdates(profileId) {
                         ${updates.map(u => `
                             <div style="background: var(--bg-light); border-radius: 8px; padding: 12px; display: flex; align-items: center; gap: 12px;">
                                 <div style="width: 40px; height: 40px; background: var(--bg-dark); border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
-                                    ${u.icon_url ? `<img src="${u.icon_url}" style="width: 100%; height: 100%; object-fit: cover;">` : '<span style="font-size: 18px;">▪</span>'}
+                                    ${u.icon_url ? `<img src="${u.icon_url}" style="width: 100%; height: 100%; object-fit: cover;">` : '<span style="font-size: 18px;"><i class="bi bi-box"></i></span>'}
                                 </div>
                                 <div style="flex: 1;">
                                     <p style="margin: 0; color: var(--text-primary); font-size: 13px;">${u.filename}</p>
@@ -2472,7 +2476,7 @@ async function loadInstalledResourcePacks(profileId) {
         if (packs.length === 0) {
             list.innerHTML = `
                 <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
-                    <div style="font-size: 48px; margin-bottom: 15px;">🎨</div>
+                    <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-palette"></i></div>
                     <p>Keine Resource Packs installiert</p>
                     <p style="font-size: 14px; margin-top: 10px;">
                         Klicke auf "+ Resource Pack" um Packs zu durchsuchen
@@ -2486,8 +2490,8 @@ async function loadInstalledResourcePacks(profileId) {
             const sizeStr = pack.size > 0 ? `${(pack.size / 1024 / 1024).toFixed(2)} MB` : '';
             const iconHTML = pack.icon_path
                 ? `<img src="file://${pack.icon_path}" style="width: 48px; height: 48px; border-radius: 4px;" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                   <div style="display: none; font-size: 32px;">🎨</div>`
-                : `<div style="font-size: 32px;">🎨</div>`;
+                   <div style="display: none; font-size: 32px;"><i class="bi bi-palette"></i></div>`
+                : `<div style="font-size: 32px;"><i class="bi bi-palette"></i></div>`;
 
             return `
                 <div style="background: var(--bg-light); padding: 12px; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
@@ -2499,12 +2503,12 @@ async function loadInstalledResourcePacks(profileId) {
                             ${pack.name}
                         </div>
                         <div style="color: var(--text-secondary); font-size: 11px;">
-                            ${pack.is_folder ? '📁 Ordner' : '▪ ' + sizeStr}
+                            ${pack.is_folder ? '<i class="bi bi-folder"></i> Ordner' : '· ' + sizeStr}
                         </div>
                     </div>
                     <button class="btn btn-secondary" onclick="deleteResourcePack('${profileId}', '${pack.name.replace(/'/g, "\\'")}', ${pack.is_folder})" 
                             style="padding: 6px 12px; font-size: 11px; color: #f44336;">
-                        🗑️
+                        <i class="bi bi-trash"></i>
                     </button>
                 </div>
             `;
@@ -2635,7 +2639,7 @@ async function loadInstalledShaderPacks(profileId) {
         if (packs.length === 0) {
             list.innerHTML = `
                 <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
-                    <div style="font-size: 48px; margin-bottom: 15px;">✨</div>
+                    <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-stars"></i></div>
                     <p>Keine Shader Packs installiert</p>
                     <p style="font-size: 14px; margin-top: 10px;">
                         Benötigt Iris oder OptiFine<br>
@@ -2652,19 +2656,19 @@ async function loadInstalledShaderPacks(profileId) {
             return `
                 <div style="background: var(--bg-light); padding: 12px; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
                     <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 32px;">
-                        ✨
+                        <i class="bi bi-stars"></i>
                     </div>
                     <div style="flex: 1; min-width: 0;">
                         <div style="color: var(--text-primary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                             ${pack.name}
                         </div>
                         <div style="color: var(--text-secondary); font-size: 11px;">
-                            ${pack.is_folder ? '📁 Ordner' : '▪ ' + sizeStr}
+                            ${pack.is_folder ? '<i class="bi bi-folder"></i> Ordner' : '· ' + sizeStr}
                         </div>
                     </div>
                     <button class="btn btn-secondary" onclick="deleteShaderPack('${profileId}', '${pack.name}')" 
                             style="padding: 6px 12px; font-size: 11px; color: #f44336;">
-                        🗑️
+                        <i class="bi bi-trash"></i>
                     </button>
                 </div>
             `;
@@ -2716,7 +2720,7 @@ async function loadWorlds(profileId) {
         if (worlds.length === 0) {
             list.innerHTML = `
                 <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
-                    <div style="font-size: 48px; margin-bottom: 15px;">🌍</div>
+                    <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-globe"></i></div>
                     <p>Keine Welten gefunden</p>
                     <p style="font-size: 14px; margin-top: 10px;">
                         Starte Minecraft und erstelle eine Welt
@@ -2738,7 +2742,7 @@ async function loadWorlds(profileId) {
             // Icon oder Fallback
             const iconHtml = world.icon_base64
                 ? `<img src="${world.icon_base64}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">`
-                : `<div style="font-size: 32px;">🌍</div>`;
+                : `<div style="font-size: 32px;"><i class="bi bi-globe"></i></div>`;
 
             return `
                 <div style="background: var(--bg-light); padding: 12px; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
@@ -2750,14 +2754,14 @@ async function loadWorlds(profileId) {
                             ${world.name}
                         </div>
                         <div style="color: var(--text-secondary); font-size: 11px; display: flex; gap: 10px; flex-wrap: wrap;">
-                            <span>🎮 ${world.game_mode}</span>
-                            <span>📅 ${lastPlayed}</span>
-                            <span>📦 ${sizeStr}</span>
+                            <span><i class="bi bi-controller"></i> ${world.game_mode}</span>
+                            <span><i class="bi bi-calendar3"></i> ${lastPlayed}</span>
+                            <span><i class="bi bi-box"></i> ${sizeStr}</span>
                         </div>
                     </div>
                     <button class="btn btn-gold" onclick="launchWorld('${profileId}', '${world.folder_name}')" 
                             style="padding: 8px 16px; font-size: 12px;">
-                        ▶️ Play
+                        <i class="bi bi-play-fill"></i> Play
                     </button>
                 </div>
             `;
@@ -2813,7 +2817,7 @@ async function loadServers(profileId) {
         if (servers.length === 0) {
             list.innerHTML = `
                 <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
-                    <div style="font-size: 48px; margin-bottom: 15px;">🖥️</div>
+                    <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-display"></i></div>
                     <p>Keine Server gespeichert</p>
                     <p style="font-size: 14px; margin-top: 10px;">
                         Starte Minecraft und füge Server hinzu
@@ -2827,7 +2831,7 @@ async function loadServers(profileId) {
             // Icon oder Fallback
             const iconHtml = server.icon_base64
                 ? `<img src="${server.icon_base64}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">`
-                : `<div style="font-size: 32px;">🖥️</div>`;
+                : `<div style="font-size: 32px;"><i class="bi bi-display"></i></div>`;
 
             // MOTD oder IP als Beschreibung
             const description = server.motd || server.ip;
@@ -2847,7 +2851,7 @@ async function loadServers(profileId) {
                     </div>
                     <button class="btn btn-gold" onclick="launchServer('${profileId}', '${server.ip}')" 
                             style="padding: 8px 16px; font-size: 12px;">
-                        ▶️ Join
+                        <i class="bi bi-play-fill"></i> Join
                     </button>
                 </div>
             `;
@@ -2931,7 +2935,7 @@ function clearProfileIcon() {
     selectedProfileIcon = null;
     const preview = document.getElementById('profile-icon-preview');
     if (preview) {
-        preview.innerHTML = '▪';
+        preview.innerHTML = '<i class="bi bi-box"></i>';
     }
     const input = document.getElementById('profile-icon-input');
     if (input) input.value = '';
@@ -3767,7 +3771,7 @@ async function loadPopularResourcePacks(page = 0) {
         debugLog('Failed to load resource packs: ' + error, 'error');
         modList.innerHTML = `
             <div class="loading" style="text-align: center; padding: 40px;">
-                <div style="font-size: 48px; margin-bottom: 15px;">🎨</div>
+                <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-palette"></i></div>
                 <p style="color: var(--gold); margin-bottom: 10px;">Beliebte Resource Packs</p>
                 <p style="color: var(--text-secondary);">Gib einen Suchbegriff ein oder versuche es später erneut</p>
             </div>
@@ -3836,7 +3840,7 @@ async function installResourcePack(packId, source) {
         showToast(`Resource Pack erfolgreich zu "${profile.name}" hinzugefügt!`, 'success', 3000);
 
         // Button als installiert markieren mit korrektem Styling
-        btn.textContent = '✓ Installiert';
+        btn.innerHTML = '<i class="bi bi-check"></i> Installiert';
         btn.disabled = true;
         btn.style.background = 'var(--bg-light)';
         btn.style.color = 'var(--text-secondary)';
@@ -3881,7 +3885,7 @@ async function installShaderPack(packId, source) {
         showToast(`Shader Pack erfolgreich zu "${profile.name}" hinzugefügt!`, 'success', 3000);
 
         // Button als installiert markieren mit korrektem Styling
-        btn.textContent = '✓ Installiert';
+        btn.innerHTML = '<i class="bi bi-check"></i> Installiert';
         btn.disabled = true;
         btn.style.background = 'var(--bg-light)';
         btn.style.color = 'var(--text-secondary)';
@@ -3931,7 +3935,7 @@ async function loadPopularShaderPacks(page = 0) {
         debugLog('Failed to load shader packs: ' + error, 'error');
         modList.innerHTML = `
             <div class="loading" style="text-align: center; padding: 40px;">
-                <div style="font-size: 48px; margin-bottom: 15px;">✨</div>
+                <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-stars"></i></div>
                 <p style="color: var(--gold); margin-bottom: 10px;">Beliebte Shader Packs</p>
                 <p style="color: var(--text-secondary);">Gib einen Suchbegriff ein oder versuche es später erneut</p>
             </div>
@@ -4018,7 +4022,7 @@ async function loadPopularMods(page = 0) {
         debugLog('Failed to load popular mods: ' + error, 'error');
         modList.innerHTML = `
             <div class="loading" style="text-align: center; padding: 40px;">
-                <div style="font-size: 48px; margin-bottom: 15px;">🔥</div>
+                <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-collection-fill"></i></div>
                 <p style="color: var(--gold); margin-bottom: 10px;">Beliebte Mods</p>
                 <p style="color: var(--text-secondary);">Gib einen Suchbegriff ein oder versuche es später erneut</p>
             </div>
@@ -4223,9 +4227,12 @@ function renderMods(mods, page = 0) {
         const installFunc = getInstallFunction();
 
         // Icon basierend auf Content-Typ
-        const defaultIcon = currentContentType === 'resourcepacks' ? '▪' :
-            currentContentType === 'shaderpacks' ? '✦' :
-                currentContentType === 'modpacks' ? '▪' : '▪';
+        const defaultIcon = currentContentType === 'resourcepacks' ? '<i class="bi bi-palette"></i>' :
+            currentContentType === 'shaderpacks' ? '<i class="bi bi-stars"></i>' :
+                currentContentType === 'modpacks' ? '<i class="bi bi-collection"></i>' : '<i class="bi bi-puzzle"></i>';
+        const fallbackIconClass = currentContentType === 'resourcepacks' ? 'bi-palette' :
+            currentContentType === 'shaderpacks' ? 'bi-stars' :
+                currentContentType === 'modpacks' ? 'bi-collection' : 'bi-puzzle';
 
         // Erstelle Icon HTML mit Fallback - prüfe ob icon_url wirklich existiert und nicht leer ist
         const hasValidIcon = mod.icon_url && typeof mod.icon_url === 'string' && mod.icon_url.trim().length > 0;
@@ -4234,7 +4241,8 @@ function renderMods(mods, page = 0) {
         if (hasValidIcon) {
             iconHTML = `<img src="${mod.icon_url}" alt="${mod.name}" 
                              style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;"
-                             onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\\'font-size: 32px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;\\'>${defaultIcon}</div>';">`;
+                             data-fallback-icon="${fallbackIconClass}"
+                             onerror="handleIconErrorMedium(this)">`;
         } else {
             iconHTML = `<div style="font-size: 32px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">${defaultIcon}</div>`;
         }
@@ -4255,7 +4263,7 @@ function renderMods(mods, page = 0) {
                            style="color: var(--text-secondary); font-size: 14px; text-decoration: underline; cursor: pointer; transition: color 0.2s;"
                            onmouseover="this.style.color='#999'"
                            onmouseout="this.style.color='var(--text-secondary)'">${mod.author}</a>
-                        ${isInstalled ? '<span style="background: #4caf50; color: white; font-size: 10px; padding: 2px 5px; border-radius: 3px;">✓ Installiert</span>' : ''}
+                        ${isInstalled ? '<span style="background: #4caf50; color: white; font-size: 10px; padding: 2px 5px; border-radius: 3px;"><i class="bi bi-check"></i> Installiert</span>' : ''}
                     </div>
                     <div class="mod-description" style="margin-bottom: 10px;">${mod.description}</div>
                     
@@ -4417,7 +4425,7 @@ async function installMod(modId, source) {
         debugLog('Mod installed successfully!', 'success');
 
         // Button als installiert markieren mit korrektem Styling
-        btn.textContent = '✓ Installiert';
+        btn.innerHTML = '<i class="bi bi-check"></i> Installiert';
         btn.disabled = true;
         btn.style.background = 'var(--bg-light)';
         btn.style.color = 'var(--text-secondary)';
@@ -4446,7 +4454,7 @@ function showModInstallError(title, htmlContent) {
     const modalHTML = `
         <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;" onclick="this.remove()">
             <div style="background: var(--bg-dark); border: 2px solid #f44336; border-radius: 10px; padding: 30px; max-width: 500px;" onclick="event.stopPropagation()">
-                <h2 style="color: #f44336; margin: 0 0 20px 0;">❌ ${title}</h2>
+                <h2 style="color: #f44336; margin: 0 0 20px 0;"><i class="bi bi-x-circle-fill"></i> ${title}</h2>
                 <div style="color: var(--text-secondary); line-height: 1.6;">
                     ${htmlContent}
                 </div>
@@ -4468,7 +4476,7 @@ function showProfileSelectDialog() {
         const modalHTML = `
             <div id="profile-select-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 10000;">
                 <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 12px; padding: 25px; max-width: 450px; width: 90%;">
-                    <h2 style="color: var(--gold); margin: 0 0 20px 0; text-align: center;">▪ Profil auswählen</h2>
+                    <h2 style="color: var(--gold); margin: 0 0 20px 0; text-align: center;"><i class="bi bi-person-circle"></i> Profil auswählen</h2>
                     <p style="color: var(--text-secondary); text-align: center; margin-bottom: 20px;">
                         Wähle ein Profil für die Mod-Installation:
                     </p>
@@ -4481,7 +4489,7 @@ function showProfileSelectDialog() {
                                         border: 2px solid transparent;"
                                  onmouseover="this.style.borderColor='var(--gold)'"
                                  onmouseout="this.style.borderColor='transparent'">
-                                <div style="font-size: 24px;">${p.icon_path ? '▪' : '▪'}</div>
+                                <div style="font-size: 24px;"><i class="bi bi-box"></i></div>
                                 <div style="flex: 1;">
                                     <div style="color: var(--text-primary); font-weight: bold;">${p.name}</div>
                                     <div style="color: var(--text-secondary); font-size: 12px;">
@@ -4578,7 +4586,7 @@ function setTheme(theme, save = true) {
 
     if (save) {
         localStorage.setItem('theme', theme);
-        showToast(`Theme: ${theme === 'dark' ? '🌙 Dark' : '☀️ Light'}`, 'success', 2000);
+        showToast(`Theme: ${theme === 'dark' ? '<i class="bi bi-moon-fill"></i> Dark' : '<i class="bi bi-sun-fill"></i> Light'}`, 'success', 2000);
     }
 }
 
@@ -4659,7 +4667,7 @@ function updateAccountDisplay() {
     if (activeAccount) {
         if (headImg) headImg.src = activeAccount.head_url;
         if (nameEl) nameEl.textContent = activeAccount.username;
-        if (typeEl) typeEl.textContent = activeAccount.is_microsoft ? '🔐 Microsoft' : '👤 Offline';
+        if (typeEl) typeEl.innerHTML = activeAccount.is_microsoft ? '<i class="bi bi-shield-lock"></i> Microsoft' : '<i class="bi bi-person"></i> Offline';
     } else {
         if (headImg) headImg.src = 'https://mc-heads.net/avatar/MHF_Steve/40';
         if (nameEl) nameEl.textContent = 'Nicht angemeldet';
@@ -4683,7 +4691,7 @@ async function updateAccountsList() {
                     <div style="flex: 1;">
                         <p style="margin: 0; color: var(--text-primary); font-weight: bold; font-size: 18px;">${activeAccount.username}</p>
                         <p style="margin: 5px 0 0 0; color: var(--text-secondary); font-size: 12px;">
-                            ${activeAccount.is_microsoft ? '🔐 Microsoft Account' : '👤 Offline Account'}
+                            ${activeAccount.is_microsoft ? '<i class="bi bi-shield-lock"></i> Microsoft Account' : '<i class="bi bi-person"></i> Offline Account'}
                         </p>
                     </div>
                     <button class="btn btn-secondary" onclick="logoutAccount('${activeAccount.uuid}')" style="padding: 8px 15px; font-size: 12px;">
@@ -4694,7 +4702,7 @@ async function updateAccountsList() {
         } else if (activeDisplay) {
             activeDisplay.innerHTML = `
                 <div style="text-align: center; color: var(--text-secondary); padding: 20px;">
-                    <div style="font-size: 32px; margin-bottom: 10px;">👤</div>
+                    <div style="font-size: 32px; margin-bottom: 10px;"><i class="bi bi-person"></i></div>
                     <p>Kein Account angemeldet</p>
                     <p style="font-size: 12px;">Melde dich mit Microsoft an oder erstelle einen Offline-Account</p>
                 </div>
@@ -4710,12 +4718,12 @@ async function updateAccountsList() {
                     <div style="display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--bg-dark); border-radius: 8px; margin-bottom: 8px;">
                         <img src="${acc.head_url}" style="width: 32px; height: 32px; border-radius: 4px; image-rendering: pixelated;">
                         <span style="flex: 1; color: var(--text-primary);">${acc.username}</span>
-                        <span style="color: var(--text-secondary); font-size: 11px;">${acc.is_microsoft ? '🔐' : '👤'}</span>
+                        <span style="color: var(--text-secondary); font-size: 11px;">${acc.is_microsoft ? '<i class="bi bi-shield-lock"></i>' : '<i class="bi bi-person"></i>'}</span>
                         <button class="btn btn-secondary" onclick="switchAccount('${acc.uuid}')" style="padding: 5px 10px; font-size: 11px;">
                             Wechseln
                         </button>
                         <button class="btn btn-secondary" onclick="logoutAccount('${acc.uuid}')" style="padding: 5px 10px; font-size: 11px; color: #f44336;">
-                            ✕
+                            <i class="bi bi-x"></i>
                         </button>
                     </div>
                 `).join('')}
@@ -4742,7 +4750,7 @@ async function startMicrosoftLogin() {
         const modalHTML = `
             <div id="microsoft-login-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 10000;">
                 <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 10px; padding: 30px; min-width: 450px; max-width: 500px; text-align: center;">
-                    <h3 style="color: var(--gold); margin: 0 0 25px 0;">🔐 Microsoft Login</h3>
+                    <h3 style="color: var(--gold); margin: 0 0 25px 0;"><i class="bi bi-shield-lock"></i> Microsoft Login</h3>
                     
                     <div style="background: var(--bg-light); border-radius: 8px; padding: 20px; margin-bottom: 25px;">
                         <p style="color: var(--text-secondary); margin: 0 0 15px 0; font-size: 14px;">
@@ -4756,7 +4764,7 @@ async function startMicrosoftLogin() {
                         </div>
                         <button onclick="navigator.clipboard.writeText('${flow.user_code}'); showToast('Code kopiert!', 'success', 2000);" 
                                 class="btn btn-secondary" style="margin-top: 10px; padding: 8px 20px;">
-                            📋 Code kopieren
+                            <i class="bi bi-clipboard"></i> Code kopieren
                         </button>
                     </div>
                     
@@ -4839,14 +4847,14 @@ function showOfflineAccountModal() {
     const modalHTML = `
         <div id="offline-account-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;" onclick="if(event.target === this) this.remove()">
             <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 10px; padding: 30px; min-width: 400px;" onclick="event.stopPropagation()">
-                <h3 style="color: var(--gold); margin: 0 0 20px 0;">👤 Offline Account erstellen</h3>
+                <h3 style="color: var(--gold); margin: 0 0 20px 0;"><i class="bi bi-person"></i> Offline Account erstellen</h3>
                 <div style="margin-bottom: 20px;">
                     <label style="display: block; margin-bottom: 8px; color: var(--text-secondary);">Spielername</label>
                     <input type="text" id="offline-username" placeholder="Dein Minecraft-Name" 
                            style="width: 100%; padding: 12px; background: var(--bg-light); border: 2px solid var(--bg-light); border-radius: 8px; color: var(--text-primary);"
                            maxlength="16">
                     <p style="color: var(--text-secondary); font-size: 11px; margin-top: 5px;">
-                        ⚠️ Offline-Accounts können nur auf Servern mit deaktivierter Online-Authentifizierung spielen
+                        <i class="bi bi-exclamation-triangle-fill" style="color:#ff9800;"></i> Offline-Accounts können nur auf Servern mit deaktivierter Online-Authentifizierung spielen
                     </p>
                 </div>
                 <div style="display: flex; gap: 10px;">
@@ -5180,8 +5188,8 @@ async function renderModDetails(mod, versions) {
                 ${mod.icon_url ? 
                     `<img src="${mod.icon_url}" alt="${mod.name}" 
                          style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;"
-                         onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\\'font-size: 48px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: var(--bg-dark); border-radius: 8px;\\'>▪</div>';">` :
-                    `<div style="font-size: 48px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: var(--bg-dark); border-radius: 8px;">▪</div>`
+                         onerror="handleIconErrorLarge(this)">` :
+                    `<div style="font-size: 48px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: var(--bg-dark); border-radius: 8px;"><i class="bi bi-box"></i></div>`
                 }
             </div>
             
@@ -5239,21 +5247,21 @@ async function renderModDetails(mod, versions) {
                     style="flex: 1; padding: 12px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;
                            background: ${currentModDetailsTab === 'description' ? 'var(--gold)' : 'transparent'};
                            color: ${currentModDetailsTab === 'description' ? 'var(--bg-dark)' : 'var(--text-secondary)'};">
-                📄 Description
+                <i class="bi bi-file-text"></i> Description
             </button>
             <button class="mod-details-tab ${currentModDetailsTab === 'versions' ? 'active' : ''}" 
                     onclick="switchModDetailsTab('versions')"
                     style="flex: 1; padding: 12px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;
                            background: ${currentModDetailsTab === 'versions' ? 'var(--gold)' : 'transparent'};
                            color: ${currentModDetailsTab === 'versions' ? 'var(--bg-dark)' : 'var(--text-secondary)'};">
-                📦 Versions (${versions.length})
+                <i class="bi bi-box"></i> Versions (${versions.length})
             </button>
             <button class="mod-details-tab ${currentModDetailsTab === 'gallery' ? 'active' : ''}" 
                     onclick="switchModDetailsTab('gallery')"
                     style="flex: 1; padding: 12px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;
                            background: ${currentModDetailsTab === 'gallery' ? 'var(--gold)' : 'transparent'};
                            color: ${currentModDetailsTab === 'gallery' ? 'var(--bg-dark)' : 'var(--text-secondary)'};">
-                🖼️ Gallery
+                <i class="bi bi-images"></i> Gallery
             </button>
         </div>
         
@@ -5304,30 +5312,30 @@ function renderDescriptionTab(mod) {
             <div style="display: flex; flex-wrap: wrap; gap: 10px;">
                 <a href="https://modrinth.com/mod/${mod.slug || mod.id}" target="_blank" 
                    class="btn btn-secondary" style="padding: 10px 16px; text-decoration: none; font-size: 13px;">
-                    🌐 Modrinth
+                    <i class="bi bi-globe"></i> Modrinth
                 </a>
                 ${mod.source_url ? 
                     `<a href="${mod.source_url}" target="_blank" 
                         class="btn btn-secondary" style="padding: 10px 16px; text-decoration: none; font-size: 13px;">
-                        💻 Source Code
+                        <i class="bi bi-code-slash"></i> Source Code
                     </a>` : ''
                 }
                 ${mod.issues_url ? 
                     `<a href="${mod.issues_url}" target="_blank" 
                         class="btn btn-secondary" style="padding: 10px 16px; text-decoration: none; font-size: 13px;">
-                        🐛 Issues
+                        <i class="bi bi-bug"></i> Issues
                     </a>` : ''
                 }
                 ${mod.wiki_url ? 
                     `<a href="${mod.wiki_url}" target="_blank" 
                         class="btn btn-secondary" style="padding: 10px 16px; text-decoration: none; font-size: 13px;">
-                        📚 Wiki
+                        <i class="bi bi-book"></i> Wiki
                     </a>` : ''
                 }
                 ${mod.discord_url ? 
                     `<a href="${mod.discord_url}" target="_blank" 
                         class="btn btn-secondary" style="padding: 10px 16px; text-decoration: none; font-size: 13px;">
-                        💬 Discord
+                        <i class="bi bi-chat-dots"></i> Discord
                     </a>` : ''
                 }
             </div>
@@ -5425,7 +5433,7 @@ async function renderVersionsTab(mod, versions, allLoaders, sortedMcVersions) {
                 <button class="btn btn-secondary" 
                         onclick="toggleSnapshotFilter()"
                         style="padding: 8px 16px; font-size: 12px; display: flex; align-items: center; gap: 6px; ${modDetailsVersionFilter.includeSnapshots ? 'background: var(--gold); color: var(--bg-dark);' : ''}">
-                    ${modDetailsVersionFilter.includeSnapshots ? '✓' : ''} Snapshots
+                    ${modDetailsVersionFilter.includeSnapshots ? '<i class="bi bi-check"></i>' : ''} Snapshots
                 </button>
                 <div style="flex: 1;"></div>
                 <span style="color: var(--text-secondary); font-size: 12px;">
@@ -5456,7 +5464,7 @@ async function renderVersionsTab(mod, versions, allLoaders, sortedMcVersions) {
                                         <span style="font-weight: 600; color: var(--text-primary); font-size: 15px;">${version.name || version.version_number}</span>
                                         <span style="background: ${typeColor}; color: white; font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: 600;">${typeLabel}</span>
                                         ${isInstalled ? 
-                                            `<span style="background: var(--gold); color: var(--bg-dark); font-size: 10px; padding: 3px 8px; border-radius: 3px; font-weight: 700;">✓ INSTALLED</span>` 
+                                            `<span style="background: var(--gold); color: var(--bg-dark); font-size: 10px; padding: 3px 8px; border-radius: 3px; font-weight: 700;"><i class="bi bi-check"></i> INSTALLED</span>` 
                                             : ''
                                         }
                                     </div>
@@ -5465,7 +5473,7 @@ async function renderVersionsTab(mod, versions, allLoaders, sortedMcVersions) {
                                 ${currentProfile ? 
                                     (isInstalled ? 
                                         `<button class="btn btn-secondary" disabled style="padding: 8px 20px; font-size: 13px; opacity: 0.6;">
-                                            ✓ Installed
+                                            <i class="bi bi-check"></i> Installed
                                         </button>` :
                                         `<button class="btn btn-primary" onclick="installModVersion('${mod.id}', '${version.id}')" 
                                                  style="padding: 8px 20px; font-size: 13px;">
@@ -5498,8 +5506,8 @@ async function renderVersionsTab(mod, versions, allLoaders, sortedMcVersions) {
                                 }
                             </div>
                             <div style="display: flex; gap: 15px; color: var(--text-secondary); font-size: 11px;">
-                                <span>📅 ${new Date(version.published).toLocaleDateString()}</span>
-                                ${version.downloads ? `<span>⬇️ ${formatNumber(version.downloads)}</span>` : ''}
+                                <span><i class="bi bi-calendar3"></i> ${new Date(version.published).toLocaleDateString()}</span>
+                                ${version.downloads ? `<span><i class="bi bi-download"></i> ${formatNumber(version.downloads)}</span>` : ''}
                             </div>
                         </div>
                     `}).join('')}
@@ -5516,7 +5524,7 @@ function renderGalleryTab(mod) {
     if (gallery.length === 0) {
         return `
             <div style="background: var(--bg-medium); padding: 60px 24px; border-radius: 12px; text-align: center;">
-                <div style="font-size: 48px; margin-bottom: 15px;">🖼️</div>
+                <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-images"></i></div>
                 <h3 style="margin: 0 0 10px 0; font-size: 18px; color: var(--text-primary);">No Images Available</h3>
                 <p style="color: var(--text-secondary); font-size: 14px;">
                     This project doesn't have any gallery images yet.

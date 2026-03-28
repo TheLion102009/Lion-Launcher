@@ -225,8 +225,7 @@ impl ForgeCompatVersions {
             LoaderType::NeoForge => {
                 // Suche die neueste stabile NeoForge-Version
                 all_versions.iter()
-                    .filter(|v| v.loader_type == LoaderType::NeoForge && !v.is_beta)
-                    .next()
+                    .find(|v| v.loader_type == LoaderType::NeoForge && !v.is_beta)
                     .cloned()
             }
             LoaderType::Forge => {
@@ -234,7 +233,7 @@ impl ForgeCompatVersions {
                 all_versions.iter()
                     .filter(|v| v.loader_type == LoaderType::Forge)
                     .find(|v| v.recommended)
-                    .or_else(|| all_versions.iter().filter(|v| v.loader_type == LoaderType::Forge).next())
+                    .or_else(|| all_versions.iter().find(|v| v.loader_type == LoaderType::Forge))
                     .cloned()
             }
         }

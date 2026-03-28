@@ -56,7 +56,7 @@ impl ForgeInstaller {
 
                     let mut success = false;
                     for url in maven_urls {
-                        if let Ok(_) = self.download_manager.download_with_hash(&url, &lib_dest, None).await {
+                        if self.download_manager.download_with_hash(&url, &lib_dest, None).await.is_ok() {
                             success = true;
                             break;
                         }
