@@ -18,9 +18,6 @@ Ein minimalistischer Minecraft Launcher für Linux und Windows, geschrieben in R
 - Jedes Profil kann eigene Mods, Einstellungen und Resource Packs haben
 - Automatisches Laden und Verwalten der Loader-Versionen
 
-**Neu:** 🎉 Forge/NeoForge-Kompatibilitätsschicht mit automatischer Loader-Auswahl für alle MC-Versionen!
-→ Siehe [FORGE_NEOFORGE_COMPAT.md](FORGE_NEOFORGE_COMPAT.md) für Details
-
 🔍 **Mod Browser**
 - Durchsuche Modrinth (CurseForge Support geplant)
 - Filtere nach Minecraft-Version und Mod-Loader
@@ -40,7 +37,7 @@ Ein minimalistischer Minecraft Launcher für Linux und Windows, geschrieben in R
 
 ⚙️ **Einstellungen**
 - Dark/Light Mode
-- Anpassbare Akzentfarben (Gold, Blau, Grün, Lila, Rot, Orange, Pink, Cyan)
+- Anpassbare Akzentfarben 
 - Konfiguriere Speicher und Java-Pfad
 
 🎮 **Design**
@@ -57,12 +54,12 @@ Ein minimalistischer Minecraft Launcher für Linux und Windows, geschrieben in R
 
 ## Installation
 
-### prebuild Releases
+### Releases
 
 Lade die neueste Version von den [Releases](https://github.com/yourusername/Lion-Launcher/releases):
 
-- **Linux**: `lion-launcher_*.AppImage` oder `.deb`
-- **Windows**: `Lion-Launcher_*_setup.exe` oder `.msi`
+- **Linux**: `.AppImage` oder `.deb` oder `.rpm`
+- **Windows**: `Lion-Launcher_*_setup.exe`
 
 ### Aus Source bauen
 
