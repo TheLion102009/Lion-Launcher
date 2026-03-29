@@ -131,45 +131,28 @@ else
     echo -e "  ${YELLOW}⚠ AppImage nicht erstellt (WSL/FUSE-Einschränkung) – wird übersprungen${NC}"
 fi
 
-# ---- Windows .exe (Cross-Compilation) ---------------------
-echo -e "\n${YELLOW}[4/7] Windows .exe (Cross-Compilation)...${NC}"
+# ---- Windows .exe (NSIS Installer via GitHub Actions) ------
+echo -e "\n${YELLOW}[4/7] Windows .exe (NSIS Installer)...${NC}"
+echo -e "  ${CYAN}ℹ  Windows-NSIS-Builds werden über GitHub Actions erstellt.${NC}"
+echo -e "  ${CYAN}   Der Installer enthält WebView2 (embedBootstrapper).${NC}"
+echo -e ""
+echo -e "  So erstellt du den Windows Installer:"
+echo -e "  ${BOLD}Option A – Tag pushen (empfohlen):${NC}"
+echo -e "    git tag v0.1.0"
+echo -e "    git push origin v0.1.0"
+echo -e "    → GitHub Actions baut automatisch .exe, .deb und .rpm"
+echo -e "    → Alle Dateien werden als GitHub Release veröffentlicht"
+echo -e ""
+echo -e "  ${BOLD}Option B – Manuell auslösen:${NC}"
+echo -e "    GitHub → Actions → \"Release Build\" → \"Run workflow\""
+echo -e ""
+echo -e "  ${BOLD}Option C – Lokal auf Windows:${NC}"
+echo -e "    cargo tauri build"
+echo -e "    → Erzeugt: target/release/bundle/nsis/*-setup.exe"
+echo -e ""
+echo -e "  ${YELLOW}Konfiguration: bundle.windows.nsis.webviewInstallMode = embedBootstrapper${NC}"
+echo -e "  ${YELLOW}WebView2 wird beim Installieren automatisch eingerichtet.${NC}"
 
-WIN_TARGET="x86_64-pc-windows-gnu"
-WIN_EXE="./target/${WIN_TARGET}/release/Lion-Launcher.exe"
-WIN_ZIP="${OUT_DIR}/Lion-Launcher_0.1.0_x64-setup.zip"
-
-if rustup target list --installed | grep -q "$WIN_TARGET" && command -v x86_64-w64-mingw32-gcc &> /dev/null; then
-    echo -e "  → Kompiliere für Windows (${WIN_TARGET})..."
-    cargo build --release --target "$WIN_TARGET" 2>&1 | grep -E "error|warning: unused|Compiling Lion|Finished" | grep -v "^$" | tail -5
-
-    if [ -f "$WIN_EXE" ]; then
-        # .exe in ZIP verpacken (NSIS cross-compile wird nicht von Tauri unterstützt)
-        echo -e "  → Erstelle ZIP-Paket..."
-        mkdir -p /tmp/lion-launcher-win
-        cp "$WIN_EXE" /tmp/lion-launcher-win/
-        # README für Windows hinzufügen
-        cat > /tmp/lion-launcher-win/README.txt << 'WINREADME'
-Lion Launcher - Windows Setup
-==============================
-Führe Lion-Launcher.exe direkt aus um den Launcher zu starten.
-Es wird keine Installation benötigt (Portable Version).
-
-Hinweis: Beim ersten Start kann Windows SmartScreen eine Warnung
-zeigen - auf "Weitere Informationen" → "Trotzdem ausführen" klicken.
-WINREADME
-        (cd /tmp/lion-launcher-win && zip -r "$OLDPWD/$WIN_ZIP" .)
-        rm -rf /tmp/lion-launcher-win
-        echo -e "${PASS} Windows .exe erstellt: $(basename "$WIN_ZIP")"
-    else
-        echo -e "${FAIL} Windows-Build fehlgeschlagen"
-    fi
-else
-    echo -e "${YELLOW}  ⚠ Windows-Cross-Toolchain nicht vorhanden – .exe wird übersprungen.${NC}"
-    echo -e "  Zum Aktivieren:"
-    echo -e "    rustup target add $WIN_TARGET"
-    echo -e "    sudo dnf install mingw64-gcc mingw64-gcc-c++   # Fedora"
-    echo -e "    sudo apt install gcc-mingw-w64-x86-64          # Ubuntu/Debian"
-fi
 
 # ---- Pakete kopieren / auflisten ---------------------------
 echo -e "\n${YELLOW}[5/7] Pakete sammeln...${NC}"
