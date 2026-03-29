@@ -56,14 +56,15 @@
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
       "timestampUrl": "",
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
       "nsis": {
         "displayLanguageSelector": true,
         "languages": ["German", "English"],
         "installerIcon": "icons/icon.ico",
-        "headerImage": "icons/icon.png",
-        "webviewInstallMode": {
-          "type": "embedBootstrapper"
-        }
+        "headerImage": "icons/icon.png"
       },
       "wix": null
     },
