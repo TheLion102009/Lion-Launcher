@@ -38,6 +38,29 @@ pub async fn get_profile_logs(profile_id: String, log_type: String) -> Result<St
     let log_file = match log_type.as_str() {
         "latest" => logs_dir.join("latest.log"),
         "debug" => logs_dir.join("debug.log"),
+        lt if lt.starts_with("file:") => {
+            // Ältere Log-Datei nach Namen laden (nur innerhalb des logs-Ordners)
+            let filename = &lt["file:".len()..];
+            // Sicherheitscheck: kein Pfad-Traversal erlaubt
+            if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
+                return Err("Ungültiger Dateiname".to_string());
+            }
+            let path = logs_dir.join(filename);
+            // .log.gz entpacken
+            if filename.ends_with(".log.gz") {
+                use std::io::Read;
+                if let Ok(f) = std::fs::File::open(&path) {
+                    let mut gz = flate2::read::GzDecoder::new(f);
+                    let mut content = String::new();
+                    let _ = gz.read_to_string(&mut content);
+                    let lines: Vec<&str> = content.lines().collect();
+                    let start = if lines.len() > 10000 { lines.len() - 10000 } else { 0 };
+                    return Ok(lines[start..].join("\n"));
+                }
+                return Ok("⚠️ Konnte Log-Datei nicht lesen".to_string());
+            }
+            path
+        }
         "crash" => {
             // Finde neuesten Crash-Report
             let crash_dir = profile.game_dir.join("crash-reports");
@@ -153,6 +176,58 @@ pub async fn open_profile_folder(profile_id: String, subfolder: Option<String>) 
 }
 
 /// Repariert ein Profil, indem Minecraft und Loader-Dateien neu heruntergeladen werden
+#[tauri::command]
+pub async fn stop_profile(profile_id: String) -> Result<bool, String> {
+    let stopped = crate::core::minecraft::kill_running_process(&profile_id);
+    if stopped {
+        tracing::info!("Stopped Minecraft instance for profile: {}", profile_id);
+    } else {
+        tracing::warn!("No running Minecraft instance found for profile: {}", profile_id);
+    }
+    Ok(stopped)
+}
+
+#[tauri::command]
+pub async fn get_running_profiles() -> Result<Vec<String>, String> {
+    Ok(crate::core::minecraft::get_running_profile_ids())
+}
+
+#[tauri::command]
+pub async fn get_log_files(profile_id: String) -> Result<Vec<String>, String> {
+    use crate::core::profiles::ProfileManager;
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    let logs_dir = profile.game_dir.join("logs");
+    if !logs_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut files: Vec<(String, std::time::SystemTime)> = std::fs::read_dir(&logs_dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            // Nur ältere, datierte Logs (nicht latest.log / debug.log)
+            (name.ends_with(".log") || name.ends_with(".log.gz"))
+                && name != "latest.log"
+                && name != "debug.log"
+        })
+        .map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let modified = e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            (name, modified)
+        })
+        .collect();
+
+    // Neueste zuerst
+    files.sort_by(|a, b| b.1.cmp(&a.1));
+    Ok(files.into_iter().map(|(name, _)| name).collect())
+}
+
 #[tauri::command]
 pub async fn repair_profile(profile_id: String) -> Result<(), String> {
     use crate::core::profiles::ProfileManager;

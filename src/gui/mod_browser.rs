@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use crate::core::mods::ModManager;
 use crate::types::mod_info::{ModInfo, ModVersion, ModSearchQuery, SortOption};
 
@@ -345,12 +346,12 @@ pub async fn search_resourcepacks(
         .await
         .map_err(|e| e.to_string())?;
 
-    #[derive(serde::Deserialize)]
+    #[derive(Deserialize)]
     struct SearchResponse {
         hits: Vec<SearchHit>,
     }
 
-    #[derive(serde::Deserialize)]
+    #[derive(Deserialize)]
     struct SearchHit {
         project_id: String,
         slug: String,
@@ -426,7 +427,7 @@ pub async fn install_resourcepack(
         .await
         .map_err(|e| e.to_string())?;
 
-    #[derive(serde::Deserialize)]
+    #[derive(Deserialize)]
     struct Version {
         id: String,
         #[allow(dead_code)]
@@ -436,7 +437,7 @@ pub async fn install_resourcepack(
         files: Vec<File>,
     }
 
-    #[derive(serde::Deserialize)]
+    #[derive(Deserialize)]
     struct File {
         url: String,
         filename: String,
@@ -536,12 +537,12 @@ pub async fn search_shaderpacks(
         .await
         .map_err(|e| e.to_string())?;
 
-    #[derive(serde::Deserialize)]
+    #[derive(Deserialize)]
     struct SearchResponse {
         hits: Vec<SearchHit>,
     }
 
-    #[derive(serde::Deserialize)]
+    #[derive(Deserialize)]
     struct SearchHit {
         project_id: String,
         slug: String,
@@ -616,7 +617,7 @@ pub async fn install_shaderpack(
         .await
         .map_err(|e| e.to_string())?;
 
-    #[derive(serde::Deserialize)]
+    #[derive(Deserialize)]
     struct Version {
         id: String,
         #[allow(dead_code)]
@@ -625,7 +626,7 @@ pub async fn install_shaderpack(
         files: Vec<File>,
     }
 
-    #[derive(serde::Deserialize)]
+    #[derive(Deserialize)]
     struct File {
         url: String,
         filename: String,
@@ -723,12 +724,12 @@ pub async fn search_modpacks(
         .await
         .map_err(|e| e.to_string())?;
 
-    #[derive(serde::Deserialize)]
+    #[derive(Deserialize)]
     struct SearchResponse {
         hits: Vec<SearchHit>,
     }
 
-    #[derive(serde::Deserialize)]
+    #[derive(Deserialize)]
     struct SearchHit {
         project_id: String,
         slug: String,

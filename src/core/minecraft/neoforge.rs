@@ -431,22 +431,32 @@ async fn run_neoforge_installer(
     mc_version: &str,
 ) -> Result<()> {
     // Prüfe ob die SRG-JAR für DIESE spezifische Minecraft-Version bereits existiert
-    // WICHTIG: Nicht nur prüfen ob IRGENDEINE SRG-JAR existiert, sondern die RICHTIGE Version!
+    // WICHTIG: Verzeichnisstruktur: libraries/net/minecraft/client/1.21.1-<neoform>/client-1.21.1-<neoform>-srg.jar
     let srg_jar_dir = launcher_dir.join("libraries/net/minecraft/client");
     if srg_jar_dir.exists() {
-        let has_correct_srg = std::fs::read_dir(&srg_jar_dir)?
-            .filter_map(|e| e.ok())
-            .any(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
-                // Prüfe ob es die SRG-JAR für die aktuelle MC-Version ist
-                name.contains("srg.jar") && name.starts_with(&format!("client-{}-", mc_version))
-            });
+        let has_correct_srg = std::fs::read_dir(&srg_jar_dir)
+            .map(|entries| {
+                entries.filter_map(|e| e.ok())
+                    // Jeder Eintrag hier ist ein Unterverzeichnis wie "1.21.1-20240808.144430"
+                    .filter(|e| e.path().is_dir())
+                    .filter(|e| e.file_name().to_string_lossy().starts_with(mc_version))
+                    .any(|dir_entry| {
+                        // Prüfe ob in diesem Unterverzeichnis eine SRG-JAR liegt
+                        std::fs::read_dir(dir_entry.path())
+                            .map(|sub| sub.filter_map(|f| f.ok()).any(|f| {
+                                let name = f.file_name().to_string_lossy().to_string();
+                                name.ends_with("-srg.jar")
+                            }))
+                            .unwrap_or(false)
+                    })
+            })
+            .unwrap_or(false);
 
         if has_correct_srg {
-            tracing::info!("✅ SRG-JAR for MC {} already exists, skipping installer", mc_version);
+            tracing::info!("✅ SRG-JAR für MC {} existiert bereits, Installer wird übersprungen", mc_version);
             return Ok(());
         } else {
-            tracing::info!("⚠️  Found other SRG-JARs but not for MC {}, running installer...", mc_version);
+            tracing::info!("⚠️  Keine SRG-JAR für MC {} gefunden, Installer wird ausgeführt...", mc_version);
         }
     }
 
@@ -535,38 +545,49 @@ fn find_srg_jar(mc_version: &str, neoform_version: &str, libraries_dir: &Path) -
         libraries_dir.join(format!("net/minecraft/{}/{}.jar", mc_version, mc_version)),
     ];
 
-    tracing::info!("🔍 Searching for SRG-JAR (NeoForm {})...", neoform_version);
+    tracing::info!("🔍 Suche SRG-JAR (NeoForm {})...", neoform_version);
+
+    // Durchsuche auch das libraries-Verzeichnis nach passenden SRG-JARs
+    let srg_dir = libraries_dir.join(format!("net/minecraft/client/{}-{}", mc_version, neoform_version));
+    if srg_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&srg_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.ends_with("-srg.jar") || name.ends_with("-slim.jar") {
+                        if is_valid_zip_file(&path) {
+                            tracing::info!("  ✅ SRG-JAR gefunden per Scan: {:?}", path);
+                            return Ok(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     for (i, path) in possible_paths.iter().enumerate() {
-        tracing::info!("  [{}] Checking: {:?}", i, path);
+        tracing::info!("  [{}] Prüfe: {:?}", i, path);
         if path.exists() {
-            // Verifiziere dass die JAR die LoadingOverlay Klasse enthält
-            if verify_jar_has_class(path, "net/minecraft/client/gui/screens/LoadingOverlay.class")? {
-                tracing::info!("  ✅ Found valid SRG-JAR at: {:?}", path);
+            // Nur prüfen ob es eine gültige ZIP-Datei ist (SRG-JARs haben obfuskierte Klassen-Namen!)
+            if is_valid_zip_file(path) {
+                tracing::info!("  ✅ Gültige SRG-JAR gefunden: {:?}", path);
                 return Ok(path.clone());
             } else {
-                tracing::warn!("  ⚠️  JAR exists but missing LoadingOverlay class");
+                tracing::warn!("  ⚠️  JAR existiert aber ist keine gültige ZIP-Datei");
             }
         }
     }
 
-    bail!("❌ SRG-JAR not found! Run NeoForge installer first.");
+    bail!("❌ SRG-JAR nicht gefunden! NeoForge-Installer muss zuerst ausgeführt werden.");
 }
 
-/// Verifiziert dass eine JAR-Datei eine bestimmte Klasse enthält
-fn verify_jar_has_class(jar_path: &Path, class_path: &str) -> Result<bool> {
-
-    let file = std::fs::File::open(jar_path)?;
-    let mut archive = zip::ZipArchive::new(file)?;
-
-    for i in 0..archive.len() {
-        if let Ok(entry) = archive.by_index(i) {
-            if entry.name() == class_path {
-                return Ok(true);
-            }
-        }
+/// Prüft ob eine Datei eine gültige ZIP/JAR-Datei ist
+fn is_valid_zip_file(path: &Path) -> bool {
+    if let Ok(file) = std::fs::File::open(path) {
+        zip::ZipArchive::new(file).is_ok()
+    } else {
+        false
     }
-
-    Ok(false)
 }
 
 /// Baut die vollständige Command-Line für den Start

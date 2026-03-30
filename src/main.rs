@@ -3,7 +3,6 @@
     windows_subsystem = "windows"
 )]
 
-#[cfg(debug_assertions)]
 use tauri::Manager;
 
 mod gui;
@@ -27,12 +26,15 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .setup(|_app| {
-            #[cfg(debug_assertions)]
-            {
-                let window = _app.get_webview_window("main").unwrap();
-                window.open_devtools();
+        .setup(|app| {
+            // Fenster-Icon aus eingebetteten Bytes setzen (Titelleiste / Taskleiste)
+            let window = app.get_webview_window("main").unwrap();
+            let icon_bytes = include_bytes!("../icons/icon.png");
+            if let Ok(icon) = tauri::image::Image::from_bytes(icon_bytes) {
+                window.set_icon(icon).ok();
             }
+            #[cfg(debug_assertions)]
+            window.open_devtools();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -99,6 +101,10 @@ fn main() {
             // Logs & Folders
             gui::get_profile_logs,
             gui::open_profile_folder,
+            gui::get_log_files,
+            // Instance Management
+            gui::stop_profile,
+            gui::get_running_profiles,
             // Profile Maintenance
             gui::repair_profile,
             gui::clear_profile_cache,

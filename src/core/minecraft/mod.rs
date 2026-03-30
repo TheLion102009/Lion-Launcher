@@ -21,6 +21,80 @@ thread_local! {
     static EXTRA_LAUNCH_ARGS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
+/// Globaler Speicher für Launch-Warnungen (thread-sicher via Mutex)
+static LAUNCH_WARNINGS: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> =
+    std::sync::OnceLock::new();
+
+/// Globale Map: Profile-ID → PID der laufenden Minecraft-Instanz
+static RUNNING_PROCESSES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u32>>> =
+    std::sync::OnceLock::new();
+
+fn running_processes() -> &'static std::sync::Mutex<std::collections::HashMap<String, u32>> {
+    RUNNING_PROCESSES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Registriert eine laufende Minecraft-Instanz.
+pub fn register_running_process(profile_id: &str, pid: u32) {
+    if let Ok(mut map) = running_processes().lock() {
+        map.insert(profile_id.to_string(), pid);
+    }
+}
+
+/// Entfernt eine beendete Minecraft-Instanz aus der globalen Map.
+pub fn unregister_running_process(profile_id: &str) {
+    if let Ok(mut map) = running_processes().lock() {
+        map.remove(profile_id);
+    }
+}
+
+/// Gibt alle aktuell laufenden Profil-IDs zurück.
+pub fn get_running_profile_ids() -> Vec<String> {
+    running_processes().lock()
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// Beendet die laufende Minecraft-Instanz eines Profils.
+pub fn kill_running_process(profile_id: &str) -> bool {
+    let pid = {
+        running_processes().lock().ok()
+            .and_then(|m| m.get(profile_id).copied())
+    };
+    if let Some(pid) = pid {
+        tracing::info!("Killing Minecraft process PID {} for profile {}", pid, profile_id);
+        #[cfg(unix)]
+        {
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM); }
+        }
+        #[cfg(windows)]
+        {
+            std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/F"])
+                .spawn().ok();
+        }
+        unregister_running_process(profile_id);
+        true
+    } else {
+        false
+    }
+}
+
+fn launch_warnings() -> &'static std::sync::Mutex<Vec<String>> {
+    LAUNCH_WARNINGS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+/// Fügt eine Launch-Warnung hinzu, die nach dem Start dem User angezeigt wird.
+pub fn add_launch_warning(msg: impl Into<String>) {
+    if let Ok(mut w) = launch_warnings().lock() {
+        w.push(msg.into());
+    }
+}
+
+/// Nimmt alle akkumulierten Warnungen heraus und leert den Puffer.
+pub fn take_launch_warnings() -> Vec<String> {
+    launch_warnings().lock().map(|mut w| std::mem::take(&mut *w)).unwrap_or_default()
+}
+
 pub struct MinecraftLauncher {
     download_manager: DownloadManager,
 }
@@ -180,10 +254,14 @@ impl MinecraftLauncher {
             args.borrow_mut().clear();
         });
 
-        result
+        result.map(|_| ())
     }
 
-    pub async fn launch(&self, profile: &Profile, username: &str, uuid: &str, access_token: Option<&str>) -> Result<()> {
+    /// Startet Minecraft und gibt Warnungen zurück (z.B. Quilt-Fallback-Info).
+    pub async fn launch(&self, profile: &Profile, username: &str, uuid: &str, access_token: Option<&str>) -> Result<Vec<String>> {
+        // Warnungs-Puffer leeren (Überrest aus vorherigem Start)
+        take_launch_warnings();
+
         let version = &profile.minecraft_version;
         let game_dir = Path::new(&profile.game_dir);
         let loader = &profile.loader.loader;
@@ -202,6 +280,10 @@ impl MinecraftLauncher {
         tokio::fs::create_dir_all(&versions_dir).await?;
         tokio::fs::create_dir_all(&libraries_dir).await?;
         tokio::fs::create_dir_all(&assets_dir).await?;
+        // IMMER leeren: verhindert LWJGL-Versionskonflikte wenn MC-Version gewechselt wird.
+        if natives_dir.exists() {
+            tokio::fs::remove_dir_all(&natives_dir).await.ok();
+        }
         tokio::fs::create_dir_all(&natives_dir).await?;
         tokio::fs::create_dir_all(game_dir).await?;
 
@@ -225,36 +307,21 @@ impl MinecraftLauncher {
 
         // NeoForge/Forge verwendet einen speziellen Launch-Mechanismus
         if matches!(loader, crate::types::version::ModLoader::NeoForge) {
-            // Verwende die neue neoforge.rs Implementation
-            return self.launch_neoforge_new(
-                profile,
-                &version_info,
-                &classpath,
-                &libraries_dir,
-                &versions_dir,
-                &assets_dir,
-                &natives_dir,
-                game_dir,
-                username,
-                uuid,
-                access_token
-            ).await;
+            self.launch_neoforge_new(
+                profile, &version_info, &classpath, &libraries_dir,
+                &versions_dir, &assets_dir, &natives_dir, game_dir,
+                username, uuid, access_token
+            ).await?;
+            return Ok(take_launch_warnings());
         }
 
         if matches!(loader, crate::types::version::ModLoader::Forge) {
-            return self.launch_neoforge_or_forge(
-                profile,
-                &version_info,
-                &client_jar,
-                &classpath,
-                &libraries_dir,
-                &assets_dir,
-                &natives_dir,
-                game_dir,
-                username,
-                uuid,
-                access_token
-            ).await;
+            self.launch_neoforge_or_forge(
+                profile, &version_info, &client_jar, &classpath,
+                &libraries_dir, &assets_dir, &natives_dir, game_dir,
+                username, uuid, access_token
+            ).await?;
+            return Ok(take_launch_warnings());
         }
 
         // Mod-Loader-spezifische Konfiguration für Fabric/Quilt/Vanilla
@@ -263,7 +330,6 @@ impl MinecraftLauncher {
                 tracing::info!("Installing Fabric loader...");
                 let (fabric_classpath, fabric_main_class) = self.install_fabric(version, &libraries_dir).await?;
 
-                // Filter Vanilla ASM-Libraries raus (Fabric bringt eigene mit)
                 let filtered_vanilla_cp: String = classpath
                     .split(':')
                     .filter(|path| !path.contains("/org/ow2/asm/"))
@@ -295,18 +361,12 @@ impl MinecraftLauncher {
 
         // Standard-Launch für Fabric/Quilt/Vanilla
         self.launch_standard(
-            profile,
-            &main_class,
-            &final_classpath,
-            &client_jar,
-            &assets_dir,
-            &natives_dir,
-            game_dir,
-            &version_info,
-            username,
-            uuid,
-            access_token
-        ).await
+            profile, &main_class, &final_classpath, &client_jar,
+            &assets_dir, &natives_dir, game_dir, &version_info,
+            username, uuid, access_token
+        ).await?;
+
+        Ok(take_launch_warnings())
     }
 
     /// Launch für NeoForge mit der neuen neoforge.rs Implementation
@@ -398,6 +458,10 @@ impl MinecraftLauncher {
         let pid = child.id();
         tracing::info!("🎮 Minecraft started with PID: {}", pid);
 
+        // PID in globalem Zustand registrieren
+        let profile_id_owned = profile.id.clone();
+        register_running_process(&profile.id, pid);
+
         // Warte auf das Spiel im Hintergrund
         tokio::spawn(async move {
             match child.wait() {
@@ -410,6 +474,7 @@ impl MinecraftLauncher {
                 }
                 Err(e) => tracing::error!("❌ Error waiting for Minecraft: {}", e),
             }
+            unregister_running_process(&profile_id_owned);
         });
 
         Ok(())
@@ -911,6 +976,9 @@ maxThreads = -1
         let pid = child.id();
         tracing::info!("Forge started with PID: {}", pid);
 
+        let profile_id_owned = profile.id.clone();
+        register_running_process(&profile.id, pid);
+
         tokio::spawn(async move {
             match child.wait() {
                 Ok(status) => {
@@ -922,6 +990,7 @@ maxThreads = -1
                 }
                 Err(e) => tracing::error!("Error waiting for Forge: {}", e),
             }
+            unregister_running_process(&profile_id_owned);
         });
 
         Ok(())
@@ -947,15 +1016,50 @@ maxThreads = -1
         let required_java = version_info.javaVersion.as_ref().map(|j| j.majorVersion).unwrap_or(21);
         tracing::info!("Required Java version: {}", required_java);
         let java_path = self.ensure_java_installed(required_java).await?;
+
+        // Auf Windows javaw.exe nutzen (kein Konsolenfenster)
+        let java_bin = if cfg!(windows) {
+            java_path.replace("java.exe", "javaw.exe")
+        } else {
+            java_path.clone()
+        };
+
         let memory_mb = profile.memory_mb.unwrap_or(4096);
         let loader = &profile.loader.loader;
 
-        let mut cmd = Command::new(&java_path);
+        // logs/ Verzeichnis sicherstellen für eigenen Log-Datei
+        tokio::fs::create_dir_all(game_dir.join("logs")).await.ok();
+
+        let mut cmd = Command::new(&java_bin);
+
+        // ── Linux/NVIDIA Display-Umgebungsvariablen ──────────────────────────────
+        // Ohne DISPLAY startet kein Fenster auf X11. Muss explizit gesetzt werden,
+        // da Tauri-Kindprozesse DISPLAY nicht immer erben (z.B. AppImage-Launch).
+        cmd.env("DISPLAY", std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string()));
+        if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
+            cmd.env("XDG_RUNTIME_DIR", xdg);
+        }
+        if let Ok(wd) = std::env::var("WAYLAND_DISPLAY") {
+            cmd.env("WAYLAND_DISPLAY", wd);
+        }
+        cmd.env("_JAVA_AWT_WM_NONREPARENTING", "1");
+        // ────────────────────────────────────────────────────────────────────────
 
         cmd.arg(format!("-Xmx{}M", memory_mb));
         cmd.arg(format!("-Xms{}M", memory_mb / 2));
         cmd.arg(format!("-Djava.library.path={}", natives_dir.display()));
         cmd.arg("-XX:+UseG1GC");
+        cmd.arg("-Dminecraft.launcher.brand=lion-launcher");
+        cmd.arg("-Dminecraft.launcher.version=1.0");
+
+        // Notwendige --add-opens für Java 17+ (Minecraft 1.17+)
+        if required_java >= 17 {
+            cmd.arg("--add-opens=java.base/java.net=ALL-UNNAMED");
+            cmd.arg("--add-opens=java.base/java.lang=ALL-UNNAMED");
+            cmd.arg("--add-opens=java.base/java.io=ALL-UNNAMED");
+            cmd.arg("--add-opens=java.base/java.util=ALL-UNNAMED");
+            cmd.arg("--add-opens=java.base/java.util.concurrent=ALL-UNNAMED");
+        }
 
         // Loader-spezifische JVM-Args
         match loader {
@@ -963,7 +1067,14 @@ maxThreads = -1
                 cmd.arg(format!("-Dfabric.gameJarPath={}", client_jar.display()));
             }
             crate::types::version::ModLoader::Quilt => {
-                cmd.arg(format!("-Dquilt.gameJarPath={}", client_jar.display()));
+                // Korrekte Quilt-Loader-Properties (nicht -Dquilt.*, sondern -Dloader.*)
+                // Ohne loader.gameJarPath kann Quilt ClassTweakers nicht von official→intermediary remappen
+                cmd.arg(format!("-Dloader.gameJarPath={}", client_jar.display()));
+                // Fabric-API-Kompatibilität: emuliert Fabric-Launcher-Verhalten für Fabric-Mods unter Quilt
+                cmd.arg("-DFabricMcEmu=net.minecraft.client.main.Main");
+                // Ziel-Namespace explizit setzen – verhindert ClassTweakerFormatException
+                // "Namespace (official) does not match current runtime namespace (intermediary)"
+                cmd.arg("-Dloader.targetNamespace=intermediary");
             }
             _ => {}
         }
@@ -991,24 +1102,52 @@ maxThreads = -1
         });
 
         cmd.current_dir(game_dir);
-        cmd.stdout(Stdio::inherit());
-        cmd.stderr(Stdio::inherit());
+        // stdout/stderr pipen und via tracing loggen (funktioniert auch ohne Terminal)
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
 
-        tracing::info!("Launching Minecraft...");
-        let mut child = cmd.spawn()?;
+        tracing::info!("Launching Minecraft ({})...", loader.as_str());
+        tracing::info!("Java: {}", java_bin);
+        let mut child = cmd.spawn()
+            .map_err(|e| anyhow::anyhow!("Konnte Minecraft nicht starten ({}): {}", java_bin, e))?;
         let pid = child.id();
+        tracing::info!("🎮 Minecraft gestartet mit PID: {}", pid);
+
+        let profile_id_owned = profile.id.clone();
+        register_running_process(&profile.id, pid);
+
+        // stdout/stderr im Hintergrund lesen und loggen
+        if let Some(stdout) = child.stdout.take() {
+            use std::io::{BufRead, BufReader};
+            tokio::task::spawn_blocking(move || {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines().flatten() {
+                    tracing::info!("[MC stdout] {}", line);
+                }
+            });
+        }
+        if let Some(stderr) = child.stderr.take() {
+            use std::io::{BufRead, BufReader};
+            tokio::task::spawn_blocking(move || {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines().flatten() {
+                    tracing::warn!("[MC stderr] {}", line);
+                }
+            });
+        }
 
         tokio::spawn(async move {
             match child.wait() {
                 Ok(status) => {
                     if status.success() {
-                        tracing::info!("Minecraft (PID {}) exited successfully", pid);
+                        tracing::info!("✅ Minecraft (PID {}) erfolgreich beendet", pid);
                     } else {
-                        tracing::warn!("Minecraft (PID {}) exited with status: {}", pid, status);
+                        tracing::warn!("⚠️ Minecraft (PID {}) beendet mit Status: {}", pid, status);
                     }
                 }
-                Err(e) => tracing::error!("Error waiting for Minecraft: {}", e),
+                Err(e) => tracing::error!("❌ Fehler beim Warten auf Minecraft: {}", e),
             }
+            unregister_running_process(&profile_id_owned);
         });
 
         Ok(())
@@ -1753,9 +1892,23 @@ maxThreads = -1
             tokio::fs::create_dir_all(loader_dest.parent().unwrap()).await?;
             self.download_manager.download_with_hash(&loader_url, &loader_dest, None).await?;
         }
-        classpath_entries.push(loader_dest.display().to_string());
 
-        // Hashed (Quilt mappings)
+        // Intermediary (von Fabric Maven) ZUERST im Classpath eintragen!
+        // Quilt braucht die Mappings schon beim Starten der KnotClassLoader-Initialisierung,
+        // bevor es versucht ClassTweakers von 'official' nach 'intermediary' umzumappen.
+        let intermediary_maven = &loader.intermediary.maven;
+        let intermediary_path = maven_to_path(intermediary_maven);
+        let intermediary_url = format!("https://maven.fabricmc.net/{}", intermediary_path);
+        let intermediary_dest = libraries_dir.join(&intermediary_path);
+
+        if !intermediary_dest.exists() {
+            tracing::info!("Downloading Fabric intermediary mappings (for Quilt)...");
+            tokio::fs::create_dir_all(intermediary_dest.parent().unwrap()).await?;
+            self.download_manager.download_with_hash(&intermediary_url, &intermediary_dest, None).await?;
+        }
+        classpath_entries.push(intermediary_dest.display().to_string());
+
+        // Hashed (Quilt mappings) ebenfalls vor dem Loader
         let hashed_maven = &loader.hashed.maven;
         let hashed_path = maven_to_path(hashed_maven);
         let hashed_url = format!("https://maven.quiltmc.org/repository/release/{}", hashed_path);
@@ -1768,19 +1921,8 @@ maxThreads = -1
         }
         classpath_entries.push(hashed_dest.display().to_string());
 
-        // Intermediary (von Fabric Maven, nicht Quilt!)
-        // Quilt verwendet die Fabric Intermediary-Mappings!
-        let intermediary_maven = &loader.intermediary.maven;
-        let intermediary_path = maven_to_path(intermediary_maven);
-        let intermediary_url = format!("https://maven.fabricmc.net/{}", intermediary_path);
-        let intermediary_dest = libraries_dir.join(&intermediary_path);
-
-        if !intermediary_dest.exists() {
-            tracing::info!("Downloading Fabric intermediary mappings (for Quilt)...");
-            tokio::fs::create_dir_all(intermediary_dest.parent().unwrap()).await?;
-            self.download_manager.download_with_hash(&intermediary_url, &intermediary_dest, None).await?;
-        }
-        classpath_entries.push(intermediary_dest.display().to_string());
+        // Quilt Loader JAR nach den Mappings
+        classpath_entries.push(loader_dest.display().to_string());
 
         // Quilt Libraries (client + common)
         let all_libs: Vec<_> = loader.launcher_meta.libraries.client.iter()
@@ -2449,12 +2591,29 @@ maxThreads = -1
             // Überspringe Verzeichnisse und META-INF
             if name.ends_with('/') || name.starts_with("META-INF") { continue; }
 
-            // Extrahiere .so / .dll / .dylib aus BELIEBIGEN Unterverzeichnissen (flach)
-            // LWJGL 3.3.3 packt sie in linux/x64/org/lwjgl/liblwjgl.so
+            // Extrahiere nur .so / .dll / .dylib
             let native_ext = name.ends_with(".so")
                 || name.ends_with(".dll")
                 || name.ends_with(".dylib");
             if !native_ext { continue; }
+
+            // LWJGL 3.3.2+ packt Natives nach Architektur:
+            // linux/x64/org/lwjgl/liblwjgl.so
+            // linux/arm64/org/lwjgl/liblwjgl.so  ← auf x86_64 NICHT extrahieren!
+            // Prüfe ob der Pfad eine falsche Architektur enthält und überspringe sie.
+            let arch = std::env::consts::ARCH; // "x86_64", "aarch64", "arm", ...
+            let path_lower = name.to_lowercase();
+
+            let wrong_arch = match arch {
+                "x86_64" => path_lower.contains("/arm64/") || path_lower.contains("/arm32/") || path_lower.contains("/arm/"),
+                "aarch64" => path_lower.contains("/x64/") || path_lower.contains("/x86/") || path_lower.contains("/arm32/"),
+                "arm"     => path_lower.contains("/x64/") || path_lower.contains("/x86/") || path_lower.contains("/arm64/"),
+                _         => false,
+            };
+            if wrong_arch {
+                tracing::debug!("Skipping wrong-arch native: {}", name);
+                continue;
+            }
 
             // Nur den Dateinamen (letztes Pfad-Segment) verwenden
             let file_name = std::path::Path::new(&name)
@@ -2463,11 +2622,10 @@ maxThreads = -1
                 .unwrap_or(&name);
 
             let dest = dir.join(file_name);
-            if !dest.exists() {
-                tracing::debug!("Extracting: {} -> {:?}", name, dest);
-                if let Ok(mut out) = std::fs::File::create(&dest) {
-                    std::io::copy(&mut f, &mut out)?;
-                }
+            // Immer überschreiben – stellt sicher dass die Natives zur aktuellen LWJGL-Version passen
+            tracing::debug!("Extracting native: {} -> {:?}", name, dest);
+            if let Ok(mut out) = std::fs::File::create(&dest) {
+                std::io::copy(&mut f, &mut out)?;
             }
         }
         Ok(())
