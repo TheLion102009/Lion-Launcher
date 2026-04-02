@@ -2304,7 +2304,28 @@ maxThreads = -1
         match std::fs::File::open(path) {
             Ok(file) => {
                 match zip::ZipArchive::new(file) {
-                    Ok(_) => true,
+                    Ok(mut archive) => {
+                        // Vollstaendige Lesbarkeit pruefen, um "corrupt deflate stream" frueh zu erkennen.
+                        for i in 0..archive.len() {
+                            let mut entry = match archive.by_index(i) {
+                                Ok(e) => e,
+                                Err(e) => {
+                                    tracing::warn!("Invalid ZIP entry {:?} at {}: {}", path, i, e);
+                                    return false;
+                                }
+                            };
+
+                            if entry.name().ends_with('/') {
+                                continue;
+                            }
+
+                            if std::io::copy(&mut entry, &mut std::io::sink()).is_err() {
+                                tracing::warn!("Unreadable ZIP payload in {:?} at index {}", path, i);
+                                return false;
+                            }
+                        }
+                        true
+                    }
                     Err(e) => {
                         tracing::warn!("Invalid ZIP file {:?}: {}", path, e);
                         false
@@ -2504,6 +2525,13 @@ maxThreads = -1
             if let Some(dl) = &lib.downloads {
                 if let Some(art) = &dl.artifact {
                     let dest = lib_dir.join(&art.path);
+                    let is_archive = art.path.ends_with(".jar") || art.path.ends_with(".zip");
+
+                    if dest.exists() && is_archive && !Self::is_valid_zip(&dest) {
+                        tracing::warn!("Corrupt cached archive detected, re-downloading: {:?}", dest);
+                        tokio::fs::remove_file(&dest).await.ok();
+                    }
+
                     if !dest.exists() {
                         tracing::info!("Downloading: {}", lib.name);
                         tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
@@ -2523,6 +2551,14 @@ maxThreads = -1
                             || (os == "windows" && art.path.contains("natives-windows"))
                             || (os == "osx" && (art.path.contains("natives-osx") || art.path.contains("natives-macos")))
                         {
+                            if !Self::is_valid_zip(&dest) {
+                                tracing::warn!("Corrupt native archive detected, re-downloading: {:?}", dest);
+                                tokio::fs::remove_file(&dest).await.ok();
+                                self.download_manager.download_with_hash(&art.url, &dest, Some(&art.sha1)).await?;
+                                if !Self::is_valid_zip(&dest) {
+                                    bail!("Native archive remains corrupt after redownload: {}", dest.display());
+                                }
+                            }
                             tracing::debug!("Extracting native: {}", lib.name);
                             self.extract_native(&dest, natives_dir)?;
                         }
@@ -2540,10 +2576,17 @@ maxThreads = -1
                         if let Some(cls) = &dl.classifiers {
                             if let Some(nat) = cls.get(key) {
                                 let dest = lib_dir.join(&nat.path);
+                                if dest.exists() && !Self::is_valid_zip(&dest) {
+                                    tracing::warn!("Corrupt legacy native archive detected, re-downloading: {:?}", dest);
+                                    tokio::fs::remove_file(&dest).await.ok();
+                                }
                                 if !dest.exists() {
                                     tracing::info!("Downloading native (legacy): {}", lib.name);
                                     tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
                                     self.download_manager.download_with_hash(&nat.url, &dest, Some(&nat.sha1)).await?;
+                                }
+                                if !Self::is_valid_zip(&dest) {
+                                    bail!("Legacy native archive is corrupt: {}", dest.display());
                                 }
                                 self.extract_native(&dest, natives_dir)?;
                             }
@@ -2589,20 +2632,10 @@ maxThreads = -1
     }
 
     fn extract_native(&self, jar: &Path, dir: &Path) -> Result<()> {
-        let file = match std::fs::File::open(jar) {
-            Ok(f) => f,
-            Err(e) => {
-                tracing::warn!("Cannot open native JAR {:?}: {}", jar, e);
-                return Ok(());
-            }
-        };
-        let mut archive = match zip::ZipArchive::new(file) {
-            Ok(a) => a,
-            Err(e) => {
-                tracing::warn!("Cannot read native JAR {:?}: {}", jar, e);
-                return Ok(());
-            }
-        };
+        let file = std::fs::File::open(jar)
+            .map_err(|e| anyhow::anyhow!("Cannot open native JAR {:?}: {}", jar, e))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| anyhow::anyhow!("Cannot read native JAR {:?}: {}", jar, e))?;
 
         for i in 0..archive.len() {
             let mut f = archive.by_index(i)?;

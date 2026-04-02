@@ -108,6 +108,22 @@ sudo apt install -y libwebkit2gtk-4.1-dev \
 4. **Füge Mods hinzu** über den Mod Browser
 5. **Starte Minecraft!**
 
+## Windows-Test unter Linux (Wine)
+
+Wenn du Loader-Probleme unter Windows reproduzieren willst, kannst du den Windows-Launcher direkt unter Wine starten:
+
+```bash
+bash scripts/wine-loader-test.sh --prepare-prefix --winetricks
+```
+
+Nutzt standardmaessig das neueste `release-output/*_x64-setup.zip`, extrahiert `Lion-Launcher.exe` und schreibt Logs nach `release-output/wine-logs/`.
+
+Weitere Optionen:
+
+```bash
+bash scripts/wine-loader-test.sh --help
+```
+
 ## Technologie-Stack
 
 - **Frontend**: HTML, CSS, JavaScript

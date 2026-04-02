@@ -46,8 +46,16 @@ impl DownloadManager {
         }
 
         let total_size = response.content_length().unwrap_or(0);
+        let tmp_dest = dest.with_extension(
+            dest.extension()
+                .map(|e| format!("{}.part", e.to_string_lossy()))
+                .unwrap_or_else(|| "part".to_string()),
+        );
 
-        let mut file = tokio::fs::File::create(dest).await?;
+        // Alte Temp-Datei entfernen, um defekte Reste nicht weiterzuverwenden.
+        tokio::fs::remove_file(&tmp_dest).await.ok();
+
+        let mut file = tokio::fs::File::create(&tmp_dest).await?;
         let mut downloaded: u64 = 0;
         let mut stream = response.bytes_stream();
 
@@ -62,13 +70,28 @@ impl DownloadManager {
         }
 
         file.flush().await?;
+        file.sync_all().await?;
 
         // Validiere heruntergeladene Datei
-        let metadata = tokio::fs::metadata(dest).await?;
+        let metadata = tokio::fs::metadata(&tmp_dest).await?;
         if metadata.len() == 0 {
-            tokio::fs::remove_file(dest).await.ok();
+            tokio::fs::remove_file(&tmp_dest).await.ok();
             anyhow::bail!("Downloaded file is empty for URL: {}", url);
         }
+
+        if total_size > 0 && metadata.len() != total_size {
+            tokio::fs::remove_file(&tmp_dest).await.ok();
+            anyhow::bail!(
+                "Downloaded file size mismatch for URL {} (got {}, expected {})",
+                url,
+                metadata.len(),
+                total_size
+            );
+        }
+
+        // Auf Windows schlägt rename über bestehende Ziele öfter fehl.
+        tokio::fs::remove_file(dest).await.ok();
+        tokio::fs::rename(&tmp_dest, dest).await?;
 
         Ok(())
     }
@@ -84,7 +107,21 @@ impl DownloadManager {
 
         while retries > 0 {
             // Download
-            self.download_file(url, dest, None::<fn(u64, u64)>).await?;
+            if let Err(e) = self.download_file(url, dest, None::<fn(u64, u64)>).await {
+                retries -= 1;
+                tokio::fs::remove_file(dest).await.ok();
+                if retries == 0 {
+                    anyhow::bail!("Download failed for {} after retries: {}", url, e);
+                }
+                tracing::warn!(
+                    "Download failed for {} ({}), retries left: {}",
+                    url,
+                    e,
+                    retries
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
 
             // Hash-Verifizierung (nur wenn erwartet)
             if let Some(expected) = expected_sha1 {
@@ -118,15 +155,7 @@ impl DownloadManager {
             }
         }
 
-        // Alle Versuche fehlgeschlagen - trotzdem akzeptieren mit Warnung
-        tracing::warn!(
-            "Hash verification failed after 3 retries for {}, accepting anyway",
-            url
-        );
-
-        // Nochmal downloaden ohne Hash-Check
-        self.download_file(url, dest, None::<fn(u64, u64)>).await?;
-        Ok(())
+        anyhow::bail!("Hash verification failed after retries for {}", url)
     }
 
     pub async fn download_many(

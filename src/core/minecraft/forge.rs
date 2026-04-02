@@ -839,7 +839,29 @@ impl ForgeInstaller {
 
     fn is_valid_zip(path: &Path) -> bool {
         match std::fs::File::open(path) {
-            Ok(file) => zip::ZipArchive::new(file).is_ok(),
+            Ok(file) => {
+                let mut archive = match zip::ZipArchive::new(file) {
+                    Ok(a) => a,
+                    Err(_) => return false,
+                };
+
+                for i in 0..archive.len() {
+                    let mut entry = match archive.by_index(i) {
+                        Ok(e) => e,
+                        Err(_) => return false,
+                    };
+
+                    if entry.name().ends_with('/') {
+                        continue;
+                    }
+
+                    if std::io::copy(&mut entry, &mut std::io::sink()).is_err() {
+                        return false;
+                    }
+                }
+
+                true
+            }
             Err(_) => false,
         }
     }
