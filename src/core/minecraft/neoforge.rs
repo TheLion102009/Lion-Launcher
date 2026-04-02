@@ -317,7 +317,9 @@ pub async fn install_neoforge(
         "jtracy",                 // Doppeltes Modul
     ];
 
-    for vanilla_lib in vanilla_classpath.split(':') {
+    for vanilla_lib in std::env::split_paths(std::ffi::OsStr::new(vanilla_classpath))
+        .map(|p| p.to_string_lossy().to_string())
+    {
         if vanilla_lib.is_empty() {
             continue;
         }
@@ -349,7 +351,7 @@ pub async fn install_neoforge(
                 if let Some(s) = arg.as_str() {
                     let processed = s
                         .replace("${library_directory}", &libraries_dir.display().to_string())
-                        .replace("${classpath_separator}", ":")
+                        .replace("${classpath_separator}", if cfg!(windows) { ";" } else { ":" })
                         .replace("${version_name}", &actual_version);
                     jvm_args.push(processed);
                 }
@@ -617,7 +619,8 @@ pub fn build_launch_command(
     cmd.arg("-Djava.net.preferIPv6Addresses=system");
     cmd.arg(format!("-DignoreList={}.jar,client-extra", version));
     cmd.arg(format!("-DlibraryDirectory={}", libraries_dir.display()));
-    cmd.arg(format!("-DlegacyClassPath={}", installation.classpath.join(":")));
+    let cp_sep = if cfg!(windows) { ";" } else { ":" };
+    cmd.arg(format!("-DlegacyClassPath={}", installation.classpath.join(cp_sep)));
 
 
     // NeoForge JVM-Args
@@ -628,14 +631,14 @@ pub fn build_launch_command(
     // Module Path (falls vorhanden)
     if !installation.module_path.is_empty() {
         cmd.arg("-p");
-        cmd.arg(installation.module_path.join(":"));
+        cmd.arg(installation.module_path.join(cp_sep));
         cmd.arg("--add-modules");
         cmd.arg("ALL-MODULE-PATH");
     }
 
     // Classpath - KRITISCH!
     cmd.arg("-cp");
-    cmd.arg(installation.classpath.join(":"));
+    cmd.arg(installation.classpath.join(cp_sep));
 
     // Main Class
     cmd.arg(&installation.main_class);

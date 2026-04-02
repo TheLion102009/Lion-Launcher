@@ -72,9 +72,11 @@ impl ForgeInstaller {
             classpath_entries.push(lib_dest.display().to_string());
         }
 
+        let cp_sep = if cfg!(windows) { ";" } else { ":" };
+
         Ok(ForgeInstallation {
             main_class: profile.version_info.main_class,
-            classpath: classpath_entries.join(":"),
+            classpath: classpath_entries.join(cp_sep),
             minecraft_arguments: profile.version_info.minecraft_arguments,
         })
     }

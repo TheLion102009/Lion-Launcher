@@ -636,8 +636,9 @@ impl ForgeInstaller {
             tracing::info!("Prozessor: {} → {}", proc.jar, main_class);
             tracing::info!("Argumente: {:?}", resolved_args);
 
+            let cp_sep = if cfg!(windows) { ";" } else { ":" };
             let out = tokio::process::Command::new(&java)
-                .arg("-cp").arg(proc_cp.join(":"))
+                .arg("-cp").arg(proc_cp.join(cp_sep))
                 .arg(&main_class)
                 .args(&resolved_args)
                 .output().await;
@@ -998,7 +999,7 @@ pub fn resolve_arg_placeholders(
 ) -> String {
     arg
         .replace("${library_directory}", &libraries_dir.display().to_string())
-        .replace("${classpath_separator}", ":")
+        .replace("${classpath_separator}", if cfg!(windows) { ";" } else { ":" })
         .replace("${version_name}", mc_version)
         .replace("${launcher_name}", "lion-launcher")
         .replace("${launcher_version}", env!("CARGO_PKG_VERSION"))

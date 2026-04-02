@@ -217,6 +217,24 @@ fn maven_to_path(maven: &str) -> String {
     }
 }
 
+fn classpath_separator() -> &'static str {
+    if cfg!(windows) { ";" } else { ":" }
+}
+
+fn split_classpath_entries(classpath: &str) -> Vec<String> {
+    std::env::split_paths(std::ffi::OsStr::new(classpath))
+        .map(|p| p.to_string_lossy().to_string())
+        .collect()
+}
+
+fn join_classpath_entries<T: AsRef<str>>(entries: impl IntoIterator<Item = T>) -> String {
+    entries
+        .into_iter()
+        .map(|entry| entry.as_ref().to_string())
+        .collect::<Vec<_>>()
+        .join(classpath_separator())
+}
+
 impl MinecraftLauncher {
     pub fn new() -> Result<Self> {
         Ok(Self {
@@ -330,30 +348,34 @@ impl MinecraftLauncher {
                 tracing::info!("Installing Fabric loader...");
                 let (fabric_classpath, fabric_main_class) = self.install_fabric(version, &libraries_dir).await?;
 
-                let filtered_vanilla_cp: String = classpath
-                    .split(':')
-                    .filter(|path| !path.contains("/org/ow2/asm/"))
-                    .collect::<Vec<_>>()
-                    .join(":");
-
-                let cp = format!("{}:{}:{}", fabric_classpath, filtered_vanilla_cp, client_jar.display());
+                let mut cp_entries = split_classpath_entries(&fabric_classpath);
+                cp_entries.extend(
+                    split_classpath_entries(&classpath)
+                        .into_iter()
+                        .filter(|path| !path.contains("/org/ow2/asm/") && !path.contains("\\org\\ow2\\asm\\"))
+                );
+                cp_entries.push(client_jar.display().to_string());
+                let cp = join_classpath_entries(cp_entries);
                 (fabric_main_class, cp)
             }
             crate::types::version::ModLoader::Quilt => {
                 tracing::info!("Installing Quilt loader...");
                 let (quilt_classpath, quilt_main_class) = self.install_quilt(version, &libraries_dir).await?;
 
-                let filtered_vanilla_cp: String = classpath
-                    .split(':')
-                    .filter(|path| !path.contains("/org/ow2/asm/"))
-                    .collect::<Vec<_>>()
-                    .join(":");
-
-                let cp = format!("{}:{}:{}", quilt_classpath, filtered_vanilla_cp, client_jar.display());
+                let mut cp_entries = split_classpath_entries(&quilt_classpath);
+                cp_entries.extend(
+                    split_classpath_entries(&classpath)
+                        .into_iter()
+                        .filter(|path| !path.contains("/org/ow2/asm/") && !path.contains("\\org\\ow2\\asm\\"))
+                );
+                cp_entries.push(client_jar.display().to_string());
+                let cp = join_classpath_entries(cp_entries);
                 (quilt_main_class, cp)
             }
             crate::types::version::ModLoader::Vanilla => {
-                let cp = format!("{}:{}", classpath, client_jar.display());
+                let mut cp_entries = split_classpath_entries(&classpath);
+                cp_entries.push(client_jar.display().to_string());
+                let cp = join_classpath_entries(cp_entries);
                 (version_info.mainClass.clone(), cp)
             }
             _ => unreachable!()
@@ -839,7 +861,8 @@ maxThreads = -1
                 .collect();
 
             // Vanilla-CP filtern: Konflikte mit Forge-JARs und Natives entfernen
-            let filtered_vanilla: Vec<&str> = vanilla_classpath.split(':')
+            let filtered_vanilla: Vec<String> = split_classpath_entries(vanilla_classpath)
+                .into_iter()
                 .filter(|e| {
                     if e.is_empty() { return false; }
                     let fname = std::path::Path::new(e)
@@ -861,13 +884,13 @@ maxThreads = -1
             cp_parts.extend(install_result.bootstrap_classpath.iter().cloned());
             cp_parts.extend(install_result.classpath.iter().cloned());
             cp_parts.push(client_jar.display().to_string());
-            cp_parts.extend(filtered_vanilla.iter().map(|s| s.to_string()));
+            cp_parts.extend(filtered_vanilla.iter().cloned());
 
             // Deduplizieren
             let mut seen_cp = std::collections::HashSet::new();
             cp_parts.retain(|p| seen_cp.insert(p.clone()));
 
-            let bootstrap_cp = cp_parts.join(":");
+            let bootstrap_cp = join_classpath_entries(cp_parts.iter());
             tracing::info!("Bootstrap classpath: {} JARs ({} forge + {} vanilla)",
                 cp_parts.len(),
                 install_result.bootstrap_classpath.len() + install_result.classpath.len(),
@@ -883,13 +906,10 @@ maxThreads = -1
 
         } else {
             // === LEGACY FORGE (BootstrapLauncher, pre-1.13ish) ===
-            let forge_cp_str = install_result.classpath.join(":");
-            let full_cp = Self::deduplicate_classpath(&format!(
-                "{}:{}:{}",
-                forge_cp_str,
-                client_jar.display(),
-                vanilla_classpath
-            ));
+            let mut full_cp_entries = install_result.classpath.clone();
+            full_cp_entries.push(client_jar.display().to_string());
+            full_cp_entries.extend(split_classpath_entries(vanilla_classpath));
+            let full_cp = Self::deduplicate_classpath(&join_classpath_entries(full_cp_entries));
             cmd.arg("-cp").arg(&full_cp);
             cmd.arg(&install_result.main_class);
         }
@@ -1191,7 +1211,7 @@ maxThreads = -1
             }
         };
 
-        for entry in classpath.split(':') {
+        for entry in split_classpath_entries(classpath) {
             let entry = entry.trim();
             if entry.is_empty() {
                 continue;
@@ -1227,9 +1247,9 @@ maxThreads = -1
             unique_entries.push(entry.to_string());
         }
 
-        let result = unique_entries.join(":");
+        let result = join_classpath_entries(unique_entries.iter());
         tracing::info!("Classpath deduplicated: {} -> {} entries",
-            classpath.split(':').count(),
+            split_classpath_entries(classpath).len(),
             unique_entries.len()
         );
 
@@ -1493,7 +1513,7 @@ maxThreads = -1
                         // Ersetze Platzhalter
                         let processed = s
                             .replace("${library_directory}", &libraries_dir.display().to_string())
-                            .replace("${classpath_separator}", ":")
+                            .replace("${classpath_separator}", classpath_separator())
                             .replace("${version_name}", neoforge_version);
                         jvm_args.push(processed);
                     }
@@ -1860,7 +1880,7 @@ maxThreads = -1
         }
 
         tracing::info!("Fabric installed with {} libraries", classpath_entries.len());
-        Ok((classpath_entries.join(":"), main_class))
+        Ok((join_classpath_entries(classpath_entries), main_class))
     }
 
     /// Quilt Loader installieren und (Classpath, MainClass) zurückgeben
@@ -1950,7 +1970,7 @@ maxThreads = -1
         }
 
         tracing::info!("Quilt installed with {} libraries", classpath_entries.len());
-        Ok((classpath_entries.join(":"), main_class))
+        Ok((join_classpath_entries(classpath_entries), main_class))
     }
 
     /// Forge Loader installieren und (Classpath, MainClass) zurückgeben
@@ -1995,7 +2015,7 @@ maxThreads = -1
 
         if !classpath_entries.is_empty() {
             tracing::info!("Forge installed successfully with {} libraries", classpath_entries.len());
-            return Ok((classpath_entries.join(":"), main_class));
+            return Ok((join_classpath_entries(classpath_entries), main_class));
         }
 
         // Fallback: Versuche den Installer
@@ -2249,7 +2269,7 @@ maxThreads = -1
             for (i, entry) in classpath_entries.iter().take(5).enumerate() {
                 tracing::debug!("  Library {}: {}", i+1, entry);
             }
-            return Ok((classpath_entries.join(":"), main_class));
+            return Ok((join_classpath_entries(classpath_entries), main_class));
         }
 
         // Letzte Fallback-Option
@@ -2536,7 +2556,7 @@ maxThreads = -1
         }
 
         tracing::info!("Vanilla libraries: {} entries in classpath", cp.len());
-        Ok(cp.join(":"))
+        Ok(join_classpath_entries(cp))
     }
 
     async fn download_assets(&self, info: &AssetIndexInfo, assets_dir: &Path) -> Result<()> {
