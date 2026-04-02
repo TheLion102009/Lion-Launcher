@@ -11,6 +11,15 @@ pub fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
+pub fn get_embedded_logo_data_url() -> String {
+    use base64::{Engine as _, engine::general_purpose};
+
+    let logo_bytes = include_bytes!("../../icons/lionlogo.png");
+    let encoded = general_purpose::STANDARD.encode(logo_bytes);
+    format!("data:image/png;base64,{}", encoded)
+}
+
+#[tauri::command]
 pub async fn get_profile_logs(profile_id: String, log_type: String) -> Result<String, String> {
     use crate::core::profiles::ProfileManager;
 

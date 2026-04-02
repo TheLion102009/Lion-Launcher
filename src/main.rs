@@ -40,6 +40,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             // General
             gui::greet,
+            gui::get_embedded_logo_data_url,
             gui::initialize_launcher,
             // Settings
             gui::get_config,

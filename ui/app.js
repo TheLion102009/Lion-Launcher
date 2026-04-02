@@ -40,6 +40,38 @@ function escapeHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
+function resolveUiAssetUrl(fileName) {
+    try {
+        return new URL(fileName, document.baseURI).href;
+    } catch (_e) {
+        return fileName;
+    }
+}
+
+let LION_LOGO_URL = resolveUiAssetUrl('lionlogo.png');
+
+async function resolveEmbeddedLogoUrl() {
+    try {
+        const dataUrl = await invoke('get_embedded_logo_data_url');
+        if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/png;base64,')) {
+            LION_LOGO_URL = dataUrl;
+        }
+    } catch (_e) {
+        // Fallback bleibt die lokale Asset-URL
+    }
+}
+
+function initSidebarLogo() {
+    const sidebarLogo = document.querySelector('.sidebar-logo-img');
+    if (!sidebarLogo) return;
+
+    sidebarLogo.src = LION_LOGO_URL;
+    sidebarLogo.onerror = () => {
+        sidebarLogo.onerror = null;
+        sidebarLogo.style.display = 'none';
+    };
+}
+
 // Debug-Log-Funktion für visuelles Feedback
 function debugLog(message, type = 'info') {
     const time = new Date().toLocaleTimeString();
@@ -179,6 +211,8 @@ async function stopProfile(profileId) {
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     debugLog('Lion Launcher starting...', 'info');
+    await resolveEmbeddedLogoUrl();
+    initSidebarLogo();
 
     const grid = document.getElementById('profiles-grid');
     if (grid) {
@@ -570,8 +604,8 @@ function renderProfiles() {
 
         // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst App-Icon
         const iconHTML = profile.icon_path
-            ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;" onerror="this.onerror=null; this.src='lionlogo.png';">`
-            : `<img src="lionlogo.png" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;">`;
+            ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;" onerror="this.onerror=null; this.src='${LION_LOGO_URL}';">`
+            : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;">`;
 
         return `
         <div class="profile-card" data-context-menu="profile" data-profile-id="${profile.id}"
@@ -757,7 +791,7 @@ async function openProfileSettings(profileId) {
                 <!-- Profil-Bild -->
                 <div style="display: flex; gap: 15px; align-items: center; background: var(--bg-light); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
                     <div id="profile-icon-preview" style="width: 60px; height: 60px; background: var(--bg-medium); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 30px; overflow: hidden;">
-                        ${profile.icon_path ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.onerror=null; this.src='lionlogo.png';">` : `<img src="lionlogo.png" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover;">`}
+                        ${profile.icon_path ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.onerror=null; this.src='${LION_LOGO_URL}';">` : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover;">`}
                     </div>
                     <div style="flex: 1;">
                         <input type="file" id="profile-icon-input" accept="image/*" onchange="previewProfileIcon(event)" style="display: none;">
@@ -1313,8 +1347,8 @@ function showProfileDetails(profileId) {
 
     // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst App-Icon
     const iconHTML = profile.icon_path
-        ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 64px; height: 64px; object-fit: cover; border-radius: 8px;" onerror="this.onerror=null; this.src='lionlogo.png';">`
-        : `<img src="lionlogo.png" alt="Lion Launcher" style="width: 64px; height: 64px; object-fit: cover; border-radius: 8px;">`;
+        ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 64px; height: 64px; object-fit: cover; border-radius: 8px;" onerror="this.onerror=null; this.src='${LION_LOGO_URL}';">`
+        : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 64px; height: 64px; object-fit: cover; border-radius: 8px;">`;
 
     grid.innerHTML = `
         <div style="grid-column: 1 / -1;">
