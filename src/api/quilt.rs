@@ -111,6 +111,32 @@ impl QuiltClient {
         let versions: Vec<QuiltLoaderInfo> = self.client.get_json(&url).await?;
         Ok(versions)
     }
+
+    /// Gibt die neueste Quilt-Loader-Version zurück (game-version-unabhängig).
+    /// Verwendet die tatsächlich neueste Version (inkl. Beta/RC), da Quilt Stable-Releases
+    /// aktuell eine zu alte fabricloader-Kompatibilitätsversion (0.17.2) deklarieren,
+    /// während neuere Betas (z.B. 0.30.0-beta.7) fabricloader 0.18.6 bereitstellen –
+    /// was für aktuelle Fabric API Versionen (>= 0.141.x) zwingend nötig ist.
+    pub async fn get_latest_loader_version(&self) -> Result<String> {
+        let versions = self.get_all_loader_versions().await?;
+        // Neueste Version direkt verwenden (Beta-Releases sind produktionsreif und
+        // bieten aktuell die einzige Möglichkeit, fabricloader >= 0.17.3 bereitzustellen)
+        let version = versions.first()
+            .ok_or_else(|| anyhow::anyhow!("Keine Quilt Loader Versionen gefunden"))?;
+        Ok(version.version.clone())
+    }
+
+    /// Lädt das vollständige Launcher-Profil für eine bestimmte Loader+MC-Version.
+    /// Dieser Endpunkt funktioniert für ALLE Loader-Versionen, auch für neuere die
+    /// nicht im game-version-spezifischen Listen-Endpunkt erscheinen.
+    pub async fn get_loader_profile(&self, mc_version: &str, loader_version: &str) -> Result<QuiltLoaderProfile> {
+        let url = format!(
+            "{}/versions/loader/{}/{}/profile/json",
+            QUILT_META_URL, mc_version, loader_version
+        );
+        let profile: QuiltLoaderProfile = self.client.get_json(&url).await?;
+        Ok(profile)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -187,3 +213,20 @@ pub struct QuiltGameVersion {
     pub version: String,
     pub stable: bool,
 }
+
+/// Vollständiges Launcher-Profil vom `/profile/json`-Endpunkt.
+/// Enthält alle Libraries und die Main-Class für eine bestimmte
+/// Loader+MC-Version-Kombination.
+#[derive(Debug, Clone, Deserialize)]
+pub struct QuiltLoaderProfile {
+    #[serde(rename = "mainClass")]
+    pub main_class: String,
+    pub libraries: Vec<QuiltProfileLibrary>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct QuiltProfileLibrary {
+    pub name: String,
+    pub url: String,
+}
+

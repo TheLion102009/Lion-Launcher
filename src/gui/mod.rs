@@ -138,6 +138,12 @@ pub async fn get_profile_logs(profile_id: String, log_type: String) -> Result<St
 }
 
 #[tauri::command]
+pub async fn get_live_launcher_logs(limit: Option<usize>) -> Result<String, String> {
+    let max_lines = limit.unwrap_or(2000);
+    Ok(crate::utils::logging::get_recent_live_logs(max_lines))
+}
+
+#[tauri::command]
 pub async fn open_profile_folder(profile_id: String, subfolder: Option<String>) -> Result<(), String> {
     use crate::core::profiles::ProfileManager;
 

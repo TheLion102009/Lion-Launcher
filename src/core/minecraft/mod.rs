@@ -1883,94 +1883,67 @@ maxThreads = -1
         Ok((join_classpath_entries(classpath_entries), main_class))
     }
 
-    /// Quilt Loader installieren und (Classpath, MainClass) zurückgeben
+    /// Quilt Loader installieren und (Classpath, MainClass) zurückgeben.
+    ///
+    /// Verwendet den `/profile/json`-Endpunkt der Quilt-Meta-API, der für ALLE
+    /// Loader-Versionen funktioniert – auch für neuere Versionen (0.21+), die im
+    /// veralteten `/versions/loader/{mc_version}`-Listen-Endpunkt nicht erscheinen.
+    ///
+    /// Hintergrund: Der Listen-Endpunkt gibt maximal `0.20.0-beta.9` zurück, welcher
+    /// nur `fabricloader 0.14.21` bereitstellt. Fabric-API >= 0.140.x benötigt aber
+    /// `fabricloader >= 0.17.3`, weshalb neuere Loader-Versionen zwingend notwendig sind.
     async fn install_quilt(&self, mc_version: &str, libraries_dir: &Path) -> Result<(String, String)> {
         use crate::api::quilt::QuiltClient;
 
         let quilt = QuiltClient::new()?;
-        let loader_versions = quilt.get_loader_versions(mc_version).await?;
 
-        let loader = loader_versions.first()
-            .ok_or_else(|| anyhow::anyhow!("No Quilt loader found for MC {}", mc_version))?;
 
-        tracing::info!("Using Quilt loader version: {}", loader.loader.version);
+        let loader_version = quilt.get_latest_loader_version().await
+            .unwrap_or_else(|e| {
+                tracing::warn!("Konnte neueste Quilt Loader Version nicht ermitteln: {} – nutze Fallback 0.30.0-beta.7", e);
+                "0.30.0-beta.7".to_string()
+            });
 
-        // Main-Class aus der API holen
-        let main_class = loader.launcher_meta.main_class.get_client_class();
-        tracing::info!("Quilt main class: {}", main_class);
+        tracing::info!("Verwende Quilt Loader Version: {}", loader_version);
+
+        let profile = quilt.get_loader_profile(mc_version, &loader_version).await
+            .map_err(|e| anyhow::anyhow!(
+                "Konnte Quilt-Profil für MC {} / Loader {} nicht laden: {}",
+                mc_version, loader_version, e
+            ))?;
+
+        tracing::info!("Quilt main class: {}", profile.main_class);
+        tracing::info!("Quilt Profil hat {} Libraries", profile.libraries.len());
 
         let mut classpath_entries = Vec::new();
 
-        // Quilt Loader JAR
-        let loader_maven = &loader.loader.maven;
-        let loader_path = maven_to_path(loader_maven);
-        let loader_url = format!("https://maven.quiltmc.org/repository/release/{}", loader_path);
-        let loader_dest = libraries_dir.join(&loader_path);
-
-        if !loader_dest.exists() {
-            tracing::info!("Downloading Quilt loader: {}", loader.loader.version);
-            tokio::fs::create_dir_all(loader_dest.parent().unwrap()).await?;
-            self.download_manager.download_with_hash(&loader_url, &loader_dest, None).await?;
-        }
-
-        // Intermediary (von Fabric Maven) ZUERST im Classpath eintragen!
-        // Quilt braucht die Mappings schon beim Starten der KnotClassLoader-Initialisierung,
-        // bevor es versucht ClassTweakers von 'official' nach 'intermediary' umzumappen.
-        let intermediary_maven = &loader.intermediary.maven;
-        let intermediary_path = maven_to_path(intermediary_maven);
-        let intermediary_url = format!("https://maven.fabricmc.net/{}", intermediary_path);
-        let intermediary_dest = libraries_dir.join(&intermediary_path);
-
-        if !intermediary_dest.exists() {
-            tracing::info!("Downloading Fabric intermediary mappings (for Quilt)...");
-            tokio::fs::create_dir_all(intermediary_dest.parent().unwrap()).await?;
-            self.download_manager.download_with_hash(&intermediary_url, &intermediary_dest, None).await?;
-        }
-        classpath_entries.push(intermediary_dest.display().to_string());
-
-        // Hashed (Quilt mappings) ebenfalls vor dem Loader
-        let hashed_maven = &loader.hashed.maven;
-        let hashed_path = maven_to_path(hashed_maven);
-        let hashed_url = format!("https://maven.quiltmc.org/repository/release/{}", hashed_path);
-        let hashed_dest = libraries_dir.join(&hashed_path);
-
-        if !hashed_dest.exists() {
-            tracing::info!("Downloading Quilt hashed...");
-            tokio::fs::create_dir_all(hashed_dest.parent().unwrap()).await?;
-            self.download_manager.download_with_hash(&hashed_url, &hashed_dest, None).await?;
-        }
-        classpath_entries.push(hashed_dest.display().to_string());
-
-        // Quilt Loader JAR nach den Mappings
-        classpath_entries.push(loader_dest.display().to_string());
-
-        // Quilt Libraries (client + common)
-        let all_libs: Vec<_> = loader.launcher_meta.libraries.client.iter()
-            .chain(loader.launcher_meta.libraries.common.iter())
-            .collect();
-
-        for lib in all_libs {
+        // Alle Libraries aus dem Profil herunterladen und zum Classpath hinzufügen.
+        // Das Profil liefert bereits die korrekte Reihenfolge (Mappings vor dem Loader).
+        for lib in &profile.libraries {
             let lib_path = maven_to_path(&lib.name);
+            // Die URL im Profil ist der Maven-Repository-Basis-URL (mit trailing slash)
             let lib_url = format!("{}{}", lib.url, lib_path);
             let lib_dest = libraries_dir.join(&lib_path);
 
             if !lib_dest.exists() {
-                tracing::info!("Downloading Quilt library: {}", lib.name);
+                tracing::info!("Lade Quilt Library: {}", lib.name);
                 tokio::fs::create_dir_all(lib_dest.parent().unwrap()).await?;
                 if let Err(e) = self.download_manager.download_with_hash(&lib_url, &lib_dest, None).await {
-                    tracing::warn!("Failed to download {}: {}, trying alternate sources...", lib.name, e);
-                    let maven_central_url = format!("https://repo1.maven.org/maven2/{}", lib_path);
-                    if let Err(e2) = self.download_manager.download_with_hash(&maven_central_url, &lib_dest, None).await {
-                        tracing::warn!("Also failed from Maven Central: {}", e2);
+                    tracing::warn!("Fehler beim Laden von {}: {} – versuche Maven Central...", lib.name, e);
+                    let fallback_url = format!("https://repo1.maven.org/maven2/{}", lib_path);
+                    if let Err(e2) = self.download_manager.download_with_hash(&fallback_url, &lib_dest, None).await {
+                        tracing::warn!("Auch Maven Central fehlgeschlagen: {} – überspringe Library", e2);
                         continue;
                     }
                 }
             }
-            classpath_entries.push(lib_dest.display().to_string());
+            if lib_dest.exists() {
+                classpath_entries.push(lib_dest.display().to_string());
+            }
         }
 
-        tracing::info!("Quilt installed with {} libraries", classpath_entries.len());
-        Ok((join_classpath_entries(classpath_entries), main_class))
+        tracing::info!("Quilt installiert mit {} Libraries (Loader {})", classpath_entries.len(), loader_version);
+        Ok((join_classpath_entries(classpath_entries), profile.main_class))
     }
 
     /// Forge Loader installieren und (Classpath, MainClass) zurückgeben

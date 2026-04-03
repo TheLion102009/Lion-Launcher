@@ -22,7 +22,7 @@ fn main() {
         }
     }
 
-    tracing_subscriber::fmt::init();
+    utils::logging::init_logging();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -101,6 +101,7 @@ fn main() {
             gui::auth::open_auth_url,
             // Logs & Folders
             gui::get_profile_logs,
+            gui::get_live_launcher_logs,
             gui::open_profile_folder,
             gui::get_log_files,
             // Instance Management

@@ -155,7 +155,7 @@ async function syncRunningProfiles() {
                 updateAllPlayStopButtons(id);
                 // Live-Log-Anzeige aktualisieren falls das der aktive Live-Log ist
                 if (liveLogProfileId === id) {
-                    const el = document.getElementById('log-content');
+                    const el = getLogContentElement();
                     if (el) refreshLiveLog(id, el);
                 }
             }
@@ -201,6 +201,10 @@ async function stopProfile(profileId) {
         await invoke('stop_profile', { profileId });
         runningProfiles.delete(profileId);
         updateAllPlayStopButtons(profileId);
+        if (liveLogProfileId === profileId) {
+            const el = getLogContentElement();
+            if (el) refreshLiveLog(profileId, el);
+        }
         showToast('Instanz gestoppt', 'info', 2000);
     } catch (e) {
         showToast('Fehler beim Stoppen: ' + e, 'error', 3000);
@@ -753,6 +757,9 @@ async function openProfileSettings(profileId) {
     const profile = profiles.find(p => p.id === profileId);
     if (!profile) return;
 
+    // Edit-Modal nutzt currentProfile als Referenz für Vorauswahl/State
+    currentProfile = profile;
+
     // Entferne altes Modal falls vorhanden
     const existingModal = document.getElementById('profile-settings-modal');
     if (existingModal) existingModal.remove();
@@ -815,7 +822,7 @@ async function openProfileSettings(profileId) {
                 <div style="margin-bottom: 15px;">
                     <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 13px;">Minecraft Version</label>
                     <div style="display: flex; gap: 10px; align-items: center;">
-                        <select id="edit-profile-mc-version" 
+                        <select id="edit-profile-mc-version" onchange="updateEditLoaderVersions()"
                                 style="flex: 1; padding: 10px; background: var(--bg-light); border: none; border-radius: 6px; color: var(--text-primary); font-size: 14px;">
                             <option value="${profile.minecraft_version}" selected>${profile.minecraft_version}</option>
                         </select>
@@ -1003,8 +1010,11 @@ async function openProfileSettings(profileId) {
     };
     document.addEventListener('keydown', escHandler);
 
-    // Versionen laden
-    setTimeout(() => populateEditVersionSelect(), 50);
+    // Versionen laden (MC + Loader), damit nicht nur "Neueste" sichtbar bleibt
+    setTimeout(async () => {
+        await populateEditVersionSelect();
+        await updateEditLoaderVersions();
+    }, 50);
 }
 
 async function closeProfileSettingsModal(profileId) {
@@ -1141,11 +1151,15 @@ async function saveProfileSettingsFromModal(profileId, silent = false) {
     }
 
     try {
+        const selectedMcVersion = mcVersionSelect?.value || currentProfile?.minecraft_version;
+        const selectedLoader = loaderSelect?.value || currentProfile?.loader?.loader;
+        const selectedLoaderVersion = loaderVersionSelect?.value || currentProfile?.loader?.version || '';
+
         const updates = {
             name: nameInput.value,
-            minecraft_version: mcVersionSelect?.value,
-            loader: loaderSelect?.value,
-            loader_version: loaderVersionSelect?.value,
+            minecraft_version: selectedMcVersion,
+            loader: selectedLoader,
+            loader_version: selectedLoaderVersion,
             memory_mb: parseInt(memoryInput.value) || 4096,
             java_args: javaArgsTextarea?.value.split(' ').filter(a => a.trim()) || [],
             icon_path: selectedProfileIcon || null
@@ -1230,6 +1244,10 @@ async function launchProfile(profileId) {
         // Instanz als laufend markieren und Buttons sofort updaten
         runningProfiles.add(profileId);
         updateAllPlayStopButtons(profileId);
+        if (liveLogProfileId === profileId) {
+            const el = getLogContentElement();
+            if (el) refreshLiveLog(profileId, el);
+        }
 
         await new Promise(r => setTimeout(r, 1500));
 
@@ -1660,8 +1678,9 @@ function renderLogsContent(profile) {
             </select>
         </div>
 
-        <div id="logs-container" style="background: #0d0d0d; border-radius: 8px; padding: 10px; min-height: 400px;
-                max-height: 550px; overflow-y: auto; font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+        <div id="logs-container" style="background: #0d0d0d; border-radius: 8px; padding: 10px;
+                height: 490px; max-height: 490px; margin-bottom: 16px;
+                overflow-y: auto; overflow-x: hidden; font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
                 font-size: 11px; line-height: 1.4; color: #e0e0e0; user-select: text; border: 1px solid var(--bg-light);">
             <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                 <div class="spinner" style="margin: 0 auto 15px;"></div>
@@ -1906,7 +1925,8 @@ function renderProfileTabContent(tabName, profile) {
                 <div id="log-content"
                      style="background: #0d0d0d; border: 1px solid var(--bg-light); border-radius: 6px;
                             padding: 12px; font-family: 'Courier New', monospace; font-size: 11px;
-                            height: 410px; overflow-y: auto; color: #ccc; word-break: break-all;">
+                            height: 480px; max-height: 480px; margin-bottom: 16px;
+                            overflow-y: auto; overflow-x: hidden; color: #ccc; word-break: break-all;">
                     <div style="color: var(--gold); text-align: center; padding: 40px;">⏳ Lade Logs…</div>
                 </div>
             `;
@@ -1960,6 +1980,8 @@ async function loadLogs(profileId) {
     debugLog('Loading logs for profile: ' + profileId, 'info');
     await new Promise(resolve => setTimeout(resolve, 50));
 
+    if (currentLogType === 'latest' && isLiveLogSelected()) return;
+
     let targetElement = document.getElementById('logs-container') || document.getElementById('log-content');
     if (!targetElement) {
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -1974,6 +1996,8 @@ async function loadLogs(profileId) {
             profileId: profileId,
             logType: currentLogType
         });
+
+        if (currentLogType === 'latest' && isLiveLogSelected()) return;
 
         if (!logs || logs.trim().length === 0) {
             targetElement.innerHTML = `
@@ -2000,6 +2024,15 @@ async function loadLogs(profileId) {
                 <pre style="color:var(--text-secondary);font-size:11px;white-space:pre-wrap;">${escapeHtml(String(error))}</pre>
             </div>`;
     }
+}
+
+function getLogContentElement() {
+    return document.getElementById('logs-container') || document.getElementById('log-content');
+}
+
+function isLiveLogSelected() {
+    const sel = document.getElementById('log-source-select');
+    return !!sel && sel.value === 'live';
 }
 
 // ── Log-Tab und Log-Quellen-Steuerung ────────────────────────────────────────
@@ -2041,7 +2074,7 @@ function switchLogTab(tabName, profileId) {
 /**
  * Dropdown-Auswahl: live / latest / file:name.log.gz
  */
-function switchLogSource(profileId, value) {
+async function switchLogSource(profileId, value) {
     stopLiveLog();
     const pid = profileId || (currentProfile ? currentProfile.id : null);
 
@@ -2050,7 +2083,7 @@ function switchLogSource(profileId, value) {
         const sel = document.getElementById('log-source-select');
         if (sel) sel.style.borderColor = '#f44336';
         currentLogType = 'latest';
-        startLiveLog(pid);
+        await startLiveLog(pid);
     } else if (value === 'latest') {
         const sel = document.getElementById('log-source-select');
         if (sel) sel.style.borderColor = '';
@@ -2061,7 +2094,7 @@ function switchLogSource(profileId, value) {
         if (sel) sel.style.borderColor = '';
         // Ältere .gz/.log Datei laden
         const filename = value.slice(5);
-        const el = document.getElementById('log-content');
+        const el = getLogContentElement();
         if (!el) return;
         el.innerHTML = `<div style="color:var(--gold);text-align:center;padding:20px;">⏳ Lade ${escapeHtml(filename)}…</div>`;
         invoke('get_profile_logs', { profileId: pid, logType: value })
@@ -2100,13 +2133,16 @@ async function populateLogSourceDropdown(profileId) {
 }
 
 /** Aktualisiert den aktuell sichtbaren Log (respektiert Live/Latest/Older) */
-function refreshCurrentLog(profileId) {
+async function refreshCurrentLog(profileId) {
     const sel = document.getElementById('log-source-select');
     const val = sel ? sel.value : 'latest';
     if (val === 'live') {
         // Live ist aktiv – einfach manuell einmal nachladen
-        const el = document.getElementById('log-content');
-        if (el) refreshLiveLog(profileId || (currentProfile ? currentProfile.id : null), el);
+        const el = getLogContentElement();
+        if (el) {
+            await syncRunningProfiles();
+            refreshLiveLog(profileId || (currentProfile ? currentProfile.id : null), el);
+        }
     } else {
         switchLogSource(profileId, val || 'latest');
     }
@@ -2125,9 +2161,9 @@ function stopLiveLog() {
 }
 
 /** Startet den Live-Log-Refresh (alle 1,5 s) */
-function startLiveLog(profileId) {
+async function startLiveLog(profileId) {
     if (!profileId) return;
-    const el = document.getElementById('log-content');
+    const el = getLogContentElement();
     if (!el) return;
 
     liveLogProfileId = profileId;
@@ -2136,61 +2172,62 @@ function startLiveLog(profileId) {
     const sel = document.getElementById('log-source-select');
     if (sel) sel.style.borderColor = '#f44336';
 
+    el.innerHTML = `<div style="color:var(--gold);text-align:center;padding:20px;">⏳ Live Log wird gestartet…</div>`;
+
+    await syncRunningProfiles();
+
     // Sofort laden
-    refreshLiveLog(profileId, el);
+    await refreshLiveLog(profileId, el);
 
     liveLogInterval = setInterval(() => {
-        const container = document.getElementById('log-content');
+        const container = getLogContentElement();
         if (!container) { stopLiveLog(); return; }
         refreshLiveLog(profileId, container);
     }, 1500);
 }
 
 async function refreshLiveLog(profileId, el) {
-    if (!el) return;
+    if (!el || !profileId) return;
+
     const isRunning = runningProfiles.has(profileId);
 
-    try {
-        const content = await invoke('get_profile_logs', { profileId, logType: 'latest' });
+    if (!isRunning) {
+        el.innerHTML = `
+            <div style="color:var(--text-secondary);text-align:center;padding:40px;">
+                <i class="bi bi-stop-circle" style="font-size:32px;color:#f44336;display:block;margin-bottom:10px;"></i>
+                <span style="color:#f44336;font-weight:600;">🔴 Keine Instanz läuft</span><br>
+                <span style="font-size:11px;margin-top:6px;display:block;">Live Log ist nur verfügbar, wenn Minecraft für dieses Profil gestartet wurde.</span>
+                <span style="font-size:11px;margin-top:4px;display:block;color:var(--gold);">Tipp: Über „📄 Latest“ kannst du den letzten gespeicherten Log ansehen.</span>
+            </div>`;
+        updateLogStats('');
+        return;
+    }
 
-        const noContent = !content || content.startsWith('📋') || content.startsWith('📄') || content.startsWith('⚠️');
+    try {
+        const content = await invoke('get_live_launcher_logs', { limit: 2500 });
+
+        const noContent = !content || !content.trim();
 
         if (noContent) {
-            // Kein Log vorhanden
-            if (isRunning) {
-                el.innerHTML = `
-                    <div style="color:var(--text-secondary);text-align:center;padding:40px;">
-                        <i class="bi bi-broadcast" style="font-size:32px;color:#4caf50;display:block;
-                            margin-bottom:10px;animation:livePulse 1s infinite;"></i>
-                        <span style="color:#4caf50;font-weight:600;">🟢 Instanz läuft</span><br>
-                        <span style="font-size:11px;margin-top:6px;display:block;">Warte auf Log-Ausgabe…</span>
-                    </div>`;
-            } else {
-                el.innerHTML = `
-                    <div style="color:var(--text-secondary);text-align:center;padding:40px;">
-                        <i class="bi bi-stop-circle" style="font-size:32px;color:#f44336;display:block;margin-bottom:10px;"></i>
-                        <span style="color:#f44336;font-weight:600;">🔴 Keine Instanz läuft</span><br>
-                        <span style="font-size:11px;margin-top:6px;display:block;">Starte Minecraft über den Play-Button</span>
-                    </div>`;
-            }
+            el.innerHTML = `
+                <div style="color:var(--text-secondary);text-align:center;padding:40px;">
+                    <i class="bi bi-broadcast" style="font-size:32px;color:#4caf50;display:block;
+                        margin-bottom:10px;animation:livePulse 1s infinite;"></i>
+                    <span style="color:#4caf50;font-weight:600;">🟢 Instanz läuft</span><br>
+                    <span style="font-size:11px;margin-top:6px;display:block;">Warte auf Log-Ausgabe…</span>
+                </div>`;
+            updateLogStats('');
             return;
         }
 
         // Log-Inhalt vorhanden → Status-Banner + Log rendern
-        const statusBanner = isRunning
-            ? `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;margin-bottom:6px;
-                    background:rgba(76,175,80,0.12);border:1px solid rgba(76,175,80,0.3);border-radius:5px;
-                    font-size:11px;color:#4caf50;font-weight:600;">
-                    <span style="width:8px;height:8px;border-radius:50%;background:#4caf50;display:inline-block;
-                        animation:livePulse 1s infinite;"></span>
-                    LIVE – Instanz läuft
-               </div>`
-            : `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;margin-bottom:6px;
-                    background:rgba(244,67,54,0.1);border:1px solid rgba(244,67,54,0.3);border-radius:5px;
-                    font-size:11px;color:#f44336;font-weight:600;">
-                    <i class="bi bi-stop-circle"></i>
-                    Keine Instanz aktiv – Letzter Log:
-               </div>`;
+        const statusBanner = `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;margin-bottom:6px;
+                background:rgba(76,175,80,0.12);border:1px solid rgba(76,175,80,0.3);border-radius:5px;
+                font-size:11px;color:#4caf50;font-weight:600;">
+                <span style="width:8px;height:8px;border-radius:50%;background:#4caf50;display:inline-block;
+                    animation:livePulse 1s infinite;"></span>
+                LIVE – Instanz läuft
+           </div>`;
 
         const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 
@@ -3276,7 +3313,8 @@ async function populateEditVersionSelect() {
         }
     }
 
-    const currentVersion = currentProfile?.minecraft_version || '';
+    // Benutzerwahl beibehalten statt immer auf den Profilwert zurückzusetzen
+    const currentVersion = select.value || currentProfile?.minecraft_version || '';
     const showSnapshotsEdit = document.getElementById('edit-show-snapshots')?.checked || false;
 
     // Prüfe welcher Loader gewählt ist
@@ -3285,7 +3323,7 @@ async function populateEditVersionSelect() {
 
     let filtered = allMinecraftVersions.filter(v => {
         if (showSnapshotsEdit) return true;
-        return v.version_type === 'release';
+        return (v.version_type || '').toLowerCase() === 'release';
     });
 
     // WICHTIG: NeoForge unterstützt nur Versionen ab 1.20.2!
@@ -3294,7 +3332,7 @@ async function populateEditVersionSelect() {
             const versionId = v.id;
 
             // Snapshots immer erlauben wenn aktiviert
-            if (showSnapshotsEdit && v.version_type !== 'release') {
+            if (showSnapshotsEdit && (v.version_type || '').toLowerCase() !== 'release') {
                 return true;
             }
 
@@ -3315,13 +3353,26 @@ async function populateEditVersionSelect() {
         });
     }
 
-    select.innerHTML = filtered.map(v =>
+    const hasCurrentVersion = !!currentVersion && filtered.some(v => v.id === currentVersion);
+    const fallbackOption = (!hasCurrentVersion && currentVersion)
+        ? [`<option value="${currentVersion}" selected>${currentVersion} (aktuell)</option>`]
+        : [];
+
+    const options = filtered.map(v =>
         `<option value="${v.id}" ${v.id === currentVersion ? 'selected' : ''}>${v.id}</option>`
-    ).join('');
+    );
+
+    select.innerHTML = [...fallbackOption, ...options].join('');
+
+    // Wert explizit setzen, damit Browser nicht auf die erste Option springt.
+    if (currentVersion) {
+        select.value = currentVersion;
+    }
 }
 
-function updateEditVersionList() {
-    populateEditVersionSelect();
+async function updateEditVersionList() {
+    await populateEditVersionSelect();
+    await updateEditLoaderVersions();
 }
 
 async function updateEditLoaderVersions() {
@@ -3332,11 +3383,14 @@ async function updateEditLoaderVersions() {
     if (!loaderSelect || !versionSelect) return;
 
     const loader = loaderSelect.value;
-    const mcVersion = mcVersionSelect?.value || currentProfile?.minecraft_version;
+    const desiredVersion = versionSelect.value || currentProfile?.loader?.version || '';
 
     // WICHTIG: Aktualisiere verfügbare MC-Versionen basierend auf Loader!
     // (z.B. NeoForge nur 1.20.2+)
     await populateEditVersionSelect();
+
+    // Nach dem Rebuild immer die tatsächlich ausgewählte MC-Version verwenden.
+    const mcVersion = mcVersionSelect?.value || currentProfile?.minecraft_version;
 
     if (loader === 'vanilla') {
         versionSelect.innerHTML = '<option value="">-</option>';
@@ -3364,8 +3418,16 @@ async function updateEditLoaderVersions() {
             // Zeige die neueste als Standard + alle anderen
             versionSelect.innerHTML = '<option value="">Neueste (' + versions[0] + ')</option>' +
                 versions.map(v => `<option value="${v}">${v}</option>`).join('');
+
+            // Gespeicherte konkrete Loader-Version wieder selektieren (falls vorhanden)
+            if (desiredVersion && versions.includes(desiredVersion)) {
+                versionSelect.value = desiredVersion;
+            } else {
+                versionSelect.value = '';
+            }
         } else {
             versionSelect.innerHTML = '<option value="">Neueste</option>';
+            versionSelect.value = '';
         }
     } catch (error) {
         console.error('Failed to load loader versions:', error);
@@ -3376,6 +3438,7 @@ async function updateEditLoaderVersions() {
         } else {
             versionSelect.innerHTML = '<option value="">Neueste (Fehler beim Laden)</option>';
         }
+        versionSelect.value = '';
     }
 }
 
