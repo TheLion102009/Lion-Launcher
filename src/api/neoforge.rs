@@ -151,21 +151,30 @@ impl NeoForgeClient {
     pub async fn get_supported_game_versions(&self) -> Result<Vec<String>> {
         let all_versions = self.get_all_versions_from_maven().await?;
 
-        // Extrahiere eindeutige MC-Versionen aus den NeoForge-Versionen
-        let mut mc_versions: Vec<String> = Vec::new();
+        // Extrahiere MC-Versionen aus NeoForge-Versionsnummern.
+        // NeoForge-Schema: {minor}.{patch}.x → MC 1.{minor}.{patch}
+        // z.B. 21.1.219 → MC 1.21.1, 20.4.5 → MC 1.20.4
+        let mut mc_versions_set = std::collections::HashSet::new();
 
-        // Prüfe alle bekannten MC-Versionen
-        let known_versions = vec![
-            "1.21.3", "1.21.2", "1.21.1", "1.21.0", "1.21",
-            "1.20.6", "1.20.5", "1.20.4", "1.20.3", "1.20.2",
-        ];
-
-        for mc_version in known_versions {
-            let matching = Self::filter_matching_versions(&all_versions, mc_version);
-            if !matching.is_empty() {
-                mc_versions.push(mc_version.to_string());
+        for version in &all_versions {
+            let parts: Vec<&str> = version.split('.').collect();
+            if parts.len() >= 2 {
+                if let (Ok(minor), Ok(patch)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                    // Nur Versionen ab minor=20 (MC 1.20.x+) sind echtes NeoForge
+                    if minor >= 20 {
+                        let mc_version = if patch == 0 {
+                            format!("1.{}", minor)
+                        } else {
+                            format!("1.{}.{}", minor, patch)
+                        };
+                        mc_versions_set.insert(mc_version);
+                    }
+                }
             }
         }
+
+        let mut mc_versions: Vec<String> = mc_versions_set.into_iter().collect();
+        mc_versions.sort_by(|a, b| Self::compare_mc_versions(b, a)); // Neueste zuerst
 
         Ok(mc_versions)
     }

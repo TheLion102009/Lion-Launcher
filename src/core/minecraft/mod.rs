@@ -430,7 +430,7 @@ impl MinecraftLauncher {
         // Finde Java – verwende die von Mojang angegebene Mindestversion (mindestens 21 für NeoForge)
         let required_java = version_info.javaVersion.as_ref().map(|j| j.majorVersion).unwrap_or(21).max(21);
         tracing::info!("Required Java version: {}", required_java);
-        let java_path = self.ensure_java_installed(required_java).await?;
+        let java_path = self.ensure_java_installed(required_java, None).await?;
 
         // Installiere NeoForge (mit Vanilla-Libraries)
         let installation = neoforge::install_neoforge(
@@ -568,10 +568,28 @@ impl MinecraftLauncher {
 
         tracing::info!("Final Forge version: {}", loader_version);
 
+        // Java-Version bestimmen: ZUERST, bevor fml.toml und Installer laufen
+        // WICHTIG: .max(17) NICHT verwenden! Alte MC-Versionen (≤1.16.x) brauchen Java 8,
+        // MC 1.17 braucht Java 16, MC 1.18+ braucht Java 17+.
+        let required_java = version_info.javaVersion.as_ref().map(|j| j.majorVersion).unwrap_or(8);
+
+        // Alte Forge-Versionen (MC ≤ 1.16.5) nutzen Nashorn (jdk.nashorn), das in Java 15 entfernt wurde.
+        // → Java maximal 8 (sicherster Wert, alle alten Forge-Versionen getestet damit).
+        // Für MC 1.17 ist Java 16 vorgeschrieben, ab 1.18 Java 17+, ab 1.20.5 Java 21+.
+        let max_java: Option<u32> = if required_java <= 8 {
+            Some(8)
+        } else {
+            None
+        };
+
+        tracing::info!("Required Java version for Forge: {} (max: {:?})", required_java, max_java);
+        let java_path = self.ensure_java_installed(required_java, max_java).await?;
+
         // fml.toml schreiben: EarlyDisplay deaktivieren.
         // earlyWindowControl=true + NVIDIA/GLX → "BadValue" bei allen GL-Profilen (3.2–4.6).
         // earlyWindowProvider="none" deaktiviert das GLFW-Fenster komplett.
-        {
+        // NUR für moderne Forge-Versionen (1.17+) die fml.toml verwenden.
+        if required_java >= 17 {
             let config_dir = game_dir.join("config");
             tokio::fs::create_dir_all(&config_dir).await.ok();
             let fml_toml = config_dir.join("fml.toml");
@@ -597,10 +615,6 @@ maxThreads = -1
         }
 
         // Forge installieren
-        // Java ZUERST sicherstellen, damit find_java_binary() im Installer die richtige Version findet
-        let required_java = version_info.javaVersion.as_ref().map(|j| j.majorVersion).unwrap_or(17).max(17);
-        tracing::info!("Required Java version for Forge: {}", required_java);
-        let java_path = self.ensure_java_installed(required_java).await?;
 
         let forge_installer = forge::ForgeInstaller::new(self.download_manager.clone());
         let install_result = forge_installer.install_forge_complete(
@@ -726,6 +740,9 @@ maxThreads = -1
         // Platzhalter in Game-Args ersetzen
         // --gameJar aus game_args filtern: Wir setzen ihn immer explizit auf die gepatchte JAR.
         // Der Platzhalter-Wert aus version.json zeigt auf die falsche (ungepatchte) JAR.
+        // NUR für Bootstrap-Forge (1.18+) filtern, da wir --gameJar nur dort re-adden.
+        let is_bootstrap_era = install_result.main_class.contains("ForgeBootstrap")
+            || install_result.main_class.contains("BootstrapLauncher");
         let mut game_args_filtered: Vec<String> = Vec::new();
         let mut skip_next = false;
         for arg in &install_result.game_args {
@@ -733,7 +750,7 @@ maxThreads = -1
                 skip_next = false;
                 continue;
             }
-            if arg == "--gameJar" {
+            if is_bootstrap_era && arg == "--gameJar" {
                 skip_next = true;
                 continue;
             }
@@ -807,30 +824,63 @@ maxThreads = -1
         // Verhindert dass Transformationsfehler die Mod-Loading-Pipeline unterbrechen
         cmd.arg("-Dfml.earlywindow.headless=true");
 
-        // DNS-Fix: Forge's SecureBootstrap ModuleLayer exportiert jdk.naming.dns nicht.
-        // Das führt zu "NoInitialContextException: Cannot instantiate DnsContextFactory"
-        // beim Server-Pingen auf dem Multiplayer-Screen. Mit --add-modules wird das
-        // Modul explizit in den Boot-Layer hinzugefügt, bevor Forge seinen ModuleLayer baut.
-        cmd.arg("--add-modules=jdk.naming.dns");
-        // --add-opens damit javax.naming.spi auf com.sun.jndi.dns zugreifen darf
-        cmd.arg("--add-opens=jdk.naming.dns/com.sun.jndi.dns=java.naming");
+        // === MODUL-ARGS: NUR für Java 9+ und nur was zur Forge-Ära passt ===
+        // Erkennung: ForgeBootstrap (1.20.2+), BootstrapLauncher (1.18-1.20.1),
+        //            ModLauncher (1.13-1.17), LaunchWrapper (≤1.12.2)
+        let is_bootstrap_era = install_result.main_class.contains("ForgeBootstrap")
+            || install_result.main_class.contains("BootstrapLauncher");
+        let is_launchwrapper = install_result.main_class.contains("launchwrapper");
 
-        // --add-opens für Forge-Coremods (SecureJarHandler, ASMAPI etc.)
-        // Notwendig für Forge 56.x/57.x wo die Bytecode-Transformation
-        // auf interne Java-Module zugreifen muss.
-        cmd.arg("--add-opens=java.base/java.util.jar=cpw.mods.securejarhandler");
-        cmd.arg("--add-opens=java.base/sun.security.util=ALL-UNNAMED");
-        cmd.arg("--add-opens=java.base/sun.security.pkcs=ALL-UNNAMED");
+        if required_java >= 9 && !is_launchwrapper {
+            // DNS-Fix: Forge's SecureBootstrap ModuleLayer exportiert jdk.naming.dns nicht.
+            // Das führt zu "NoInitialContextException: Cannot instantiate DnsContextFactory"
+            // beim Server-Pingen auf dem Multiplayer-Screen. Mit --add-modules wird das
+            // Modul explizit in den Boot-Layer hinzugefügt, bevor Forge seinen ModuleLayer baut.
+            cmd.arg("--add-modules=jdk.naming.dns");
+            // --add-opens damit javax.naming.spi auf com.sun.jndi.dns zugreifen darf
+            cmd.arg("--add-opens=jdk.naming.dns/com.sun.jndi.dns=java.naming");
+        }
+
+        if is_bootstrap_era {
+            // --add-opens für Forge-Coremods (SecureJarHandler, ASMAPI etc.)
+            // Notwendig für Forge 56.x/57.x wo die Bytecode-Transformation
+            // auf interne Java-Module zugreifen muss.
+            // NUR für Bootstrap-basierte Forge-Versionen (1.18+) die SecureJarHandler nutzen.
+            cmd.arg("--add-opens=java.base/java.util.jar=cpw.mods.securejarhandler");
+            cmd.arg("--add-opens=java.base/sun.security.util=ALL-UNNAMED");
+            cmd.arg("--add-opens=java.base/sun.security.pkcs=ALL-UNNAMED");
+        }
 
         // JVM-Args aus version.json (ohne -p / --module-path - das bauen wir selbst)
-        for arg in &resolved_jvm_args {
-            if arg != "-p" && arg != "--module-path" && !arg.starts_with("--module-path=") {
+        // WICHTIG: -p ist ein Positional-Arg, der nächste Wert ist der Module-Path → beide entfernen!
+        // NUR für moderne Forge-Versionen die Module-Args haben.
+        if !is_launchwrapper {
+            let mut skip_next_jvm = false;
+            for arg in &resolved_jvm_args {
+                if skip_next_jvm {
+                    skip_next_jvm = false;
+                    continue;
+                }
+                if arg == "-p" || arg == "--module-path" {
+                    skip_next_jvm = true;
+                    continue;
+                }
+                if arg.starts_with("--module-path=") {
+                    continue;
+                }
                 cmd.arg(arg);
             }
         }
 
+        // KRITISCH: -DlibraryDirectory MUSS ein absoluter Pfad sein!
+        // Forge version.json enthält oft "-DlibraryDirectory=libraries" (relativer Pfad),
+        // aber das Arbeitsverzeichnis ist game_dir (Profil-Verzeichnis), nicht der Launcher-Root.
+        // FMLLoader's LibraryFinder.findLibsPath() liest diese Property und sucht dort Forge-JARs.
+        // Da Java bei mehrfacher -D die LETZTE nimmt, überschreibt dies den falschen Wert.
+        cmd.arg(format!("-DlibraryDirectory={}", libraries_dir.display()));
+
         if install_result.is_bootstrap {
-            // === FORGE BOOTSTRAP START (Forge 1.13+) ===
+            // === FORGE BOOTSTRAP START (Forge 1.20.2+) ===
             //
             // ForgeBootstrap.main() → Bootstrap.selectBootModules() liest ALLE JARs
             // aus dem AppClassLoader (Classpath) und baut intern selbst den ModuleLayer.
@@ -905,62 +955,103 @@ maxThreads = -1
 
 
         } else {
-            // === LEGACY FORGE (BootstrapLauncher, pre-1.13ish) ===
-            let mut full_cp_entries = install_result.classpath.clone();
+            // === ALLE ANDEREN FORGE-VERSIONEN (ModLauncher 1.13-1.20.1, LaunchWrapper ≤1.12.2) ===
+            //
+            // Für ModLauncher (1.13+): cpw.mods.modlauncher.Launcher liest ALLE JARs
+            // vom Classpath und baut daraus den TransformingClassLoader.
+            //
+            // Für BootstrapLauncher (1.18-1.20.1): Ähnlich wie ForgeBootstrap.
+            //
+            // Für LaunchWrapper (≤1.12.2): net.minecraft.launchwrapper.Launch
+            // liest vom Classpath und nutzt TweakClasses für Forge-Injection.
+            //
+            // ALLE Forge-JARs müssen auf dem Classpath sein!
+            let mut full_cp_entries: Vec<String> = Vec::new();
+            full_cp_entries.extend(install_result.bootstrap_classpath.iter().cloned());
+            full_cp_entries.extend(install_result.classpath.iter().cloned());
             full_cp_entries.push(client_jar.display().to_string());
             full_cp_entries.extend(split_classpath_entries(vanilla_classpath));
-            let full_cp = Self::deduplicate_classpath(&join_classpath_entries(full_cp_entries));
+
+            // Deduplizieren
+            let mut seen_cp = std::collections::HashSet::new();
+            full_cp_entries.retain(|p| !p.is_empty() && seen_cp.insert(p.clone()));
+
+            let full_cp = join_classpath_entries(full_cp_entries.iter());
+            tracing::info!("Forge classpath: {} JARs ({} forge + vanilla)",
+                full_cp_entries.len(),
+                install_result.bootstrap_classpath.len() + install_result.classpath.len()
+            );
             cmd.arg("-cp").arg(&full_cp);
             cmd.arg(&install_result.main_class);
         }
 
-        // === GAME-ARGUMENTE ===
-        for arg in &resolved_game_args {
-            cmd.arg(arg);
-        }
+        // === GAME-ARGUMENTE (abhängig von Forge-Ära) ===
+        if let Some(ref mc_args_str) = install_result.minecraft_arguments {
+            // ── LEGACY FORGE (≤1.12.2): minecraftArguments ──────────────────────
+            // Einzelner String mit ${Platzhaltern}, durch Leerzeichen getrennt.
+            // Enthält bereits --tweakClass und alle nötigen Minecraft-Args.
+            tracing::info!("Legacy Forge: Verwende minecraftArguments");
+            let legacy_args: Vec<String> = mc_args_str.split_whitespace()
+                .map(|arg| forge::resolve_arg_placeholders(
+                    arg, libraries_dir, natives_dir, game_dir, assets_dir,
+                    &version_info.assetIndex.id, version, uuid, token, user_type, username,
+                ))
+                .collect();
+            for arg in &legacy_args {
+                cmd.arg(arg);
+            }
+        } else {
+            // ── MODERNE FORGE (1.13+): Strukturierte arguments ──────────────────
+            for arg in &resolved_game_args {
+                cmd.arg(arg);
+            }
 
-        let has_arg = |name: &str| resolved_game_args.iter().any(|a| a == name);
+            let has_arg = |name: &str| resolved_game_args.iter().any(|a| a == name);
 
-        // --gameJar: IMMER die gepatchte JAR verwenden (aus install_result.patched_client_jar).
-        // ForgeProdLaunchHandler sucht Minecraft.class in dieser JAR.
-        // Wir haben --gameJar bereits aus game_args gefiltert, also können wir ihn direkt setzen.
-        cmd.arg("--gameJar").arg(&install_result.patched_client_jar);
-        tracing::info!("--gameJar: {:?}", install_result.patched_client_jar.display());
-        if !has_arg("--fml.forgeVersion") {
-            cmd.arg("--fml.forgeVersion").arg(&install_result.forge_version);
-        }
-        if !has_arg("--fml.mcVersion") {
-            cmd.arg("--fml.mcVersion").arg(version);
-        }
-        if !has_arg("--fml.forgeGroup") {
-            cmd.arg("--fml.forgeGroup").arg("net.minecraftforge");
-        }
-        if !has_arg("--fml.mcpVersion") {
-            cmd.arg("--fml.mcpVersion").arg(&install_result.mcp_version);
-        }
-        if !has_arg("--username") {
-            cmd.arg("--username").arg(username);
-        }
-        if !has_arg("--version") {
-            cmd.arg("--version").arg(version);
-        }
-        if !has_arg("--gameDir") {
-            cmd.arg("--gameDir").arg(game_dir);
-        }
-        if !has_arg("--assetsDir") {
-            cmd.arg("--assetsDir").arg(assets_dir);
-        }
-        if !has_arg("--assetIndex") {
-            cmd.arg("--assetIndex").arg(&version_info.assetIndex.id);
-        }
-        if !has_arg("--uuid") {
-            cmd.arg("--uuid").arg(uuid);
-        }
-        if !has_arg("--accessToken") {
-            cmd.arg("--accessToken").arg(token);
-        }
-        if !has_arg("--userType") {
-            cmd.arg("--userType").arg(user_type);
+            // --gameJar: NUR für ForgeBootstrap (1.20.2+) und BootstrapLauncher (1.18+).
+            // Ältere ModLauncher-Versionen (1.13-1.17) kennen --gameJar NICHT —
+            // der FMLClientLaunchProvider sucht den Client über den Classpath/ModuleLayer.
+            if is_bootstrap_era {
+                cmd.arg("--gameJar").arg(&install_result.patched_client_jar);
+                tracing::info!("--gameJar: {:?}", install_result.patched_client_jar.display());
+            }
+
+            if !has_arg("--fml.forgeVersion") {
+                cmd.arg("--fml.forgeVersion").arg(&install_result.forge_version);
+            }
+            if !has_arg("--fml.mcVersion") {
+                cmd.arg("--fml.mcVersion").arg(version);
+            }
+            if !has_arg("--fml.forgeGroup") {
+                cmd.arg("--fml.forgeGroup").arg("net.minecraftforge");
+            }
+            if !has_arg("--fml.mcpVersion") {
+                cmd.arg("--fml.mcpVersion").arg(&install_result.mcp_version);
+            }
+            if !has_arg("--username") {
+                cmd.arg("--username").arg(username);
+            }
+            if !has_arg("--version") {
+                cmd.arg("--version").arg(version);
+            }
+            if !has_arg("--gameDir") {
+                cmd.arg("--gameDir").arg(game_dir);
+            }
+            if !has_arg("--assetsDir") {
+                cmd.arg("--assetsDir").arg(assets_dir);
+            }
+            if !has_arg("--assetIndex") {
+                cmd.arg("--assetIndex").arg(&version_info.assetIndex.id);
+            }
+            if !has_arg("--uuid") {
+                cmd.arg("--uuid").arg(uuid);
+            }
+            if !has_arg("--accessToken") {
+                cmd.arg("--accessToken").arg(token);
+            }
+            if !has_arg("--userType") {
+                cmd.arg("--userType").arg(user_type);
+            }
         }
 
         // Extra-Args
@@ -1035,7 +1126,7 @@ maxThreads = -1
         // Verwende die von Mojang angegebene Java-Version (aus version.json javaVersion.majorVersion)
         let required_java = version_info.javaVersion.as_ref().map(|j| j.majorVersion).unwrap_or(21);
         tracing::info!("Required Java version: {}", required_java);
-        let java_path = self.ensure_java_installed(required_java).await?;
+        let java_path = self.ensure_java_installed(required_java, None).await?;
 
         // Auf Windows javaw.exe nutzen (kein Konsolenfenster)
         let java_bin = if cfg!(windows) {
@@ -1358,7 +1449,7 @@ maxThreads = -1
             tracing::info!("🔨 Running NeoForge installer to create SRG-mapped client JAR...");
             tracing::info!("This may take 1-2 minutes on first launch...");
 
-            let java_path = self.ensure_java_installed(21).await?;
+            let java_path = self.ensure_java_installed(21, None).await?;
             // Der Installer erwartet das .minecraft-ähnliche Verzeichnis (parent von libraries)
             let launcher_dir = libraries_dir.parent().unwrap();
 
@@ -1591,7 +1682,7 @@ maxThreads = -1
         if !srg_exists {
             tracing::info!("🔨 SRG-JAR nicht gefunden! Führe NeoForge-Installer aus...");
 
-            let java_path = self.ensure_java_installed(21).await?;
+            let java_path = self.ensure_java_installed(21, None).await?;
             let launcher_dir = libraries_dir.parent().unwrap();
 
             // Erstelle launcher_profiles.json falls nicht vorhanden
@@ -2695,60 +2786,154 @@ maxThreads = -1
         bail!("Java not found! Install Java 17+")
     }
 
-    async fn ensure_java_installed(&self, required_major: u32) -> Result<String> {
+    /// Findet oder installiert Java mit der passenden Version.
+    /// `max_major`: Wenn gesetzt, wird NUR Java im Bereich [required_major, max_major] akzeptiert.
+    ///              Wichtig für alte Forge-Versionen die Nashorn brauchen (Java ≤ 14).
+    async fn ensure_java_installed(&self, required_major: u32, max_major: Option<u32>) -> Result<String> {
         let java_bin_name = if cfg!(windows) { "java.exe" } else { "java" };
-        // 1. JAVA_HOME
+
+        let version_ok = |v: u32| -> bool {
+            v >= required_major && max_major.map_or(true, |max| v <= max)
+        };
+
+        let label = if let Some(max) = max_major {
+            format!("Java {}-{}", required_major, max)
+        } else {
+            format!("Java {}+", required_major)
+        };
+
+        tracing::info!("Looking for {}", label);
+
+        // 1. JAVA_HOME (nur wenn Version passt)
         if let Ok(home) = std::env::var("JAVA_HOME") {
             let p = PathBuf::from(&home).join("bin").join(java_bin_name);
-            if p.exists() && Self::java_major_version(&p.display().to_string()).await >= required_major {
-                return Ok(p.display().to_string());
+            if p.exists() {
+                let v = Self::java_major_version(&p.display().to_string()).await;
+                if version_ok(v) {
+                    tracing::info!("Using JAVA_HOME Java {}: {}", v, p.display());
+                    return Ok(p.display().to_string());
+                }
             }
         }
-        // 2. Launcher-managed Java
-        let java_dir = defaults::java_dir();
+
+        // 2. Launcher-managed Java (per-version Verzeichnisse: java/java-8/, java/java-21/ etc.)
+        let java_base_dir = defaults::java_dir();
+        // Bestimme die Zielversion für Download/Managed: bei max_major nutze required_major,
+        // sonst required_major (wie bisher)
+        let target_version = required_major;
+
+        let java_dir = java_base_dir.join(format!("java-{}", target_version));
         let java_bin = java_dir.join("bin").join(java_bin_name);
         if java_bin.exists() {
             let installed = Self::java_major_version(&java_bin.display().to_string()).await;
-            if installed >= required_major {
+            if version_ok(installed) {
                 tracing::info!("Using managed Java {}: {}", installed, java_bin.display());
                 return Ok(java_bin.display().to_string());
             }
-            tracing::info!("Managed Java {} too old (need {}), re-downloading...", installed, required_major);
-            tokio::fs::remove_dir_all(&java_dir).await.ok();
         }
-        // 3. System paths
-        let system_paths: &[&str] = if cfg!(target_os = "linux") {
+        // Auch andere managed-Versionen prüfen
+        if java_base_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&java_base_dir) {
+                for entry in entries.flatten() {
+                    if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                        let candidate = entry.path().join("bin").join(java_bin_name);
+                        if candidate.exists() {
+                            let v = Self::java_major_version(&candidate.display().to_string()).await;
+                            if version_ok(v) {
+                                tracing::info!("Using managed Java {}: {}", v, candidate.display());
+                                return Ok(candidate.display().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Legacy: altes einzelnes java/ Verzeichnis (Migration)
+        let legacy_java_bin = java_base_dir.join("bin").join(java_bin_name);
+        if legacy_java_bin.exists() {
+            let v = Self::java_major_version(&legacy_java_bin.display().to_string()).await;
+            if version_ok(v) {
+                tracing::info!("Using legacy managed Java {}: {}", v, legacy_java_bin.display());
+                return Ok(legacy_java_bin.display().to_string());
+            }
+        }
+
+        // 3. System paths — Reihenfolge: bei max_major von niedrig nach hoch suchen
+        let system_paths_low_first: &[&str] = if cfg!(target_os = "linux") {
             &[
-                "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+                "/usr/lib/jvm/java-8-openjdk-amd64/bin/java",
+                "/usr/lib/jvm/java-8-openjdk/bin/java",
+                "/usr/lib/jvm/java-1.8.0-openjdk/bin/java",
+                "/usr/lib/jvm/java-1.8.0-openjdk-amd64/bin/java",
+                "/usr/lib/jvm/java-11-openjdk-amd64/bin/java",
+                "/usr/lib/jvm/java-11-openjdk/bin/java",
+                "/usr/lib/jvm/java-16-openjdk-amd64/bin/java",
+                "/usr/lib/jvm/java-16-openjdk/bin/java",
                 "/usr/lib/jvm/java-17-openjdk-amd64/bin/java",
-                "/usr/lib/jvm/java-21-openjdk/bin/java",
                 "/usr/lib/jvm/java-17-openjdk/bin/java",
+                "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+                "/usr/lib/jvm/java-21-openjdk/bin/java",
                 "/usr/bin/java",
             ]
         } else {
             &["java"]
         };
+        let system_paths_high_first: &[&str] = if cfg!(target_os = "linux") {
+            &[
+                "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+                "/usr/lib/jvm/java-17-openjdk-amd64/bin/java",
+                "/usr/lib/jvm/java-21-openjdk/bin/java",
+                "/usr/lib/jvm/java-17-openjdk/bin/java",
+                "/usr/lib/jvm/java-16-openjdk-amd64/bin/java",
+                "/usr/lib/jvm/java-16-openjdk/bin/java",
+                "/usr/lib/jvm/java-11-openjdk-amd64/bin/java",
+                "/usr/lib/jvm/java-11-openjdk/bin/java",
+                "/usr/lib/jvm/java-8-openjdk-amd64/bin/java",
+                "/usr/lib/jvm/java-8-openjdk/bin/java",
+                "/usr/lib/jvm/java-1.8.0-openjdk/bin/java",
+                "/usr/bin/java",
+            ]
+        } else {
+            &["java"]
+        };
+
+        // Bei max_major: niedrige Versionen zuerst (finde Java 8 vor Java 21)
+        // Sonst: hohe Versionen zuerst (wie bisher)
+        let system_paths: &[&str] = if max_major.is_some() {
+            system_paths_low_first
+        } else {
+            system_paths_high_first
+        };
+
         for p in system_paths {
-            if Path::new(p).exists()
-                && Self::java_major_version(p).await >= required_major
-            {
-                return Ok(p.to_string());
+            if Path::new(p).exists() {
+                let v = Self::java_major_version(p).await;
+                if version_ok(v) {
+                    tracing::info!("Using system Java {}: {}", v, p);
+                    return Ok(p.to_string());
+                }
             }
         }
-        if tokio::process::Command::new("java").arg("-version").output().await.is_ok()
-            && Self::java_major_version("java").await >= required_major
-        {
-            return Ok("java".to_string());
+
+        if tokio::process::Command::new("java").arg("-version").output().await.is_ok() {
+            let v = Self::java_major_version("java").await;
+            if version_ok(v) {
+                return Ok("java".to_string());
+            }
         }
+
         // 4. Auto-download from Adoptium
-        tracing::info!("Downloading Java {} from Adoptium...", required_major);
+        tracing::info!("Downloading Java {} from Adoptium...", target_version);
         tokio::fs::create_dir_all(&java_dir).await?;
-        self.download_java(&java_dir, required_major).await?;
+        self.download_java(&java_dir, target_version).await?;
         if java_bin.exists() {
-            tracing::info!("Java {} installed: {}", required_major, java_bin.display());
-            return Ok(java_bin.display().to_string());
+            let v = Self::java_major_version(&java_bin.display().to_string()).await;
+            if version_ok(v) {
+                tracing::info!("Java {} installed: {}", v, java_bin.display());
+                return Ok(java_bin.display().to_string());
+            }
         }
-        bail!("Java {} installation failed. Please install Java {}+ manually.", required_major, required_major)
+        bail!("{} installation failed. Please install {} manually.", label, label)
     }
     /// Returns the major version number of the given java binary (e.g. 21, 25).
     /// Returns 0 if the version cannot be determined.

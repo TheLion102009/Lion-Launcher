@@ -37,6 +37,8 @@ pub struct ForgeInstallResult {
     pub forge_version: String,
     pub is_bootstrap: bool,
     pub patched_client_jar: PathBuf,
+    /// Legacy Forge (≤1.12.2): minecraftArguments als einzelner String mit ${Platzhaltern}
+    pub minecraft_arguments: Option<String>,
 }
 
 pub struct ForgeInstaller {
@@ -105,6 +107,9 @@ impl ForgeInstaller {
             main_class: String,
             libraries: Vec<ForgeLib>,
             arguments: Option<ForgeArgs>,
+            /// Legacy Forge (≤1.12.2): Argumente als einzelner String
+            #[serde(rename = "minecraftArguments")]
+            minecraft_arguments: Option<String>,
         }
         #[derive(serde::Deserialize)]
         struct ForgeArgs {
@@ -115,6 +120,8 @@ impl ForgeInstaller {
         struct ForgeLib {
             name: String,
             downloads: Option<LibDownloads>,
+            /// Legacy Forge: Base-URL für Maven-Downloads (z.B. "http://files.minecraftforge.net/maven/")
+            url: Option<String>,
         }
         #[derive(serde::Deserialize, Clone)]
         struct LibDownloads {
@@ -147,15 +154,36 @@ impl ForgeInstaller {
             });
 
         // Forge-Version aus install_profile.version extrahieren
+        // Bekannte Formate:
+        //   "1.20.1-forge-47.3.0"  → enthält "-forge-" → split liefert "47.3.0"
+        //   "1.20.3-forge49.0.2"   → enthält "-forge" ohne Trennstrich → split liefert "forge49.0.2"
+        //   "1.20.3-49.0.2"        → kein "forge" → split('-') liefert "49.0.2"
         let forge_version_resolved = install_profile.version.as_deref()
             .and_then(|v| {
+                tracing::debug!("install_profile.version = {:?}", v);
                 if v.contains("-forge-") {
+                    // Format: "1.20.1-forge-47.3.0"
                     v.split("-forge-").nth(1).map(|s| s.to_string())
+                } else if let Some(pos) = v.find("-forge") {
+                    // Format: "1.20.3-forge49.0.2" (ohne Trennstrich nach "forge")
+                    let after_forge = &v[pos + "-forge".len()..];
+                    if after_forge.is_empty() {
+                        None
+                    } else {
+                        Some(after_forge.to_string())
+                    }
                 } else {
                     v.split('-').next_back().map(|s| s.to_string())
                 }
             })
             .unwrap_or_else(|| forge_version.to_string());
+
+        // Cleanup: Falls doch noch ein "forge"-Präfix übrig ist (z.B. "forge49.0.2" → "49.0.2")
+        let forge_version_resolved = forge_version_resolved
+            .strip_prefix("forge")
+            .filter(|s| s.starts_with(|c: char| c.is_ascii_digit()))
+            .map(|s| s.to_string())
+            .unwrap_or(forge_version_resolved);
 
         // MCP-Version aus version.json libraries extrahieren
         // Format: "de.oceanlabs.mcp:mcp_config:1.21.7-20250630.104312" → "20250630.104312"
@@ -182,11 +210,41 @@ impl ForgeInstaller {
             .map(|v| v.client.trim().trim_matches('\'').to_string())
             .filter(|s| !s.is_empty());
 
+        // MCP-Version aus version.json game args extrahieren (zusätzliche Quelle)
+        // Suche nach "--fml.mcpVersion" gefolgt vom Wert in arguments.game
+        let mcp_version_from_game_args: Option<String> = version_json.arguments.as_ref()
+            .and_then(|args| args.game.as_ref())
+            .and_then(|game| {
+                let strs: Vec<String> = game.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect();
+                strs.windows(2)
+                    .find(|w| w[0] == "--fml.mcpVersion")
+                    .map(|w| w[1].clone())
+            })
+            .filter(|s| !s.is_empty() && s.starts_with(|c: char| c.is_ascii_digit()));
+
         let mcp_version = mcp_version_from_data
+            .or(mcp_version_from_game_args)
             .or(mcp_version_from_libs)
             .unwrap_or_else(|| {
-                tracing::warn!("MCP Version nicht gefunden, nutze Fallback 20240808.144430");
-                "20240808.144430".to_string()
+                // Versionsspezifische MCP-Fallbacks statt eines einzigen Hardcodes
+                let fallback = match mc_version {
+                    "1.20.1" => "20230612.114412",
+                    "1.20.2" => "20231019.122523",
+                    "1.20.3" => "20231205.124940",
+                    "1.20.4" => "20240104.091131",
+                    "1.20.5" => "20240429.145121",
+                    "1.20.6" => "20240429.145121",
+                    "1.21"   => "20240613.152323",
+                    "1.21.1" => "20240725.100730",
+                    "1.21.2" => "20241029.085956",
+                    "1.21.3" => "20241029.085956",
+                    "1.21.4" => "20241203.161809",
+                    _ => "20240808.144430",
+                };
+                tracing::warn!("MCP Version nicht aus Installer extrahierbar, nutze Fallback {} für MC {}", fallback, mc_version);
+                fallback.to_string()
             });
 
         tracing::info!("forge_version={}, mcp_version={}", forge_version_resolved, mcp_version);
@@ -256,7 +314,15 @@ impl ForgeInstaller {
                     continue;
                 }
             } else {
-                (String::new(), Self::maven_to_path(&lib.name), None)
+                // Legacy oder einfaches Format: url + maven_to_path
+                let maven_path = Self::maven_to_path(&lib.name);
+                let download_url = if let Some(base_url) = &lib.url {
+                    let base = base_url.trim_end_matches('/');
+                    format!("{}/{}", base, maven_path)
+                } else {
+                    String::new()
+                };
+                (download_url, maven_path, None)
             };
 
             let dest = libraries_dir.join(&path);
@@ -347,11 +413,15 @@ impl ForgeInstaller {
             forge_version: forge_version_resolved,
             is_bootstrap,
             patched_client_jar,
+            minecraft_arguments: version_json.minecraft_arguments,
         })
     }
 
     /// Liest version.json und install_profile.json aus dem Installer.
     /// Extrahiert außerdem alle eingebetteten JARs (maven/) und Datendateien (data/).
+    ///
+    /// Legacy-Forge (≤1.12.2) hat kein separates version.json — die Versionsdaten
+    /// stehen in install_profile.json unter dem Feld "versionInfo".
     async fn read_installer_contents(
         installer_path: &Path,
         installer_data_dir: &Path,
@@ -360,12 +430,14 @@ impl ForgeInstaller {
         let file = std::fs::File::open(installer_path)?;
         let mut archive = zip::ZipArchive::new(file)?;
 
-        let version_json = {
-            let mut entry = archive.by_name("version.json")
-                .map_err(|_| anyhow::anyhow!("version.json nicht im Forge Installer gefunden"))?;
-            let mut s = String::new();
-            entry.read_to_string(&mut s)?;
-            s
+        // Versuche version.json zu lesen (modern format, 1.13+)
+        let version_json_opt = match archive.by_name("version.json") {
+            Ok(mut entry) => {
+                let mut s = String::new();
+                entry.read_to_string(&mut s)?;
+                Some(s)
+            }
+            Err(_) => None,
         };
 
         let install_profile = {
@@ -374,6 +446,23 @@ impl ForgeInstaller {
             let mut s = String::new();
             entry.read_to_string(&mut s)?;
             s
+        };
+
+        // Falls kein version.json: Legacy-Format (≤1.12.2)
+        // install_profile.json enthält "versionInfo" mit den Versionsdaten
+        let version_json = match version_json_opt {
+            Some(vj) => vj,
+            None => {
+                tracing::info!("Legacy Forge Installer erkannt (kein version.json)");
+                let profile_value: serde_json::Value = serde_json::from_str(&install_profile)
+                    .map_err(|e| anyhow::anyhow!("Legacy install_profile.json parse error: {}", e))?;
+                if let Some(version_info) = profile_value.get("versionInfo") {
+                    serde_json::to_string(version_info)
+                        .map_err(|e| anyhow::anyhow!("versionInfo serialization error: {}", e))?
+                } else {
+                    bail!("Weder version.json noch versionInfo in install_profile.json gefunden");
+                }
+            }
         };
 
         // Embedded JARs und Datendateien extrahieren
@@ -998,6 +1087,14 @@ pub fn find_java_binary() -> String {
         "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
         "/usr/lib/jvm/java-21-openjdk/bin/java",
         "/usr/lib/jvm/java-21/bin/java",
+        "/usr/lib/jvm/java-17-openjdk-amd64/bin/java",
+        "/usr/lib/jvm/java-17-openjdk/bin/java",
+        "/usr/lib/jvm/java-17/bin/java",
+        "/usr/lib/jvm/java-16-openjdk-amd64/bin/java",
+        "/usr/lib/jvm/java-16-openjdk/bin/java",
+        "/usr/lib/jvm/java-8-openjdk-amd64/bin/java",
+        "/usr/lib/jvm/java-8-openjdk/bin/java",
+        "/usr/lib/jvm/java-1.8.0-openjdk/bin/java",
         "/usr/bin/java",
     ] {
         if Path::new(p).exists() { return p.to_string(); }

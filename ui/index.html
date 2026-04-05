@@ -145,6 +145,14 @@
                                 </div>
                             </div>
 
+                            <!-- Hide Installed -->
+                            <div class="filter-section" id="installed-filter-section">
+                                <label style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; font-size: 13px;" onmouseover="this.style.background='var(--bg-light)'" onmouseout="this.style.background='transparent'">
+                                    <input type="checkbox" id="filter-hide-installed" style="cursor: pointer; width: 16px; height: 16px; accent-color: var(--gold);">
+                                    <span style="color: var(--text-primary); flex: 1;">Hide Installed</span>
+                                </label>
+                            </div>
+
                             <!-- Environment - Collapsible -->
                             <div class="filter-section" id="environment-filter-section">
                                 <h3 class="filter-header" onclick="toggleFilterSection('environment')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">

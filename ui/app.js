@@ -121,12 +121,18 @@ let selectedFilters = {
     version: '',
     loader: '',
     sort: 'downloads',
-    categories: []
+    categories: [],
+    hideInstalled: false
 };
 let currentModSearchQuery = '';
 let currentModPage = 0;
 const MODS_PER_PAGE = 20;
 let currentContentType = 'mods';
+
+// Berechne effektives Limit: Bei "Hide Installed" mehr laden, um Seite zu füllen
+function getEffectiveLimit() {
+    return selectedFilters.hideInstalled ? MODS_PER_PAGE * 5 : MODS_PER_PAGE;
+}
 
 // Theme State
 let currentTheme = 'dark';
@@ -3326,32 +3332,8 @@ async function populateEditVersionSelect() {
         return (v.version_type || '').toLowerCase() === 'release';
     });
 
-    // WICHTIG: NeoForge unterstützt nur Versionen ab 1.20.2!
-    if (selectedLoader === 'neoforge') {
-        filtered = filtered.filter(v => {
-            const versionId = v.id;
-
-            // Snapshots immer erlauben wenn aktiviert
-            if (showSnapshotsEdit && (v.version_type || '').toLowerCase() !== 'release') {
-                return true;
-            }
-
-            // Parse Version
-            const parts = versionId.split('.').map(p => parseInt(p));
-            if (parts.length < 3) return false;
-
-            const [major, minor, patch] = parts;
-
-            if (major !== 1) return false;
-
-            // 1.20.2 bis 1.21.11
-            if (minor === 20 && patch >= 2) return true;
-            if (minor === 21 && patch <= 11) return true;
-            if (minor > 21) return false;
-
-            return false;
-        });
-    }
+    // Für jeden Loader: Nur MC-Versionen anzeigen die tatsächlich unterstützt werden
+    filtered = await filterVersionsByLoader(filtered, selectedLoader);
 
     const hasCurrentVersion = !!currentVersion && filtered.some(v => v.id === currentVersion);
     const fallbackOption = (!hasCurrentVersion && currentVersion)
@@ -3495,7 +3477,7 @@ function openCreateProfileModal() {
     const modal = document.getElementById('create-profile-modal');
     if (modal) {
         modal.classList.add('active');
-        updateVersionSelects();
+        updateVersionSelects(); // async, fire-and-forget ist OK hier
     }
 }
 
@@ -3548,7 +3530,7 @@ function setupModals() {
             }
 
             // WICHTIG: Aktualisiere die verfügbaren Versionen basierend auf dem Loader!
-            updateVersionSelects();
+            await updateVersionSelects();
 
             // WICHTIG: Lade auch die Loader-Versionen!
             await updateCreateLoaderVersions();
@@ -3597,6 +3579,88 @@ function setupModals() {
 
 let allMinecraftVersions = [];
 let showSnapshots = false;
+let forgeSupportedMcVersions = null; // Cache: MC-Versionen mit Forge-Support
+let fabricSupportedMcVersions = null; // Cache: MC-Versionen mit Fabric-Support
+let quiltSupportedMcVersions = null; // Cache: MC-Versionen mit Quilt-Support
+let neoforgeSupportedMcVersions = null; // Cache: MC-Versionen mit NeoForge-Support
+
+/// Lädt die Liste der MC-Versionen die Forge unterstützen (gecached)
+async function getForgeSuportedMcVersions() {
+    if (forgeSupportedMcVersions !== null) return forgeSupportedMcVersions;
+    try {
+        forgeSupportedMcVersions = await invoke('get_forge_supported_mc_versions');
+        debugLog('Loaded ' + forgeSupportedMcVersions.length + ' Forge-supported MC versions', 'success');
+    } catch (e) {
+        debugLog('Failed to load Forge-supported MC versions: ' + e, 'error');
+        forgeSupportedMcVersions = [];
+    }
+    return forgeSupportedMcVersions;
+}
+
+/// Lädt die Liste der MC-Versionen die Fabric unterstützen (gecached)
+async function getFabricSupportedMcVersions() {
+    if (fabricSupportedMcVersions !== null) return fabricSupportedMcVersions;
+    try {
+        fabricSupportedMcVersions = await invoke('get_fabric_supported_mc_versions');
+        debugLog('Loaded ' + fabricSupportedMcVersions.length + ' Fabric-supported MC versions', 'success');
+    } catch (e) {
+        debugLog('Failed to load Fabric-supported MC versions: ' + e, 'error');
+        fabricSupportedMcVersions = [];
+    }
+    return fabricSupportedMcVersions;
+}
+
+/// Lädt die Liste der MC-Versionen die Quilt unterstützen (gecached)
+async function getQuiltSupportedMcVersions() {
+    if (quiltSupportedMcVersions !== null) return quiltSupportedMcVersions;
+    try {
+        quiltSupportedMcVersions = await invoke('get_quilt_supported_mc_versions');
+        debugLog('Loaded ' + quiltSupportedMcVersions.length + ' Quilt-supported MC versions', 'success');
+    } catch (e) {
+        debugLog('Failed to load Quilt-supported MC versions: ' + e, 'error');
+        quiltSupportedMcVersions = [];
+    }
+    return quiltSupportedMcVersions;
+}
+
+/// Lädt die Liste der MC-Versionen die NeoForge unterstützen (gecached)
+async function getNeoforgeSupportedMcVersions() {
+    if (neoforgeSupportedMcVersions !== null) return neoforgeSupportedMcVersions;
+    try {
+        neoforgeSupportedMcVersions = await invoke('get_neoforge_supported_mc_versions');
+        debugLog('Loaded ' + neoforgeSupportedMcVersions.length + ' NeoForge-supported MC versions', 'success');
+    } catch (e) {
+        debugLog('Failed to load NeoForge-supported MC versions: ' + e, 'error');
+        neoforgeSupportedMcVersions = [];
+    }
+    return neoforgeSupportedMcVersions;
+}
+
+/// Hilfsfunktion: Filtert Versionen basierend auf dem Loader
+async function filterVersionsByLoader(versions, loader) {
+    if (loader === 'vanilla') return versions;
+
+    let supported;
+    if (loader === 'forge') {
+        supported = await getForgeSuportedMcVersions();
+    } else if (loader === 'fabric') {
+        supported = await getFabricSupportedMcVersions();
+    } else if (loader === 'quilt') {
+        supported = await getQuiltSupportedMcVersions();
+    } else if (loader === 'neoforge') {
+        supported = await getNeoforgeSupportedMcVersions();
+    } else {
+        return versions;
+    }
+
+    if (supported && supported.length > 0) {
+        const supportedSet = new Set(supported);
+        const filtered = versions.filter(v => supportedSet.has(v.id));
+        debugLog('Filtered to ' + filtered.length + ' ' + loader + '-supported versions', 'info');
+        return filtered;
+    }
+    return versions;
+}
 
 async function loadMinecraftVersions() {
     try {
@@ -3604,7 +3668,7 @@ async function loadMinecraftVersions() {
         allMinecraftVersions = await invoke('get_minecraft_versions');
         debugLog('Loaded ' + allMinecraftVersions.length + ' versions', 'success');
 
-        updateVersionSelects();
+        await updateVersionSelects();
 
         // Setup snapshot toggle
         const snapshotToggle = document.getElementById('show-snapshots');
@@ -3619,7 +3683,7 @@ async function loadMinecraftVersions() {
     }
 }
 
-function updateVersionSelects() {
+async function updateVersionSelects() {
     debugLog('Updating version selects...', 'info');
 
     if (allMinecraftVersions.length === 0) {
@@ -3627,60 +3691,26 @@ function updateVersionSelects() {
         return;
     }
 
-    // Debug: Check first version format
-    if (allMinecraftVersions.length > 0) {
-        const firstVersion = allMinecraftVersions[0];
-        debugLog('First version: ' + JSON.stringify(firstVersion), 'info');
-    }
-
     // Filter versions based on snapshot toggle
-    // Support multiple version_type formats: "Release", "release", or type field
     let filteredVersions = showSnapshots
-        ? allMinecraftVersions
+        ? [...allMinecraftVersions]
         : allMinecraftVersions.filter(v => v.version_type?.toLowerCase() === 'release');
 
-    // WICHTIG: NeoForge unterstützt nur Versionen ab 1.20.2!
     // Filtere Versionen basierend auf dem gewählten Loader
     const loaderSelect = document.getElementById('profile-loader');
     const selectedLoader = loaderSelect ? loaderSelect.value : 'vanilla';
 
-    if (selectedLoader === 'neoforge') {
-        // NeoForge: Nur 1.20.2 bis 1.21.11 (und Snapshots wenn aktiviert)
-        filteredVersions = filteredVersions.filter(v => {
-            const versionId = v.id;
+    // Für jeden Loader: Nur MC-Versionen anzeigen die tatsächlich unterstützt werden
+    filteredVersions = await filterVersionsByLoader(filteredVersions, selectedLoader);
 
-            // Snapshots immer erlauben wenn Snapshot-Toggle aktiv ist
-            if (showSnapshots && v.version_type?.toLowerCase() !== 'release') {
-                return true;
-            }
-
-            // Parse Version (z.B. "1.21.2" -> [1, 21, 2])
-            const parts = versionId.split('.').map(p => parseInt(p));
-            if (parts.length < 3) return false;
-
-            const [major, minor, patch] = parts;
-
-            // Nur Minecraft 1.x
-            if (major !== 1) return false;
-
-            // 1.20.2 bis 1.21.11
-            if (minor === 20 && patch >= 2) return true;  // 1.20.2+
-            if (minor === 21 && patch <= 11) return true; // 1.21.0 bis 1.21.11
-            if (minor > 21) return false; // Zu neu
-
-            return false;
-        });
-
-        debugLog('Filtered to ' + filteredVersions.length + ' NeoForge-compatible versions (1.20.2 - 1.21.11)', 'info');
-    } else {
-        debugLog('Filtered to ' + filteredVersions.length + ' versions (snapshots: ' + showSnapshots + ')', 'info');
-    }
-
-    // Update Profile Modal select (limit to 50 for performance)
+    // Update Profile Modal select
+    // Vanilla hat keine Filterung → Limit auf 50 für Performance.
+    // Alle anderen Loader sind bereits gefiltert → alle anzeigen.
+    const versionLimit = selectedLoader === 'vanilla' ? 50 : filteredVersions.length;
     const profileSelect = document.getElementById('profile-mc-version');
     if (profileSelect) {
         debugLog('Found profile-mc-version select, updating...', 'success');
-        profileSelect.innerHTML = filteredVersions.slice(0, 50).map(v =>
+        profileSelect.innerHTML = filteredVersions.slice(0, versionLimit).map(v =>
             `<option value="${v.id}">${v.id}${v.version_type !== 'Release' ? ' (' + v.version_type + ')' : ''}</option>`
         ).join('');
     } else {
@@ -3867,6 +3897,15 @@ function setupSearch() {
             } else if (currentContentType === 'modpacks') {
                 searchModpacks(query);
             }
+        });
+    }
+
+    // Hide Installed Filter
+    const hideInstalledFilter = document.getElementById('filter-hide-installed');
+    if (hideInstalledFilter) {
+        hideInstalledFilter.addEventListener('change', (e) => {
+            selectedFilters.hideInstalled = e.target.checked;
+            triggerContentSearch();
         });
     }
 
@@ -4195,8 +4234,8 @@ async function loadPopularResourcePacks(page = 0) {
             gameVersion: selectedFilters.version || null,
             categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
             sortBy: 'downloads',
-            offset: page * MODS_PER_PAGE,
-            limit: MODS_PER_PAGE
+            offset: page * getEffectiveLimit(),
+            limit: getEffectiveLimit()
         });
 
         renderMods(packs, page);
@@ -4235,8 +4274,8 @@ async function searchResourcePacks(query, page = 0) {
             gameVersion: selectedFilters.version || null,
             categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
             sortBy: selectedFilters.sort || 'downloads',
-            offset: page * MODS_PER_PAGE,
-            limit: MODS_PER_PAGE
+            offset: page * getEffectiveLimit(),
+            limit: getEffectiveLimit()
         });
 
         renderMods(packs, page);
@@ -4359,8 +4398,8 @@ async function loadPopularShaderPacks(page = 0) {
             gameVersion: selectedFilters.version || null,
             categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
             sortBy: 'downloads',
-            offset: page * MODS_PER_PAGE,
-            limit: MODS_PER_PAGE
+            offset: page * getEffectiveLimit(),
+            limit: getEffectiveLimit()
         });
 
         renderMods(packs, page);
@@ -4399,8 +4438,8 @@ async function searchShaderPacks(query, page = 0) {
             gameVersion: selectedFilters.version || null,
             categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
             sortBy: selectedFilters.sort || 'downloads',
-            offset: page * MODS_PER_PAGE,
-            limit: MODS_PER_PAGE
+            offset: page * getEffectiveLimit(),
+            limit: getEffectiveLimit()
         });
 
         renderMods(packs, page);
@@ -4446,8 +4485,8 @@ async function loadPopularMods(page = 0) {
             loader: selectedFilters.loader || null,
             categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
             sortBy: 'downloads',  // Nach Downloads sortieren
-            offset: page * MODS_PER_PAGE,
-            limit: MODS_PER_PAGE
+            offset: page * getEffectiveLimit(),
+            limit: getEffectiveLimit()
         });
 
         renderMods(mods, page);
@@ -4592,8 +4631,8 @@ async function searchMods(query, page = 0) {
             loader: selectedFilters.loader || null,
             categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
             sortBy: selectedFilters.sort || 'downloads',
-            offset: page * MODS_PER_PAGE,
-            limit: MODS_PER_PAGE
+            offset: page * getEffectiveLimit(),
+            limit: getEffectiveLimit()
         });
 
         renderMods(mods, page);
@@ -4609,6 +4648,43 @@ function renderMods(mods, page = 0) {
 
     // Speichere Scroll-Position
     const scrollTop = list.scrollTop;
+
+    // Speichere Original-Länge für Pagination (ob es noch mehr Ergebnisse gibt)
+    const originalCount = mods.length;
+
+    // Wenn "Hide Installed" aktiv ist, installierte vorher herausfiltern
+    if (selectedFilters.hideInstalled && currentProfile) {
+        const beforeCount = mods.length;
+        mods = mods.filter(mod => {
+            const modSlug = mod.slug ? mod.slug.toLowerCase() : '';
+            const modName = mod.name ? mod.name.toLowerCase().replace(/\s+/g, '-') : '';
+            const modId = mod.id ? mod.id.toLowerCase() : '';
+            const modFirstName = mod.name ? mod.name.toLowerCase().split(' ')[0] : '';
+
+            let isInst = false;
+            if (currentContentType === 'mods') {
+                isInst = installedModIds.has(modSlug) ||
+                    installedModIds.has(modName) ||
+                    installedModIds.has(modId) ||
+                    installedModIds.has(modFirstName) ||
+                    (modSlug && Array.from(installedModIds).some(id => id === modSlug || modSlug === id));
+            } else if (currentContentType === 'resourcepacks') {
+                isInst = installedResourcePackNames.has(modSlug) ||
+                    installedResourcePackNames.has(modName) ||
+                    installedResourcePackNames.has(modFirstName);
+            } else if (currentContentType === 'shaderpacks') {
+                isInst = installedShaderPackNames.has(modSlug) ||
+                    installedShaderPackNames.has(modName) ||
+                    installedShaderPackNames.has(modFirstName);
+            }
+            return !isInst;
+        });
+        debugLog('Hide Installed: ' + beforeCount + ' -> ' + mods.length + ' (installedModIds: ' + installedModIds.size + ', profile: ' + (currentProfile ? currentProfile.name : 'none') + ')', 'info');
+    }
+
+    // Auf MODS_PER_PAGE begrenzen (wir haben evtl. mehr geladen wegen Overfetch)
+    const hasMore = mods.length > MODS_PER_PAGE || originalCount >= getEffectiveLimit();
+    mods = mods.slice(0, MODS_PER_PAGE);
 
     if (mods.length === 0 && page === 0) {
         list.innerHTML = '<div class="loading">Keine Inhalte gefunden</div>';
@@ -4628,7 +4704,6 @@ function renderMods(mods, page = 0) {
     const modsHTML = mods.map(mod => {
         // Prüfe ob bereits installiert ist - NUR wenn ein Profil ausgewählt ist
         let isInstalled = false;
-
         if (currentProfile) {
             const modSlug = mod.slug ? mod.slug.toLowerCase() : '';
             const modName = mod.name ? mod.name.toLowerCase().replace(/\s+/g, '-') : '';
@@ -4636,19 +4711,16 @@ function renderMods(mods, page = 0) {
             const modFirstName = mod.name ? mod.name.toLowerCase().split(' ')[0] : '';
 
             if (currentContentType === 'mods') {
-                // Prüfe Mods
                 isInstalled = installedModIds.has(modSlug) ||
                     installedModIds.has(modName) ||
                     installedModIds.has(modId) ||
                     installedModIds.has(modFirstName) ||
                     (modSlug && Array.from(installedModIds).some(id => id === modSlug || modSlug === id));
             } else if (currentContentType === 'resourcepacks') {
-                // Prüfe Resource Packs
                 isInstalled = installedResourcePackNames.has(modSlug) ||
                     installedResourcePackNames.has(modName) ||
                     installedResourcePackNames.has(modFirstName);
             } else if (currentContentType === 'shaderpacks') {
-                // Prüfe Shader Packs
                 isInstalled = installedShaderPackNames.has(modSlug) ||
                     installedShaderPackNames.has(modName) ||
                     installedShaderPackNames.has(modFirstName);
@@ -4772,7 +4844,7 @@ function renderMods(mods, page = 0) {
                 Seite ${page + 1}
             </span>
             <button class="btn btn-secondary" onclick="nextModPage()" 
-                    ${mods.length < MODS_PER_PAGE ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}>
+                    ${!hasMore ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}>
                 Nächste →
             </button>
         </div>

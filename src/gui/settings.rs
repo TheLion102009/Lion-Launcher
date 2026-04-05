@@ -84,6 +84,54 @@ pub async fn get_forge_versions(minecraft_version: String) -> Result<Vec<String>
     Ok(versions.into_iter().map(|v| v.forge_version).collect())
 }
 
+/// Gibt alle MC-Versionen zurück für die Forge verfügbar ist
+#[tauri::command]
+pub async fn get_forge_supported_mc_versions() -> Result<Vec<String>, String> {
+    let client = crate::api::forge::ForgeClient::new()
+        .map_err(|e| e.to_string())?;
+
+    client.get_supported_game_versions()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Gibt alle MC-Versionen zurück für die Fabric verfügbar ist
+#[tauri::command]
+pub async fn get_fabric_supported_mc_versions() -> Result<Vec<String>, String> {
+    let client = crate::api::fabric::FabricClient::new()
+        .map_err(|e| e.to_string())?;
+
+    let versions = client.get_game_versions()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(versions.into_iter().map(|v| v.version).collect())
+}
+
+/// Gibt alle MC-Versionen zurück für die Quilt verfügbar ist
+#[tauri::command]
+pub async fn get_quilt_supported_mc_versions() -> Result<Vec<String>, String> {
+    let client = crate::api::quilt::QuiltClient::new()
+        .map_err(|e| e.to_string())?;
+
+    let versions = client.get_game_versions()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(versions.into_iter().map(|v| v.version).collect())
+}
+
+/// Gibt alle MC-Versionen zurück für die NeoForge verfügbar ist
+#[tauri::command]
+pub async fn get_neoforge_supported_mc_versions() -> Result<Vec<String>, String> {
+    let client = crate::api::neoforge::NeoForgeClient::new()
+        .map_err(|e| e.to_string())?;
+
+    client.get_supported_game_versions()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn get_neoforge_versions(minecraft_version: String) -> Result<Vec<String>, String> {
     tracing::info!("🔍 GUI: Loading NeoForge versions for MC {}", minecraft_version);

@@ -49,6 +49,10 @@ fn main() {
             gui::get_fabric_versions,
             gui::get_quilt_versions,
             gui::get_forge_versions,
+            gui::get_forge_supported_mc_versions,
+            gui::get_fabric_supported_mc_versions,
+            gui::get_quilt_supported_mc_versions,
+            gui::get_neoforge_supported_mc_versions,
             gui::get_neoforge_versions,
             gui::get_system_memory,
             // Profiles
