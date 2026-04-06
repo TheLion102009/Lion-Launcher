@@ -476,16 +476,19 @@ impl MinecraftLauncher {
         );
 
         // Display-Umgebungsvariablen weitergeben (verhindert GBM/EGL-Fallback → SIGABRT)
-        if let Ok(display) = std::env::var("DISPLAY") {
-            cmd.env("DISPLAY", display);
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(display) = std::env::var("DISPLAY") {
+                cmd.env("DISPLAY", display);
+            }
+            if let Ok(wd) = std::env::var("WAYLAND_DISPLAY") {
+                cmd.env("WAYLAND_DISPLAY", wd);
+            }
+            if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
+                cmd.env("XDG_RUNTIME_DIR", xdg);
+            }
+            cmd.env("_JAVA_AWT_WM_NONREPARENTING", "1");
         }
-        if let Ok(wd) = std::env::var("WAYLAND_DISPLAY") {
-            cmd.env("WAYLAND_DISPLAY", wd);
-        }
-        if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
-            cmd.env("XDG_RUNTIME_DIR", xdg);
-        }
-        cmd.env("_JAVA_AWT_WM_NONREPARENTING", "1");
 
         // Extra-Args (Quick Play) — fehlte hier komplett!
         let extra_args = get_extra_launch_args();
@@ -796,29 +799,31 @@ maxThreads = -1
         // Kontext: NVIDIA Kernel-Modul und Userspace-Treiber können unterschiedliche
         // Versionen haben (z.B. nach Kernel-Update ohne Reboot). Das bricht GLX mit
         // "BadValue X_GLXCreateNewContext". LWJGL/GLFW kann aber über EGL-X11 rendern.
-        //
-        // DISPLAY muss explizit gesetzt sein – Tauri-Kindprozesse erben env nicht immer.
-        cmd.env("DISPLAY", std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string()));
-        if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
-            cmd.env("XDG_RUNTIME_DIR", xdg);
+        #[cfg(target_os = "linux")]
+        {
+            // DISPLAY muss explizit gesetzt sein – Tauri-Kindprozesse erben env nicht immer.
+            cmd.env("DISPLAY", std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string()));
+            if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
+                cmd.env("XDG_RUNTIME_DIR", xdg);
+            }
+            // NVIDIA-Treiber für GLX explizit wählen (nicht Mesa-Fallback)
+            cmd.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia");
+            // NVIDIA EGL-Treiber explizit (für LWJGL EGL-Pfad)
+            cmd.env("__EGL_VENDOR_LIBRARY_FILENAMES", "/usr/lib/x86_64-linux-gnu/libEGL_nvidia.so.0");
+            // Threaded Optimizations AUS – verursacht BadValue bei Context-Create
+            cmd.env("__GL_THREADED_OPTIMIZATIONS", "0");
+            // Kein indirektes Rendering (würde Software-Fallback erzwingen)
+            cmd.env("LIBGL_ALWAYS_INDIRECT", "0");
+            // Reparenting-WM Fix: verhindert GLXBadDrawable beim Fensterwechsel
+            cmd.env("_JAVA_AWT_WM_NONREPARENTING", "1");
+            // Mesa-Overrides entfernen – interferieren mit NVIDIA-Treiber
+            cmd.env_remove("MESA_GL_VERSION_OVERRIDE");
+            cmd.env_remove("MESA_GLSL_VERSION_OVERRIDE");
+            cmd.env_remove("LIBGL_DRIVERS_PATH");
+            // LWJGL: EGL-X11 Plattform statt Standard-GLX wählen
+            // Das umgeht den GLX BadValue Bug bei NVIDIA Version-Mismatch
+            cmd.env("LIBGL_KOPPER_DISABLE", "1");
         }
-        // NVIDIA-Treiber für GLX explizit wählen (nicht Mesa-Fallback)
-        cmd.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia");
-        // NVIDIA EGL-Treiber explizit (für LWJGL EGL-Pfad)
-        cmd.env("__EGL_VENDOR_LIBRARY_FILENAMES", "/usr/lib/x86_64-linux-gnu/libEGL_nvidia.so.0");
-        // Threaded Optimizations AUS – verursacht BadValue bei Context-Create
-        cmd.env("__GL_THREADED_OPTIMIZATIONS", "0");
-        // Kein indirektes Rendering (würde Software-Fallback erzwingen)
-        cmd.env("LIBGL_ALWAYS_INDIRECT", "0");
-        // Reparenting-WM Fix: verhindert GLXBadDrawable beim Fensterwechsel
-        cmd.env("_JAVA_AWT_WM_NONREPARENTING", "1");
-        // Mesa-Overrides entfernen – interferieren mit NVIDIA-Treiber
-        cmd.env_remove("MESA_GL_VERSION_OVERRIDE");
-        cmd.env_remove("MESA_GLSL_VERSION_OVERRIDE");
-        cmd.env_remove("LIBGL_DRIVERS_PATH");
-        // LWJGL: EGL-X11 Plattform statt Standard-GLX wählen
-        // Das umgeht den GLX BadValue Bug bei NVIDIA Version-Mismatch
-        cmd.env("LIBGL_KOPPER_DISABLE", "1");
         // ────────────────────────────────────────────────────────────────────────
 
         // === BASIS JVM-ARGUMENTE ===
@@ -831,8 +836,12 @@ maxThreads = -1
         // Forge EarlyDisplay auf Linux deaktivieren: vermeidet GLFW BadValue-Fehler
         // durch das frühe OpenGL-Fenster das Forge vor dem eigentlichen MC öffnet.
         // GLFW versucht dort alle GL-Profile 4.6..3.2 und scheitert auf NVIDIA/GLX.
-        cmd.arg("-Dfml.earlyprogresswindow=false");
-        cmd.arg("-Dforge.earlyprogresswindow=false");
+        // Auf Windows funktioniert das EarlyDisplay problemlos.
+        #[cfg(target_os = "linux")]
+        {
+            cmd.arg("-Dfml.earlyprogresswindow=false");
+            cmd.arg("-Dforge.earlyprogresswindow=false");
+        }
 
         // Forge Patch-Toleranz: Ignoriere Diskrepanzen beim Patching und ungültige Zertifikate.
         // Notwendig für Forge 56.x/57.x (MC 1.21.6/1.21.7) wo die field_to_method.js-Coremods
@@ -1168,14 +1177,17 @@ maxThreads = -1
         // ── Linux/NVIDIA Display-Umgebungsvariablen ──────────────────────────────
         // Ohne DISPLAY startet kein Fenster auf X11. Muss explizit gesetzt werden,
         // da Tauri-Kindprozesse DISPLAY nicht immer erben (z.B. AppImage-Launch).
-        cmd.env("DISPLAY", std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string()));
-        if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
-            cmd.env("XDG_RUNTIME_DIR", xdg);
+        #[cfg(target_os = "linux")]
+        {
+            cmd.env("DISPLAY", std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string()));
+            if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
+                cmd.env("XDG_RUNTIME_DIR", xdg);
+            }
+            if let Ok(wd) = std::env::var("WAYLAND_DISPLAY") {
+                cmd.env("WAYLAND_DISPLAY", wd);
+            }
+            cmd.env("_JAVA_AWT_WM_NONREPARENTING", "1");
         }
-        if let Ok(wd) = std::env::var("WAYLAND_DISPLAY") {
-            cmd.env("WAYLAND_DISPLAY", wd);
-        }
-        cmd.env("_JAVA_AWT_WM_NONREPARENTING", "1");
         // ────────────────────────────────────────────────────────────────────────
 
         cmd.arg(format!("-Xmx{}M", memory_mb));
@@ -2896,6 +2908,22 @@ maxThreads = -1
                 "/usr/lib/jvm/java-21-openjdk/bin/java",
                 "/usr/bin/java",
             ]
+        } else if cfg!(target_os = "windows") {
+            &[
+                "C:\\Program Files\\Eclipse Adoptium\\jre-8-hotspot\\bin\\java.exe",
+                "C:\\Program Files\\Java\\jre1.8.0_411\\bin\\java.exe",
+                "C:\\Program Files\\Java\\jdk1.8.0_411\\bin\\java.exe",
+                "C:\\Program Files\\Eclipse Adoptium\\jdk-8-hotspot\\bin\\java.exe",
+                "C:\\Program Files\\Eclipse Adoptium\\jre-11-hotspot\\bin\\java.exe",
+                "C:\\Program Files\\Java\\jdk-11\\bin\\java.exe",
+                "C:\\Program Files\\Eclipse Adoptium\\jdk-11-hotspot\\bin\\java.exe",
+                "C:\\Program Files\\Eclipse Adoptium\\jre-17-hotspot\\bin\\java.exe",
+                "C:\\Program Files\\Java\\jdk-17\\bin\\java.exe",
+                "C:\\Program Files\\Eclipse Adoptium\\jdk-17-hotspot\\bin\\java.exe",
+                "C:\\Program Files\\Eclipse Adoptium\\jre-21-hotspot\\bin\\java.exe",
+                "C:\\Program Files\\Java\\jdk-21\\bin\\java.exe",
+                "C:\\Program Files\\Eclipse Adoptium\\jdk-21-hotspot\\bin\\java.exe",
+            ]
         } else {
             &["java"]
         };
@@ -2913,6 +2941,22 @@ maxThreads = -1
                 "/usr/lib/jvm/java-8-openjdk/bin/java",
                 "/usr/lib/jvm/java-1.8.0-openjdk/bin/java",
                 "/usr/bin/java",
+            ]
+        } else if cfg!(target_os = "windows") {
+            &[
+                "C:\\Program Files\\Eclipse Adoptium\\jre-21-hotspot\\bin\\java.exe",
+                "C:\\Program Files\\Java\\jdk-21\\bin\\java.exe",
+                "C:\\Program Files\\Eclipse Adoptium\\jdk-21-hotspot\\bin\\java.exe",
+                "C:\\Program Files\\Eclipse Adoptium\\jre-17-hotspot\\bin\\java.exe",
+                "C:\\Program Files\\Java\\jdk-17\\bin\\java.exe",
+                "C:\\Program Files\\Eclipse Adoptium\\jdk-17-hotspot\\bin\\java.exe",
+                "C:\\Program Files\\Eclipse Adoptium\\jre-11-hotspot\\bin\\java.exe",
+                "C:\\Program Files\\Java\\jdk-11\\bin\\java.exe",
+                "C:\\Program Files\\Eclipse Adoptium\\jdk-11-hotspot\\bin\\java.exe",
+                "C:\\Program Files\\Eclipse Adoptium\\jre-8-hotspot\\bin\\java.exe",
+                "C:\\Program Files\\Java\\jre1.8.0_411\\bin\\java.exe",
+                "C:\\Program Files\\Java\\jdk1.8.0_411\\bin\\java.exe",
+                "C:\\Program Files\\Eclipse Adoptium\\jdk-8-hotspot\\bin\\java.exe",
             ]
         } else {
             &["java"]
@@ -2936,10 +2980,44 @@ maxThreads = -1
             }
         }
 
-        if tokio::process::Command::new("java").arg("-version").output().await.is_ok() {
-            let v = Self::java_major_version("java").await;
+        // Windows: Dynamisch nach Java in Program Files suchen
+        #[cfg(target_os = "windows")]
+        {
+            let search_dirs = [
+                "C:\\Program Files\\Eclipse Adoptium",
+                "C:\\Program Files\\Java",
+                "C:\\Program Files\\Microsoft",
+                "C:\\Program Files\\Zulu",
+                "C:\\Program Files\\BellSoft",
+                "C:\\Program Files (x86)\\Java",
+            ];
+            for dir in &search_dirs {
+                let dir_path = Path::new(dir);
+                if dir_path.exists() {
+                    if let Ok(entries) = std::fs::read_dir(dir_path) {
+                        for entry in entries.flatten() {
+                            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                                let candidate = entry.path().join("bin").join("java.exe");
+                                if candidate.exists() {
+                                    let v = Self::java_major_version(&candidate.display().to_string()).await;
+                                    if version_ok(v) {
+                                        tracing::info!("Using Windows system Java {}: {}", v, candidate.display());
+                                        return Ok(candidate.display().to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // java / java.exe auf PATH testen
+        let path_bin = if cfg!(windows) { "java.exe" } else { "java" };
+        if tokio::process::Command::new(path_bin).arg("-version").output().await.is_ok() {
+            let v = Self::java_major_version(path_bin).await;
             if version_ok(v) {
-                return Ok("java".to_string());
+                return Ok(path_bin.to_string());
             }
         }
 

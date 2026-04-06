@@ -3,11 +3,16 @@
 #  Lion Launcher – VOLLSTÄNDIGER RELEASE BUILD
 #
 #  Erstellt alle Pakete:
-#    Linux  →  .deb  |  .rpm  |  .AppImage (separat gebaut)
-#    Windows→  .exe (NSIS-Installer, benötigt Cross-Toolchain)
+#    Linux  →  .deb  |  .rpm  (lokal gebaut)
+#    Windows→  .exe  (NSIS Installer via GitHub Actions)
 #
-#  Hinweis: AppImage wird separat gebaut um FUSE-Probleme
-#  auf WSL/Fedora zu umgehen (APPIMAGE_EXTRACT_AND_RUN=1).
+#  Die .exe kann NICHT auf Linux gebaut werden (Tauri 2 braucht
+#  MSVC + NSIS + WebView2 Bootstrapper — alles Windows-only).
+#  Deshalb baut GitHub Actions die .exe automatisch.
+#
+#  Nutzung:
+#    ./scripts/release.sh              # Baut .deb + .rpm lokal
+#    ./scripts/release.sh --tag v0.1.0 # Baut lokal + pusht Tag → .exe via CI
 # ============================================================
 
 set -e
@@ -28,6 +33,22 @@ echo "  🦁  Lion Launcher — Full Release Build"
 echo "================================================${NC}"
 echo ""
 
+# ---- Argumente parsen --------------------------------------
+TAG_TO_PUSH=""
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --tag)
+            TAG_TO_PUSH="$2"
+            shift 2
+            ;;
+        *)
+            echo -e "${FAIL} Unbekanntes Argument: $1"
+            echo "  Nutzung: $0 [--tag v0.1.0]"
+            exit 1
+            ;;
+    esac
+done
+
 # ---- Paket-Verzeichnis (Ausgabe) ---------------------------
 OUT_DIR="./release-output"
 mkdir -p "$OUT_DIR"
@@ -36,15 +57,13 @@ mkdir -p "$OUT_DIR"
 export WEBKIT_DISABLE_DMABUF_RENDERER=1
 export WEBKIT_DISABLE_COMPOSITING_MODE=1
 export RUST_LOG="info"
-# WSL/Fedora: AppImages ohne FUSE-Mount ausführen (kein Kernel-FUSE nötig)
-export APPIMAGE_EXTRACT_AND_RUN=1
 
 if [ -z "${DISPLAY}" ]; then
     export DISPLAY=:0
 fi
 
 # ---- Voraussetzungen prüfen --------------------------------
-echo -e "${YELLOW}[1/7] Prüfe Werkzeuge...${NC}"
+echo -e "${YELLOW}[1/6] Prüfe Werkzeuge...${NC}"
 
 if ! command -v cargo &> /dev/null; then
     echo -e "${FAIL} cargo nicht gefunden. Installiere Rust: https://rustup.rs"
@@ -58,104 +77,50 @@ fi
 
 echo -e "${PASS} Rust / Cargo / Tauri CLI vorhanden"
 
+# ---- tauri.conf.json Validierung ---------------------------
+echo -e "\n${YELLOW}[2/6] Prüfe Konfiguration...${NC}"
+
+# Prüfe ob bundle targets korrekt gesetzt sind
+if command -v python3 &> /dev/null; then
+    TARGETS=$(python3 -c "
+import json
+with open('tauri.conf.json') as f:
+    c = json.load(f)
+targets = c.get('bundle', {}).get('targets', [])
+print(','.join(targets) if isinstance(targets, list) else str(targets))
+" 2>/dev/null || echo "unknown")
+    echo -e "  Bundle targets: ${BOLD}${TARGETS}${NC}"
+
+    WV_MODE=$(python3 -c "
+import json
+with open('tauri.conf.json') as f:
+    c = json.load(f)
+print(c.get('bundle', {}).get('windows', {}).get('webviewInstallMode', {}).get('type', 'unknown'))
+" 2>/dev/null || echo "unknown")
+    echo -e "  Windows WebView2 Modus: ${BOLD}${WV_MODE}${NC}"
+
+    if [ "$WV_MODE" != "embedBootstrapper" ]; then
+        echo -e "  ${YELLOW}⚠ WebView2 ist NICHT auf embedBootstrapper gesetzt!${NC}"
+        echo -e "  ${YELLOW}  Die .exe wird WebView2 möglicherweise nicht enthalten.${NC}"
+    else
+        echo -e "  ${PASS} WebView2 embedBootstrapper konfiguriert (wird in .exe eingebettet)"
+    fi
+else
+    echo -e "  ${YELLOW}⚠ python3 nicht gefunden — Konfigurationsvalidierung übersprungen${NC}"
+fi
+
+echo -e "${PASS} Konfiguration geprüft"
+
 # ---- Linux-Pakete (.deb, .rpm) ----------------------------
-echo -e "\n${YELLOW}[2/7] Baue Linux-Pakete (.deb / .rpm)...${NC}"
-echo -e "  (AppImage wird in Schritt 3 separat gebaut)"
+echo -e "\n${YELLOW}[3/6] Baue Linux-Pakete (.deb / .rpm)...${NC}"
 
 rm -rf ./target/release/bundle/
 cargo tauri build 2>&1
 
-echo -e "${PASS} Linux-Pakete (.deb / .rpm) erstellt"
+echo -e "${PASS} Linux-Pakete erstellt"
 
-# ---- AppImage separat bauen --------------------------------
-echo -e "\n${YELLOW}[3/7] Baue AppImage (mit APPIMAGE_EXTRACT_AND_RUN)...${NC}"
-
-LINUXDEPLOY_CACHE="$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage"
-# Eigenes Verzeichnis außerhalb des Tauri-Cache (Tauri überschreibt ~/.cache/tauri/)
-LINUXDEPLOY_OWN="$HOME/.local/share/lion-launcher/linuxdeploy-x86_64.AppImage"
-APPDIR="./target/release/bundle/appimage/Lion Launcher.AppDir"
-BINARY="./target/release/Lion-Launcher"
-
-mkdir -p "$HOME/.local/share/lion-launcher"
-
-# Herunterladen falls noch nicht vorhanden
-if [ ! -f "$LINUXDEPLOY_OWN" ]; then
-    if [ -f "${LINUXDEPLOY_CACHE}.bak" ]; then
-        echo -e "  → Nutze vorhandenes linuxdeploy-Backup..."
-        cp "${LINUXDEPLOY_CACHE}.bak" "$LINUXDEPLOY_OWN"
-        chmod +x "$LINUXDEPLOY_OWN"
-    else
-        echo -e "  → Lade linuxdeploy herunter..."
-        curl -fsSL -o "$LINUXDEPLOY_OWN" \
-            "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
-        chmod +x "$LINUXDEPLOY_OWN"
-    fi
-fi
-
-# AppDir-Struktur erstellen
-mkdir -p "$APPDIR/usr/bin"
-mkdir -p "$APPDIR/usr/share/applications"
-mkdir -p "$APPDIR/usr/share/icons/hicolor/128x128/apps"
-cp "$BINARY" "$APPDIR/usr/bin/Lion-Launcher"
-cp "icons/128x128.png" "$APPDIR/usr/share/icons/hicolor/128x128/apps/lion-launcher.png"
-
-# Desktop-Datei erstellen
-cat > "$APPDIR/usr/share/applications/lion-launcher.desktop" << 'DESKTOP'
-[Desktop Entry]
-Name=Lion Launcher
-Exec=Lion-Launcher
-Icon=lion-launcher
-Type=Application
-Categories=Game;
-DESKTOP
-
-# AppImage bauen
-# APPIMAGE_EXTRACT_AND_RUN=1 → kein FUSE-Mount nötig (WSL/Fedora-kompatibel)
-# NO_STRIP=1                 → überspringt strip für neuere .relr.dyn-Sektionen
-# Nur --output appimage      → ruft intern das appimage-Plugin auf (kein --plugin appimage!)
-APPIMAGE_OUT="./target/release/bundle/appimage"
-mkdir -p "$APPIMAGE_OUT"
-
-cd "$APPIMAGE_OUT"
-APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 NO_STRIP=1 \
-    "$LINUXDEPLOY_OWN" \
-    --appdir "Lion Launcher.AppDir" \
-    --output appimage 2>&1 | grep -v "^Setting rpath\|^Calling strip\|Unable to recognise" || {
-    echo -e "  ${YELLOW}⚠ AppImage-Build fehlgeschlagen – wird übersprungen${NC}"
-}
-cd - > /dev/null
-
-if ls "$APPIMAGE_OUT"/*.AppImage 2>/dev/null | grep -v ".bak" | grep -q ".AppImage"; then
-    echo -e "${PASS} AppImage erstellt"
-else
-    echo -e "  ${YELLOW}⚠ AppImage nicht erstellt (WSL/FUSE-Einschränkung) – wird übersprungen${NC}"
-fi
-
-# ---- Windows .exe (NSIS Installer via GitHub Actions) ------
-echo -e "\n${YELLOW}[4/7] Windows .exe (NSIS Installer)...${NC}"
-echo -e "  ${CYAN}ℹ  Windows-NSIS-Builds werden über GitHub Actions erstellt.${NC}"
-echo -e "  ${CYAN}   Der Installer enthält WebView2 (embedBootstrapper).${NC}"
-echo -e ""
-echo -e "  So erstellt du den Windows Installer:"
-echo -e "  ${BOLD}Option A – Tag pushen (empfohlen):${NC}"
-echo -e "    git tag v0.1.0"
-echo -e "    git push origin v0.1.0"
-echo -e "    → GitHub Actions baut automatisch .exe, .deb und .rpm"
-echo -e "    → Alle Dateien werden als GitHub Release veröffentlicht"
-echo -e ""
-echo -e "  ${BOLD}Option B – Manuell auslösen:${NC}"
-echo -e "    GitHub → Actions → \"Release Build\" → \"Run workflow\""
-echo -e ""
-echo -e "  ${BOLD}Option C – Lokal auf Windows:${NC}"
-echo -e "    cargo tauri build"
-echo -e "    → Erzeugt: target/release/bundle/nsis/*-setup.exe"
-echo -e ""
-echo -e "  ${YELLOW}Konfiguration: bundle.windows.nsis.webviewInstallMode = embedBootstrapper${NC}"
-echo -e "  ${YELLOW}WebView2 wird beim Installieren automatisch eingerichtet.${NC}"
-
-
-# ---- Pakete kopieren / auflisten ---------------------------
-echo -e "\n${YELLOW}[5/7] Pakete sammeln...${NC}"
+# ---- Pakete sammeln ----------------------------------------
+echo -e "\n${YELLOW}[4/6] Pakete sammeln...${NC}"
 
 BUNDLE_DIR="./target/release/bundle"
 FOUND=0
@@ -164,41 +129,79 @@ while IFS= read -r -d '' f; do
     cp "$f" "$OUT_DIR/"
     echo -e "  ${PASS} ${BOLD}$(basename "$f")${NC} → $OUT_DIR/"
     FOUND=$((FOUND + 1))
-done < <(find "$BUNDLE_DIR" \( -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.exe" \) -not -name "*.bak" -print0 2>/dev/null)
-
-# Windows ZIP (wurde direkt in OUT_DIR erstellt)
-for f in "$OUT_DIR"/*.zip; do
-    [ -f "$f" ] && FOUND=$((FOUND + 1))
-done
+done < <(find "$BUNDLE_DIR" \( -name "*.deb" -o -name "*.rpm" \) -print0 2>/dev/null)
 
 if [ "$FOUND" -eq 0 ]; then
-    echo -e "  ${YELLOW}⚠ Keine Pakete im Bundle-Verzeichnis gefunden.${NC}"
+    echo -e "  ${YELLOW}⚠ Keine Linux-Pakete im Bundle-Verzeichnis gefunden.${NC}"
 fi
 
 # ---- Checksums erstellen -----------------------------------
-echo -e "\n${YELLOW}[6/7] SHA-256 Checksums erstellen...${NC}"
+echo -e "\n${YELLOW}[5/6] SHA-256 Checksums erstellen...${NC}"
 if [ "$FOUND" -gt 0 ]; then
-    (cd "$OUT_DIR" && sha256sum * > SHA256SUMS.txt)
+    (cd "$OUT_DIR" && sha256sum *.deb *.rpm 2>/dev/null > SHA256SUMS.txt)
     echo -e "${PASS} Checksums gespeichert in ${OUT_DIR}/SHA256SUMS.txt"
 fi
 
+# ---- Windows .exe — Tag pushen für GitHub Actions ----------
+echo -e "\n${YELLOW}[6/6] Windows .exe (NSIS Installer)...${NC}"
+
+if [ -n "$TAG_TO_PUSH" ]; then
+    echo -e "  ${CYAN}→ Erstelle und pushe Tag: ${BOLD}${TAG_TO_PUSH}${NC}"
+    git tag "$TAG_TO_PUSH" 2>/dev/null || echo -e "  ${YELLOW}⚠ Tag existiert bereits${NC}"
+    git push origin "$TAG_TO_PUSH" 2>/dev/null && {
+        echo -e "  ${PASS} Tag ${TAG_TO_PUSH} gepusht → GitHub Actions baut jetzt die .exe"
+        echo -e "  ${CYAN}  Prüfe den Build unter:${NC}"
+        # Versuche die GitHub URL zu ermitteln
+        REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
+        if [ -n "$REMOTE_URL" ]; then
+            # Konvertiere SSH/HTTPS URL zu Actions URL
+            GH_URL=$(echo "$REMOTE_URL" | sed 's/\.git$//' | sed 's|git@github.com:|https://github.com/|')
+            echo -e "  ${BOLD}${GH_URL}/actions${NC}"
+        fi
+    } || echo -e "  ${YELLOW}⚠ Push fehlgeschlagen — ist ein Remote konfiguriert?${NC}"
+else
+    echo -e "  ${CYAN}ℹ  Windows-Builds (.exe) können NICHT auf Linux gebaut werden.${NC}"
+    echo -e "  ${CYAN}   Tauri 2 benötigt MSVC + NSIS + WebView2 → nur auf Windows.${NC}"
+    echo -e ""
+    echo -e "  So erstellst du die .exe:"
+    echo -e ""
+    echo -e "  ${BOLD}Option A – Tag pushen (empfohlen):${NC}"
+    echo -e "    ${CYAN}./scripts/release.sh --tag v0.1.0${NC}"
+    echo -e "    → GitHub Actions baut automatisch .deb + .rpm + .exe"
+    echo -e "    → Alle Dateien werden als GitHub Release veröffentlicht"
+    echo -e ""
+    echo -e "  ${BOLD}Option B – Manuell auslösen:${NC}"
+    echo -e "    GitHub → Actions → \"Release Build\" → \"Run workflow\""
+    echo -e ""
+    echo -e "  ${BOLD}Option C – Lokal auf einem Windows-PC:${NC}"
+    echo -e "    cargo tauri build"
+    echo -e "    → Erzeugt: target/release/bundle/nsis/*-setup.exe"
+    echo -e ""
+    echo -e "  ${GREEN}✓ WebView2 Bootstrapper wird automatisch eingebettet (tauri.conf.json)${NC}"
+    echo -e "  ${GREEN}✓ Java-Erkennung unterstützt Windows-Pfade (Adoptium, Oracle, JAVA_HOME)${NC}"
+    echo -e "  ${GREEN}✓ Classpath-Separator automatisch ; auf Windows, : auf Linux${NC}"
+    echo -e "  ${GREEN}✓ Linux-Env-Vars (DISPLAY, NVIDIA) werden auf Windows übersprungen${NC}"
+fi
+
 # ---- Ergebnis anzeigen -------------------------------------
-echo -e "\n${YELLOW}[7/7] Release-Übersicht${NC}"
-echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}${BOLD}  ✅ Release Build abgeschlossen!${NC}"
+echo -e "\n${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}${BOLD}  ✅ Lokaler Release Build abgeschlossen!${NC}"
 echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo -e "  Ausgabe-Verzeichnis: ${BOLD}${OUT_DIR}/${NC}"
+echo -e "  ${BOLD}Linux-Pakete:${NC} ${OUT_DIR}/"
 if [ -d "$OUT_DIR" ] && [ "$(ls -A "$OUT_DIR")" ]; then
     ls -lh "$OUT_DIR/"
 fi
+echo ""
+echo -e "  ${BOLD}Windows .exe:${NC} Wird über GitHub Actions gebaut"
+echo -e "  Workflow: ${CYAN}.github/workflows/release.yml${NC}"
+echo ""
 
 # ---- App direkt starten (Test-Fenster) ---------------------
 BINARY_PATH="./target/release/Lion-Launcher"
 if [ -f "$BINARY_PATH" ]; then
-    echo -e "\n${CYAN}  🚀 Starte Lion Launcher zum Testen...${NC}\n"
+    echo -e "${CYAN}  🚀 Starte Lion Launcher zum Testen...${NC}\n"
     exec "$BINARY_PATH"
 else
-    echo -e "\n${YELLOW}  ℹ Binary nicht gefunden unter $BINARY_PATH – wird nicht gestartet.${NC}"
+    echo -e "${YELLOW}  ℹ Binary nicht gefunden unter $BINARY_PATH – wird nicht gestartet.${NC}"
 fi
-

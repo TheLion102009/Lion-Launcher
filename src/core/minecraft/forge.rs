@@ -1074,32 +1074,59 @@ impl ForgeInstaller {
 }
 
 pub fn find_java_binary() -> String {
+    let java_bin_name = if cfg!(windows) { "java.exe" } else { "java" };
+
     if let Ok(home) = std::env::var("JAVA_HOME") {
-        let p = PathBuf::from(&home).join("bin").join("java");
+        let p = PathBuf::from(&home).join("bin").join(java_bin_name);
         if p.exists() { return p.display().to_string(); }
     }
     // Launcher-managed Java
-    let managed = crate::config::defaults::java_dir().join("bin").join("java");
+    let managed = crate::config::defaults::java_dir().join("bin").join(java_bin_name);
     if managed.exists() {
         return managed.display().to_string();
     }
-    for p in &[
-        "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
-        "/usr/lib/jvm/java-21-openjdk/bin/java",
-        "/usr/lib/jvm/java-21/bin/java",
-        "/usr/lib/jvm/java-17-openjdk-amd64/bin/java",
-        "/usr/lib/jvm/java-17-openjdk/bin/java",
-        "/usr/lib/jvm/java-17/bin/java",
-        "/usr/lib/jvm/java-16-openjdk-amd64/bin/java",
-        "/usr/lib/jvm/java-16-openjdk/bin/java",
-        "/usr/lib/jvm/java-8-openjdk-amd64/bin/java",
-        "/usr/lib/jvm/java-8-openjdk/bin/java",
-        "/usr/lib/jvm/java-1.8.0-openjdk/bin/java",
-        "/usr/bin/java",
-    ] {
-        if Path::new(p).exists() { return p.to_string(); }
+
+    // Platform-specific system paths
+    #[cfg(target_os = "linux")]
+    {
+        for p in &[
+            "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+            "/usr/lib/jvm/java-21-openjdk/bin/java",
+            "/usr/lib/jvm/java-21/bin/java",
+            "/usr/lib/jvm/java-17-openjdk-amd64/bin/java",
+            "/usr/lib/jvm/java-17-openjdk/bin/java",
+            "/usr/lib/jvm/java-17/bin/java",
+            "/usr/lib/jvm/java-16-openjdk-amd64/bin/java",
+            "/usr/lib/jvm/java-16-openjdk/bin/java",
+            "/usr/lib/jvm/java-8-openjdk-amd64/bin/java",
+            "/usr/lib/jvm/java-8-openjdk/bin/java",
+            "/usr/lib/jvm/java-1.8.0-openjdk/bin/java",
+            "/usr/bin/java",
+        ] {
+            if Path::new(p).exists() { return p.to_string(); }
+        }
     }
-    "java".to_string()
+
+    #[cfg(target_os = "windows")]
+    {
+        for p in &[
+            "C:\\Program Files\\Eclipse Adoptium\\jre-21-hotspot\\bin\\java.exe",
+            "C:\\Program Files\\Java\\jdk-21\\bin\\java.exe",
+            "C:\\Program Files\\Eclipse Adoptium\\jdk-21-hotspot\\bin\\java.exe",
+            "C:\\Program Files\\Eclipse Adoptium\\jre-17-hotspot\\bin\\java.exe",
+            "C:\\Program Files\\Java\\jdk-17\\bin\\java.exe",
+            "C:\\Program Files\\Eclipse Adoptium\\jdk-17-hotspot\\bin\\java.exe",
+            "C:\\Program Files\\Eclipse Adoptium\\jre-11-hotspot\\bin\\java.exe",
+            "C:\\Program Files\\Java\\jdk-11\\bin\\java.exe",
+            "C:\\Program Files\\Eclipse Adoptium\\jre-8-hotspot\\bin\\java.exe",
+            "C:\\Program Files\\Java\\jre1.8.0_411\\bin\\java.exe",
+            "C:\\Program Files\\Java\\jdk1.8.0_411\\bin\\java.exe",
+        ] {
+            if Path::new(p).exists() { return p.to_string(); }
+        }
+    }
+
+    java_bin_name.to_string()
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -30,9 +30,13 @@ pub fn compress_directory(source: &Path, output: &Path) -> Result<()> {
     let file = File::create(output)?;
     let mut zip = zip::ZipWriter::new(file);
 
-    let options = zip::write::FileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .unix_permissions(0o755);
+    let options = {
+        let opts = zip::write::FileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        #[cfg(unix)]
+        let opts = opts.unix_permissions(0o755);
+        opts
+    };
 
     let walkdir = walkdir::WalkDir::new(source);
     let it = walkdir.into_iter();
