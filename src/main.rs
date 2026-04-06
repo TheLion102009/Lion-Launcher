@@ -93,6 +93,8 @@ fn main() {
             // Servers
             gui::get_servers,
             gui::launch_server,
+            gui::add_server,
+            gui::remove_server,
             // Auth
             gui::auth::get_accounts,
             gui::auth::get_active_account,
@@ -103,6 +105,13 @@ fn main() {
             gui::auth::remove_account,
             gui::auth::refresh_account,
             gui::auth::open_auth_url,
+            gui::auth::upload_skin_file,
+            gui::auth::apply_skin_from_url,
+            gui::auth::get_skin_texture,
+            gui::auth::resolve_player_uuid,
+            gui::auth::save_skin_locally,
+            gui::auth::load_saved_skin,
+            gui::auth::delete_saved_skin,
             // Logs & Folders
             gui::get_profile_logs,
             gui::get_live_launcher_logs,

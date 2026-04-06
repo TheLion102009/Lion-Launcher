@@ -8,7 +8,6 @@ pub mod worlds;
 use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::cell::RefCell;
 use crate::types::profile::Profile;
 use crate::core::download::DownloadManager;
 use crate::config::defaults;
@@ -16,9 +15,35 @@ use crate::config::defaults;
 const MOJANG_MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const RESOURCES_URL: &str = "https://resources.download.minecraft.net";
 
-// Thread-local storage für extra Launch-Argumente (für Quick Play)
-thread_local! {
-    static EXTRA_LAUNCH_ARGS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+/// Thread-sichere globale Variable für extra Launch-Argumente (Quick Play).
+/// thread_local! funktioniert NICHT mit async/Tokio – nach einem .await kann der Task
+/// auf einem anderen Thread fortgesetzt werden, wo die thread_local leer ist.
+static EXTRA_LAUNCH_ARGS: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> =
+    std::sync::OnceLock::new();
+
+fn extra_launch_args() -> &'static std::sync::Mutex<Vec<String>> {
+    EXTRA_LAUNCH_ARGS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+/// Setzt die Extra-Launch-Argumente (z.B. --quickPlaySingleplayer <world>).
+fn set_extra_launch_args(args: Vec<String>) {
+    if let Ok(mut guard) = extra_launch_args().lock() {
+        *guard = args;
+    }
+}
+
+/// Nimmt die Extra-Launch-Argumente heraus und leert den Puffer.
+fn take_extra_launch_args() -> Vec<String> {
+    extra_launch_args().lock()
+        .map(|mut guard| std::mem::take(&mut *guard))
+        .unwrap_or_default()
+}
+
+/// Liest die Extra-Launch-Argumente (ohne sie zu leeren).
+fn get_extra_launch_args() -> Vec<String> {
+    extra_launch_args().lock()
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
 }
 
 /// Globaler Speicher für Launch-Warnungen (thread-sicher via Mutex)
@@ -251,26 +276,15 @@ impl MinecraftLauncher {
         access_token: Option<&str>,
         extra_args: Vec<String>
     ) -> Result<()> {
-        // Speichere extra_args im Profile-Kontext für später
-        // Da die launch-Methode komplex ist, setzen wir die extra_args als Environment-Variable
-        // die dann von den Launch-Methoden gelesen werden kann
-
-        // Alternativ: Wir rufen launch() auf und fügen die Argumente nachher hinzu
-        // Das ist einfacher als die gesamte Launch-Logik zu refaktorieren
-
         tracing::info!("Launching with extra args: {:?}", extra_args);
 
-        // Setze extra args als statische Variable (thread-local)
-        EXTRA_LAUNCH_ARGS.with(|args| {
-            *args.borrow_mut() = extra_args;
-        });
+        // Setze extra args in thread-sicherer statischer Variable (Mutex)
+        set_extra_launch_args(extra_args);
 
         let result = self.launch(profile, username, uuid, access_token).await;
 
-        // Clear extra args
-        EXTRA_LAUNCH_ARGS.with(|args| {
-            args.borrow_mut().clear();
-        });
+        // Clear extra args nach dem Launch
+        take_extra_launch_args();
 
         result.map(|_| ())
     }
@@ -472,6 +486,15 @@ impl MinecraftLauncher {
             cmd.env("XDG_RUNTIME_DIR", xdg);
         }
         cmd.env("_JAVA_AWT_WM_NONREPARENTING", "1");
+
+        // Extra-Args (Quick Play) — fehlte hier komplett!
+        let extra_args = get_extra_launch_args();
+        if !extra_args.is_empty() {
+            tracing::info!("Appending Quick Play args to NeoForge: {:?}", extra_args);
+            for arg in &extra_args {
+                cmd.arg(arg);
+            }
+        }
 
         tracing::info!("✅ Starting NeoForge...");
 
@@ -1054,12 +1077,11 @@ maxThreads = -1
             }
         }
 
-        // Extra-Args
-        EXTRA_LAUNCH_ARGS.with(|args| {
-            for arg in args.borrow().iter() {
-                cmd.arg(arg);
-            }
-        });
+        // Extra-Args (Quick Play)
+        let extra_args = get_extra_launch_args();
+        for arg in &extra_args {
+            cmd.arg(arg);
+        }
 
         // Debug-Kommando speichern
         let debug_cmd_path = game_dir.join("java_command_debug.txt");
@@ -1206,11 +1228,10 @@ maxThreads = -1
         cmd.arg("--userType").arg(user_type);
 
         // Extra args (z.B. für Quick Play)
-        EXTRA_LAUNCH_ARGS.with(|args| {
-            for arg in args.borrow().iter() {
-                cmd.arg(arg);
-            }
-        });
+        let extra_args = get_extra_launch_args();
+        for arg in &extra_args {
+            cmd.arg(arg);
+        }
 
         cmd.current_dir(game_dir);
         // stdout/stderr pipen und via tracing loggen (funktioniert auch ohne Terminal)

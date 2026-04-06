@@ -30,6 +30,10 @@ pub fn mods_cache_dir() -> PathBuf {
     launcher_dir().join("cache").join("mods")
 }
 
+pub fn skins_dir() -> PathBuf {
+    launcher_dir().join("skins")
+}
+
 pub fn java_dir() -> PathBuf {
     launcher_dir().join("java")
 }

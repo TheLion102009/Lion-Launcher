@@ -1374,6 +1374,40 @@ pub async fn launch_server(profile_id: String, server_ip: String) -> Result<(), 
     ).await.map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn add_server(profile_id: String, name: String, ip: String) -> Result<(), String> {
+    use crate::core::profiles::ProfileManager;
+
+    tracing::info!("Adding server '{}' ({}) for profile '{}'", name, ip, profile_id);
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    crate::core::minecraft::worlds::add_server(&profile.game_dir, &name, &ip)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remove_server(profile_id: String, ip: String) -> Result<(), String> {
+    use crate::core::profiles::ProfileManager;
+
+    tracing::info!("Removing server '{}' from profile '{}'", ip, profile_id);
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile = profiles.get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    crate::core::minecraft::worlds::remove_server(&profile.game_dir, &ip)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Migriert alte .jar.meta.json Dateien aus mods/ nach modinfos/
 fn migrate_old_metadata(mods_dir: &std::path::Path, modinfos_dir: &std::path::Path) {
     if let Ok(entries) = std::fs::read_dir(mods_dir) {

@@ -430,6 +430,14 @@ function switchPage(page) {
         }
     }
 
+    // Skin-Viewer initialisieren wenn Skins-Seite geöffnet wird
+    if (page === 'skins') {
+        setTimeout(() => {
+            initSkinViewer();
+            updateSkinPage();
+        }, 100);
+    }
+
 
     // Zeige/Verstecke Modpacks Button je nach Kontext
     const modpacksBtn = document.querySelector('[data-content-type="modpacks"]');
@@ -1852,6 +1860,12 @@ function renderProfileTabContent(tabName, profile) {
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <h3 style="color: var(--gold); margin: 0;"><i class="bi bi-display"></i> Server</h3>
                     <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary" onclick="showAddServerModal('${profile.id}')" 
+                                style="padding: 8px 12px; font-size: 12px; border: 2px solid var(--gold); color: var(--gold); background: var(--bg-light);"
+                                onmouseover="this.style.background='var(--gold)'; this.style.color='var(--bg-dark)';"
+                                onmouseout="this.style.background='var(--bg-light)'; this.style.color='var(--gold)';">
+                            <i class="bi bi-plus-lg"></i> Server hinzufügen
+                        </button>
                         <button class="btn btn-secondary" onclick="refreshServers('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
                             <i class="bi bi-arrow-clockwise"></i>
                         </button>
@@ -1862,6 +1876,25 @@ function renderProfileTabContent(tabName, profile) {
                     <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                         <div class="spinner" style="margin: 0 auto 15px;"></div>
                         <p>Lade Server...</p>
+                    </div>
+                </div>
+                
+                <!-- Add Server Modal -->
+                <div id="add-server-modal" class="modal">
+                    <div class="modal-content" style="max-width: 450px;">
+                        <div class="modal-header"><i class="bi bi-plus-circle"></i> Server hinzufügen</div>
+                        <div class="form-group">
+                            <label>Servername</label>
+                            <input type="text" id="add-server-name" placeholder="z.B. Mein Server" style="background: var(--bg-dark);">
+                        </div>
+                        <div class="form-group">
+                            <label>Server-Adresse (IP / Domain)</label>
+                            <input type="text" id="add-server-ip" placeholder="z.B. mc.hypixel.net oder 192.168.1.1:25565" style="background: var(--bg-dark);">
+                        </div>
+                        <div class="modal-actions">
+                            <button class="btn btn-secondary" onclick="hideAddServerModal()">Abbrechen</button>
+                            <button class="btn" onclick="submitAddServer('${profile.id}')"><i class="bi bi-plus-lg"></i> Hinzufügen</button>
+                        </div>
                     </div>
                 </div>
             `;
@@ -3174,6 +3207,14 @@ async function loadServers(profileId) {
     const list = document.getElementById('profile-servers-list');
     if (!list) return;
 
+    // Zeige Loading-Spinner sofort
+    list.innerHTML = `
+        <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+            <div class="spinner" style="margin: 0 auto 15px;"></div>
+            <p>Lade Server & prüfe Status...</p>
+        </div>
+    `;
+
     try {
         const servers = await invoke('get_servers', { profileId });
 
@@ -3183,7 +3224,7 @@ async function loadServers(profileId) {
                     <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-display"></i></div>
                     <p>Keine Server gespeichert</p>
                     <p style="font-size: 14px; margin-top: 10px;">
-                        Starte Minecraft und füge Server hinzu
+                        Klicke auf <b>"+ Server hinzufügen"</b> um einen Server einzutragen
                     </p>
                 </div>
             `;
@@ -3193,29 +3234,58 @@ async function loadServers(profileId) {
         const serversHTML = servers.map(server => {
             // Icon oder Fallback
             const iconHtml = server.icon_base64
-                ? `<img src="${server.icon_base64}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">`
-                : `<div style="font-size: 32px;"><i class="bi bi-display"></i></div>`;
+                ? `<img src="${server.icon_base64}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px; image-rendering: pixelated;">`
+                : `<div style="font-size: 28px; color: var(--text-secondary);"><i class="bi bi-display"></i></div>`;
 
-            // MOTD oder IP als Beschreibung
-            const description = server.motd || server.ip;
+            // Spieleranzahl (grün, rechts)
+            const playerInfo = (server.online_players != null && server.max_players != null)
+                ? `<span style="color: #55FF55; font-family: 'Minecraft', monospace; font-size: 12px; white-space: nowrap; flex-shrink: 0;">${server.online_players}/${server.max_players}</span>`
+                : '';
+
+            // MOTD: HTML-Version mit Minecraft-Farben oder Fallback auf clean/IP
+            let motdHtml = '';
+            if (server.motd_html && server.motd_html.length > 0) {
+                // Jede Zeile als eigene Zeile rendern (wie in Minecraft)
+                motdHtml = server.motd_html.map(line =>
+                    `<div style="white-space: pre; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; text-align: center;">${line}</div>`
+                ).join('');
+            } else if (server.motd) {
+                motdHtml = `<div style="color: #AAAAAA;">${server.motd}</div>`;
+            } else {
+                motdHtml = `<div style="color: #555555;">${server.ip}</div>`;
+            }
+
+            // Escape für onclick
+            const escapedIp = server.ip.replace(/'/g, "\\'");
+            const escapedName = server.name.replace(/'/g, "\\'");
 
             return `
-                <div style="background: var(--bg-light); padding: 12px; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
-                    <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--bg-dark); border-radius: 4px; overflow: hidden;">
-                        ${iconHtml}
-                    </div>
-                    <div style="flex: 1; min-width: 0;">
-                        <div style="color: var(--text-primary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            ${server.name}
+                <div style="background: var(--bg-light); padding: 10px; border-radius: 8px; display: flex; align-items: center; gap: 10px; transition: all 0.2s; border: 2px solid transparent;"
+                     onmouseover="this.style.borderColor='var(--gold)'" onmouseout="this.style.borderColor='transparent'">
+                    <div style="flex: 1; min-width: 0; background: #000000cc; border-radius: 6px; padding: 10px 14px; display: flex; gap: 12px; align-items: center;">
+                        <div style="width: 64px; height: 64px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: #111; border-radius: 4px; overflow: hidden;">
+                            ${iconHtml}
                         </div>
-                        <div style="color: var(--text-secondary); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            ${description}
+                        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+                            <div style="color: #FFFFFF; font-family: 'Minecraft', monospace; font-size: 20px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                ${server.name}
+                            </div>
+                            <div style="font-family: 'Minecraft', monospace; font-size: 16px; text-align: center;">
+                                ${motdHtml}
+                            </div>
                         </div>
                     </div>
-                    <button class="btn btn-gold" onclick="launchServer('${profileId}', '${server.ip}')" 
-                            style="padding: 8px 16px; font-size: 12px;">
-                        <i class="bi bi-play-fill"></i> Join
-                    </button>
+                    ${playerInfo ? `<div style="flex-shrink: 0; padding: 0 4px;">${playerInfo}</div>` : ''}
+                    <div style="display: flex; flex-direction: column; gap: 4px; flex-shrink: 0;">
+                        <button class="btn" onclick="launchServer('${profileId}', '${escapedIp}')" 
+                                style="padding: 8px 16px; font-size: 12px; border-radius: 6px;">
+                            <i class="bi bi-play-fill"></i> Join
+                        </button>
+                        <button class="btn btn-secondary" onclick="removeServer('${profileId}', '${escapedIp}', '${escapedName}')" 
+                                style="padding: 6px 10px; font-size: 11px; border-radius: 6px; color: #f44336;" title="Server entfernen">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
                 </div>
             `;
         }).join('');
@@ -3235,6 +3305,75 @@ async function loadServers(profileId) {
 async function refreshServers(profileId) {
     await loadServers(profileId);
     showToast('Server aktualisiert', 'success', 2000);
+}
+
+function showAddServerModal(profileId) {
+    const modal = document.getElementById('add-server-modal');
+    if (modal) {
+        modal.classList.add('active');
+        // Focus auf erstes Feld
+        setTimeout(() => {
+            const nameInput = document.getElementById('add-server-name');
+            if (nameInput) nameInput.focus();
+        }, 100);
+    }
+}
+
+function hideAddServerModal() {
+    const modal = document.getElementById('add-server-modal');
+    if (modal) {
+        modal.classList.remove('active');
+        // Felder zurücksetzen
+        const nameInput = document.getElementById('add-server-name');
+        const ipInput = document.getElementById('add-server-ip');
+        if (nameInput) nameInput.value = '';
+        if (ipInput) ipInput.value = '';
+    }
+}
+
+async function submitAddServer(profileId) {
+    const nameInput = document.getElementById('add-server-name');
+    const ipInput = document.getElementById('add-server-ip');
+
+    const name = nameInput ? nameInput.value.trim() : '';
+    const ip = ipInput ? ipInput.value.trim() : '';
+
+    if (!name) {
+        showToast('Bitte gib einen Servernamen ein', 'error', 3000);
+        if (nameInput) nameInput.focus();
+        return;
+    }
+    if (!ip) {
+        showToast('Bitte gib eine Server-Adresse ein', 'error', 3000);
+        if (ipInput) ipInput.focus();
+        return;
+    }
+
+    try {
+        showToast(`Server "${name}" wird hinzugefügt...`, 'info', 2000);
+        await invoke('add_server', { profileId, name, ip });
+        showToast(`Server "${name}" hinzugefügt!`, 'success', 3000);
+        hideAddServerModal();
+        await loadServers(profileId);
+    } catch (error) {
+        debugLog('Failed to add server: ' + error, 'error');
+        showToast('Fehler: ' + error, 'error', 5000);
+    }
+}
+
+async function removeServer(profileId, serverIp, serverName) {
+    if (!confirm(`Server "${serverName}" (${serverIp}) wirklich entfernen?`)) {
+        return;
+    }
+
+    try {
+        await invoke('remove_server', { profileId, ip: serverIp });
+        showToast(`Server "${serverName}" entfernt`, 'success', 3000);
+        await loadServers(profileId);
+    } catch (error) {
+        debugLog('Failed to remove server: ' + error, 'error');
+        showToast('Fehler beim Entfernen: ' + error, 'error', 5000);
+    }
 }
 
 async function launchServer(profileId, serverIp) {
@@ -5144,6 +5283,7 @@ if (saveSettingsBtn) {
 
 let activeAccount = null;
 let recentSkins = JSON.parse(localStorage.getItem('recentSkins') || '[]');
+let savedSkins = JSON.parse(localStorage.getItem('savedSkins') || '[]');
 
 async function loadAccounts() {
     try {
@@ -5430,23 +5570,254 @@ async function logoutAccount(uuid) {
     }
 }
 
-// ==================== SKIN VIEWER ====================
+// ==================== SKIN VIEWER (3D) ====================
+
+let skinViewer = null;
+let currentViewingUuid = null;  // UUID des aktuell angezeigten Skins (null = eigener)
+let currentViewingSkinUrl = null; // Skin-URL für "Übernehmen"
+let skinViewerInitialized = false;
+let skinDefaultRotationY = 0;
+let skinDefaultRotationX = 0;
+
+function initSkinViewer() {
+    if (skinViewerInitialized && skinViewer) return;
+    
+    const container = document.getElementById('skin-viewer');
+    const canvas = document.getElementById('skin-canvas');
+    if (!container || !canvas || typeof skinview3d === 'undefined') {
+        debugLog('skinview3d not available, falling back to static image', 'warning');
+        return;
+    }
+
+    // Nicht initialisieren wenn die Seite versteckt ist (0-Größe)
+    const rect = container.getBoundingClientRect();
+    if (rect.width < 10 || rect.height < 10) {
+        debugLog('Skin viewer container not visible yet, deferring init', 'info');
+        return;
+    }
+
+    try {
+        // Zerstöre alten Viewer wenn vorhanden
+        if (skinViewer) {
+            skinViewer.dispose();
+            skinViewer = null;
+        }
+
+        const width = Math.max(Math.min(Math.floor(rect.width) - 20, 280), 100);
+        const height = Math.max(Math.min(Math.floor(rect.height) - 10, 400), 200);
+
+        skinViewer = new skinview3d.SkinViewer({
+            canvas: canvas,
+            width: width,
+            height: height,
+        });
+
+        // Idle-Animation
+        skinViewer.animation = new skinview3d.IdleAnimation();
+        skinViewer.animation.speed = 0.5;
+
+        // Zoom deaktivieren, Rotation erlauben (eingebaute Controls in v3.4.x)
+        skinViewer.controls.enableZoom = false;
+        skinViewer.controls.enablePan = false;
+        skinViewer.controls.enableRotate = true;
+        skinViewer.controls.enableDamping = true;
+        skinViewer.controls.dampingFactor = 0.1;
+        
+        // Speichere Default-Kamera-Position für Reset
+        const defaultCamPos = {
+            x: skinViewer.camera.position.x,
+            y: skinViewer.camera.position.y,
+            z: skinViewer.camera.position.z
+        };
+        
+        // OrbitControls "saveState" für Reset
+        if (skinViewer.controls.saveState) {
+            skinViewer.controls.saveState();
+        }
+
+        // Rotation zurücksetzen wenn Maus losgelassen wird
+        let resetTimeout = null;
+        let isDragging = false;
+        
+        function scheduleReset(delay) {
+            isDragging = false;
+            if (resetTimeout) clearTimeout(resetTimeout);
+            resetTimeout = setTimeout(() => {
+                animateResetRotation(defaultCamPos);
+            }, delay);
+        }
+        
+        canvas.addEventListener('mousedown', () => { isDragging = true; if (resetTimeout) clearTimeout(resetTimeout); });
+        canvas.addEventListener('mouseup', () => scheduleReset(200));
+        canvas.addEventListener('mouseleave', () => { if (isDragging) scheduleReset(300); });
+        canvas.addEventListener('touchstart', () => { isDragging = true; if (resetTimeout) clearTimeout(resetTimeout); });
+        canvas.addEventListener('touchend', () => scheduleReset(200));
+
+        skinViewerInitialized = true;
+        debugLog('skinview3d 3D viewer initialized (' + width + 'x' + height + ')', 'success');
+    } catch (e) {
+        debugLog('Failed to init skinview3d: ' + e, 'error');
+        skinViewerInitialized = false;
+    }
+}
+
+function animateResetRotation(defaultCamPos) {
+    if (!skinViewer) return;
+    
+    const cam = skinViewer.camera;
+    const startX = cam.position.x;
+    const startY = cam.position.y;
+    const startZ = cam.position.z;
+    const targetX = defaultCamPos ? defaultCamPos.x : 0;
+    const targetY = defaultCamPos ? defaultCamPos.y : 0;
+    const targetZ = defaultCamPos ? defaultCamPos.z : 60;
+    
+    // Wenn schon nahe genug, direkt reset
+    const dist = Math.sqrt(
+        Math.pow(startX - targetX, 2) + 
+        Math.pow(startY - targetY, 2) + 
+        Math.pow(startZ - targetZ, 2)
+    );
+    if (dist < 0.1) return;
+    
+    const duration = 500; // ms
+    const startTime = performance.now();
+    
+    // Disable controls während der Animation
+    if (skinViewer.controls) {
+        skinViewer.controls.enableRotate = false;
+    }
+    
+    function animStep(now) {
+        if (!skinViewer) return;
+        
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        // Ease out cubic
+        const ease = 1 - Math.pow(1 - progress, 3);
+        
+        cam.position.x = startX + (targetX - startX) * ease;
+        cam.position.y = startY + (targetY - startY) * ease;
+        cam.position.z = startZ + (targetZ - startZ) * ease;
+        cam.lookAt(0, 0, 0);
+        
+        if (progress < 1) {
+            requestAnimationFrame(animStep);
+        } else {
+            cam.position.set(targetX, targetY, targetZ);
+            cam.lookAt(0, 0, 0);
+            // Controls wieder aktivieren und zurücksetzen
+            if (skinViewer.controls) {
+                if (skinViewer.controls.reset) {
+                    skinViewer.controls.reset();
+                }
+                skinViewer.controls.enableRotate = true;
+            }
+        }
+    }
+    
+    requestAnimationFrame(animStep);
+}
+
+async function loadSkinToViewer(uuid) {
+    if (!skinViewer) {
+        initSkinViewer();
+    }
+    
+    if (skinViewer) {
+        try {
+            // Skin-Textur über Rust proxen (CORS-sicher)
+            const skinDataUrl = await invoke('get_skin_texture', { uuid: uuid });
+            skinViewer.loadSkin(skinDataUrl);
+        } catch (e) {
+            debugLog('Skin proxy failed, trying direct URL: ' + e, 'warning');
+            try {
+                skinViewer.loadSkin(`https://mc-heads.net/skin/${uuid}`);
+            } catch (e2) {
+                debugLog('Direct skin load also failed: ' + e2, 'error');
+            }
+        }
+    }
+}
+
+/**
+ * Rendert den Kopf-Avatar direkt aus einer Skin-Textur (Data-URL oder Image-URL).
+ * Extrahiert das 8x8 Gesicht (Position 8,8) + Overlay (40,8) und skaliert es hoch.
+ * Aktualisiert sofort alle Avatar-Elemente im UI – kein mc-heads.net Cache nötig!
+ */
+function updateAvatarsFromSkinData(skinDataUrl) {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+        try {
+            // Canvas für Kopf-Extraktion
+            const canvas = document.createElement('canvas');
+            const size = 64; // Ausgabegröße
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+
+            // Pixelated rendering für Minecraft-Style
+            ctx.imageSmoothingEnabled = false;
+
+            // Gesicht: 8x8 Pixel ab Position (8, 8) in der Skin-Textur
+            ctx.drawImage(img, 8, 8, 8, 8, 0, 0, size, size);
+
+            // Helm-Overlay: 8x8 Pixel ab Position (40, 8) – drüberlegen
+            ctx.drawImage(img, 40, 8, 8, 8, 0, 0, size, size);
+
+            const headDataUrl = canvas.toDataURL('image/png');
+
+            // Alle Avatar-Elemente sofort aktualisieren
+            const accountHead = document.getElementById('account-head');
+            if (accountHead) accountHead.src = headDataUrl;
+
+            const currentHead = document.getElementById('current-skin-head');
+            if (currentHead) currentHead.src = headDataUrl;
+
+            debugLog('Avatare sofort aus Skin-Textur aktualisiert', 'success');
+        } catch (e) {
+            debugLog('Fehler beim Rendern des Avatars aus Skin: ' + e, 'warning');
+        }
+    };
+    img.onerror = () => {
+        debugLog('Konnte Skin-Bild nicht laden für Avatar-Extraktion', 'warning');
+    };
+    img.src = skinDataUrl;
+}
 
 function updateSkinPage() {
-    const render = document.getElementById('skin-3d-render');
     const playerName = document.getElementById('skin-player-name');
     const currentHead = document.getElementById('current-skin-head');
     const currentName = document.getElementById('current-skin-name');
+    const applyBtn = document.getElementById('skin-apply-btn');
+    const uploadBtn = document.getElementById('skin-upload-btn');
+
+    // Initialisiere 3D-Viewer nur wenn Seite sichtbar
+    const skinsPage = document.getElementById('page-skins');
+    if (skinsPage && !skinsPage.classList.contains('hidden')) {
+        initSkinViewer();
+    }
 
     if (activeAccount) {
         const uuid = activeAccount.uuid;
-        if (render) render.src = `https://mc-heads.net/body/${uuid}/150`;
+        loadSkinToViewer(uuid);
+        currentViewingUuid = null; // Eigener Skin
+        currentViewingSkinUrl = null;
         if (playerName) playerName.textContent = activeAccount.username;
         if (currentHead) currentHead.src = `https://mc-heads.net/avatar/${uuid}/64`;
         if (currentName) currentName.textContent = activeAccount.username;
+        
+        // Upload nur für Microsoft-Accounts
+        if (uploadBtn) uploadBtn.style.display = activeAccount.is_microsoft ? 'block' : 'none';
+        if (applyBtn) applyBtn.style.display = 'none';
+    } else {
+        if (uploadBtn) uploadBtn.style.display = 'none';
+        if (applyBtn) applyBtn.style.display = 'none';
     }
 
     renderRecentSkins();
+    renderSavedSkins();
 }
 
 async function searchPlayerSkin() {
@@ -5459,32 +5830,185 @@ async function searchPlayerSkin() {
     }
 
     try {
-        // Mojang API um UUID zu bekommen
-        const response = await fetch(`https://api.mojang.com/users/profiles/minecraft/${playerName}`);
+        // Mojang API über Rust-Backend (CORS-Proxy)
+        const [uuid, name] = await invoke('resolve_player_uuid', { username: playerName });
 
-        if (!response.ok) {
-            showToast('Spieler nicht gefunden', 'error', 3000);
-            return;
+        // 3D Skin anzeigen
+        loadSkinToViewer(uuid);
+        
+        const nameDisplay = document.getElementById('skin-player-name');
+        if (nameDisplay) nameDisplay.textContent = name;
+
+        // Track viewing state
+        currentViewingUuid = uuid;
+        currentViewingSkinUrl = `https://mc-heads.net/skin/${uuid}`;
+        
+        // "Übernehmen" Button anzeigen wenn nicht eigener Skin
+        const applyBtn = document.getElementById('skin-apply-btn');
+        if (applyBtn) {
+            const isOwnSkin = activeAccount && activeAccount.uuid === uuid;
+            if (!isOwnSkin && activeAccount) {
+                applyBtn.style.display = 'block';
+                if (activeAccount.is_microsoft) {
+                    applyBtn.textContent = `✨ Skin von ${name} übernehmen`;
+                    applyBtn.disabled = false;
+                    applyBtn.style.opacity = '1';
+                } else {
+                    applyBtn.textContent = `🔒 Skin übernehmen (nur Microsoft)`;
+                    applyBtn.disabled = true;
+                    applyBtn.style.opacity = '0.5';
+                }
+            } else {
+                applyBtn.style.display = 'none';
+            }
         }
 
-        const data = await response.json();
-        const uuid = data.id;
-
-        // Skin anzeigen
-        const render = document.getElementById('skin-3d-render');
-        const nameDisplay = document.getElementById('skin-player-name');
-
-        if (render) render.src = `https://mc-heads.net/body/${uuid}/150`;
-        if (nameDisplay) nameDisplay.textContent = data.name;
-
         // Zu "Zuletzt angesehen" hinzufügen
-        addToRecentSkins(data.name, uuid);
+        addToRecentSkins(name, uuid);
 
-        showToast(`Skin von ${data.name} geladen!`, 'success', 2000);
+        showToast(`Skin von ${name} geladen!`, 'success', 2000);
         input.value = '';
 
     } catch (error) {
-        showToast('Fehler beim Laden des Skins', 'error', 3000);
+        showToast('Spieler nicht gefunden: ' + error, 'error', 3000);
+    }
+}
+
+// Skin-Datei hochladen
+async function handleSkinFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.png')) {
+        showToast('Bitte wähle eine PNG-Datei', 'warning', 3000);
+        return;
+    }
+
+    if (file.size > 100 * 1024) { // Max 100KB
+        showToast('Die Datei ist zu groß (max. 100KB)', 'warning', 3000);
+        return;
+    }
+
+    if (!activeAccount || !activeAccount.is_microsoft) {
+        showToast('Skin-Upload funktioniert nur mit Microsoft-Accounts', 'error', 3000);
+        return;
+    }
+
+    try {
+        showToast('Skin wird hochgeladen...', 'info', 5000);
+
+        // Datei als Base64 lesen
+        const base64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                // "data:image/png;base64," Prefix entfernen
+                const result = reader.result.split(',')[1];
+                resolve(result);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+
+        const variant = document.querySelector('input[name="skin-variant"]:checked')?.value || 'classic';
+
+        await invoke('upload_skin_file', { skinData: base64, variant: variant });
+
+        showToast('Skin erfolgreich hochgeladen! 🎉', 'success', 3000);
+
+        // Skin-Vorschau mit der hochgeladenen Datei aktualisieren
+        const dataUrl = `data:image/png;base64,${base64}`;
+        if (skinViewer) {
+            skinViewer.loadSkin(dataUrl);
+        }
+        
+        // Skin lokal speichern für "Gespeichert"-Sektion
+        if (activeAccount) {
+            const skinName = file.name.replace('.png', '') || activeAccount.username;
+            addToSavedSkins(skinName, activeAccount.uuid, dataUrl);
+        }
+        
+        const nameDisplay = document.getElementById('skin-player-name');
+        if (nameDisplay && activeAccount) nameDisplay.textContent = activeAccount.username;
+        
+        currentViewingUuid = null;
+        currentViewingSkinUrl = null;
+        const applyBtn = document.getElementById('skin-apply-btn');
+        if (applyBtn) applyBtn.style.display = 'none';
+
+        // Avatare sofort aus der hochgeladenen Skin-Textur aktualisieren
+        updateAvatarsFromSkinData(dataUrl);
+
+    } catch (error) {
+        showToast('Fehler beim Upload: ' + error, 'error', 5000);
+    }
+
+    // File-Input zurücksetzen
+    event.target.value = '';
+}
+
+// Angezeigten Skin übernehmen
+async function applyViewedSkin() {
+    if (!currentViewingSkinUrl) {
+        showToast('Kein Skin zum Übernehmen ausgewählt', 'warning', 3000);
+        return;
+    }
+
+    if (!activeAccount || !activeAccount.is_microsoft) {
+        showToast('Skin-Änderung funktioniert nur mit Microsoft-Accounts', 'error', 3000);
+        return;
+    }
+
+    try {
+        showToast('Skin wird übernommen...', 'info', 5000);
+
+        const variant = document.querySelector('input[name="skin-variant"]:checked')?.value || 'classic';
+        const savedUuid = currentViewingUuid;
+        const savedName = document.getElementById('skin-player-name')?.textContent || 'Unknown';
+        const savedSkinUrl = currentViewingSkinUrl;
+        
+        // Prüfe ob es eine Data-URL ist (z.B. von gespeichertem Skin)
+        if (currentViewingSkinUrl.startsWith('data:')) {
+            // Data-URL: Base64 extrahieren und als Datei-Upload senden
+            const b64 = currentViewingSkinUrl.split(',')[1];
+            await invoke('upload_skin_file', { skinData: b64, variant: variant });
+        } else {
+            // Normale URL: über apply_skin_from_url herunterladen und senden
+            await invoke('apply_skin_from_url', { skinUrl: currentViewingSkinUrl, variant: variant });
+        }
+
+        showToast('Skin erfolgreich übernommen! 🎉', 'success', 3000);
+
+        // Skin lokal speichern für "Gespeichert"-Sektion
+        if (savedUuid) {
+            try {
+                // Wenn wir schon eine Data-URL haben, direkt verwenden
+                const skinDataUrl = savedSkinUrl.startsWith('data:') 
+                    ? savedSkinUrl 
+                    : await invoke('get_skin_texture', { uuid: savedUuid });
+                addToSavedSkins(savedName, savedUuid, skinDataUrl);
+                // Avatare sofort aus Skin-Textur aktualisieren (kein mc-heads.net Cache!)
+                updateAvatarsFromSkinData(skinDataUrl);
+            } catch (e) {
+                debugLog('Skin konnte nicht gespeichert werden: ' + e, 'warning');
+            }
+        }
+
+        // Button ausblenden
+        const applyBtn = document.getElementById('skin-apply-btn');
+        if (applyBtn) applyBtn.style.display = 'none';
+
+        // Skin ist bereits korrekt im Viewer angezeigt – NICHT von mc-heads.net neu laden,
+        // da mc-heads.net den alten Skin noch gecacht hat!
+        // Nur Name-Label zurücksetzen
+        const nameDisplay = document.getElementById('skin-player-name');
+        if (nameDisplay && activeAccount) nameDisplay.textContent = activeAccount.username;
+
+        currentViewingUuid = null;
+        currentViewingSkinUrl = null;
+
+
+    } catch (error) {
+        showToast('Fehler: ' + error, 'error', 5000);
     }
 }
 
@@ -5492,12 +6016,12 @@ function addToRecentSkins(name, uuid) {
     // Entferne wenn bereits vorhanden
     recentSkins = recentSkins.filter(s => s.uuid !== uuid);
 
-    // Am Anfang hinzufügen
+    // Am Anfang hinzufügen (neueste links)
     recentSkins.unshift({ name, uuid });
 
-    // Max 12 Skins
-    if (recentSkins.length > 12) {
-        recentSkins = recentSkins.slice(0, 12);
+    // Max 10 Skins (eine Zeile)
+    if (recentSkins.length > 10) {
+        recentSkins = recentSkins.slice(0, 10);
     }
 
     localStorage.setItem('recentSkins', JSON.stringify(recentSkins));
@@ -5513,24 +6037,267 @@ function renderRecentSkins() {
         return;
     }
 
-    container.innerHTML = recentSkins.map(skin => `
-        <div onclick="showSkin('${skin.uuid}', '${skin.name}')" 
-             style="cursor: pointer; text-align: center; transition: transform 0.2s;"
-             onmouseover="this.style.transform='scale(1.1)'" 
-             onmouseout="this.style.transform='scale(1)'">
-            <img src="https://mc-heads.net/avatar/${skin.uuid}/48" 
-                 style="width: 48px; height: 48px; border-radius: 6px; image-rendering: pixelated;">
-            <p style="color: var(--text-secondary); font-size: 10px; margin: 3px 0 0 0; max-width: 48px; overflow: hidden; text-overflow: ellipsis;">${skin.name}</p>
-        </div>
-    `).join('');
+    const hasMsAccount = activeAccount && activeAccount.is_microsoft;
+
+    container.innerHTML = recentSkins.map(skin => {
+        const isOwnSkin = activeAccount && activeAccount.uuid === skin.uuid;
+        const showApply = hasMsAccount && !isOwnSkin;
+        return `
+        <div class="skin-thumbnail" onclick="showSkin('${skin.uuid}', '${skin.name}')">
+            <img src="https://mc-heads.net/avatar/${skin.uuid}/48" alt="${skin.name}">
+            <p class="skin-name">${skin.name}</p>
+            ${showApply ? `<button class="skin-action-btn" onclick="event.stopPropagation(); quickApplySkin('${skin.uuid}', '${skin.name}')" 
+                title="Skin übernehmen">✨</button>` : ''}
+        </div>`;
+    }).join('');
+}
+
+// ==================== GESPEICHERTE SKINS ====================
+
+async function addToSavedSkins(name, uuid, skinDataUrl) {
+    // Prüfe ob schon vorhanden
+    const existing = savedSkins.find(s => s.uuid === uuid && s.name === name);
+    if (existing) return; // Nicht doppelt speichern
+    
+    try {
+        // Skin lokal über Rust speichern
+        const filename = await invoke('save_skin_locally', { uuid, name, skinData: skinDataUrl });
+        
+        // Am Anfang hinzufügen (neueste zuerst)
+        savedSkins.unshift({ 
+            name, 
+            uuid, 
+            filename,
+            timestamp: Date.now() 
+        });
+        
+        localStorage.setItem('savedSkins', JSON.stringify(savedSkins));
+        renderSavedSkins();
+        debugLog(`Skin "${name}" lokal gespeichert`, 'success');
+    } catch (e) {
+        debugLog('Fehler beim Speichern des Skins: ' + e, 'error');
+    }
+}
+
+function renderSavedSkins() {
+    const container = document.getElementById('saved-skins');
+    if (!container) return;
+
+    if (savedSkins.length === 0) {
+        container.innerHTML = '<p style="color: var(--text-secondary); font-size: 12px;">Noch keine Skins gespeichert – Equippe einen Skin um ihn hier zu speichern</p>';
+        return;
+    }
+
+    const hasMsAccount = activeAccount && activeAccount.is_microsoft;
+
+    container.innerHTML = savedSkins.map((skin, index) => {
+        const showApply = hasMsAccount;
+        return `
+        <div class="skin-thumbnail">
+            <div onclick="showSavedSkin('${skin.uuid}', '${skin.name}', '${skin.filename || ''}')">
+                <img src="https://mc-heads.net/avatar/${skin.uuid}/48" alt="${skin.name}">
+                <p class="skin-name">${skin.name}</p>
+            </div>
+            ${showApply ? `<button class="skin-action-btn" onclick="event.stopPropagation(); quickApplySavedSkin(${index})" 
+                title="Skin equippen">✨</button>` : ''}
+            <button class="skin-action-btn skin-delete-btn" onclick="event.stopPropagation(); removeSavedSkin(${index})" 
+                title="Aus Gespeichert entfernen" style="top: -4px; left: -4px; right: auto;">🗑</button>
+        </div>`;
+    }).join('');
+}
+
+async function showSavedSkin(uuid, name, filename) {
+    // Versuche Skin vom lokalen Speicher zu laden
+    if (filename) {
+        try {
+            const skinDataUrl = await invoke('load_saved_skin', { filename });
+            if (skinViewer) {
+                if (!skinViewer) initSkinViewer();
+                skinViewer.loadSkin(skinDataUrl);
+            }
+            const nameDisplay = document.getElementById('skin-player-name');
+            if (nameDisplay) nameDisplay.textContent = name;
+            
+            currentViewingUuid = uuid;
+            currentViewingSkinUrl = skinDataUrl; // Lokale Data-URL verwenden
+            
+            // "Übernehmen" Button anzeigen
+            const applyBtn = document.getElementById('skin-apply-btn');
+            if (applyBtn && activeAccount) {
+                const isOwnSkin = activeAccount.uuid === uuid;
+                if (!isOwnSkin && activeAccount.is_microsoft) {
+                    applyBtn.style.display = 'block';
+                    applyBtn.textContent = `✨ Skin von ${name} übernehmen`;
+                    applyBtn.disabled = false;
+                    applyBtn.style.opacity = '1';
+                } else {
+                    applyBtn.style.display = 'none';
+                }
+            }
+            return;
+        } catch (e) {
+            debugLog('Lokaler Skin konnte nicht geladen werden, fallback: ' + e, 'warning');
+        }
+    }
+    // Fallback: normal anzeigen
+    showSkin(uuid, name);
+}
+
+async function quickApplySavedSkin(index) {
+    const skin = savedSkins[index];
+    if (!skin) return;
+    
+    if (!activeAccount || !activeAccount.is_microsoft) {
+        showToast('Skin-Änderung funktioniert nur mit Microsoft-Accounts', 'error', 3000);
+        return;
+    }
+    
+    try {
+        // Lokalen Skin laden und als Datei hochladen
+        let skinData = null;
+        if (skin.filename) {
+            try {
+                skinData = await invoke('load_saved_skin', { filename: skin.filename });
+            } catch (e) {
+                debugLog('Lokaler Skin nicht gefunden, lade von Server: ' + e, 'warning');
+            }
+        }
+        
+        showToast(`Skin "${skin.name}" wird übernommen...`, 'info', 5000);
+        const variant = document.querySelector('input[name="skin-variant"]:checked')?.value || 'classic';
+        
+        if (skinData) {
+            // Base64 Daten extrahieren und als Datei-Upload senden
+            const b64 = skinData.includes(',') ? skinData.split(',')[1] : skinData;
+            await invoke('upload_skin_file', { skinData: b64, variant });
+        } else {
+            // Fallback: von mc-heads.net laden
+            const skinUrl = `https://mc-heads.net/skin/${skin.uuid}`;
+            await invoke('apply_skin_from_url', { skinUrl, variant });
+        }
+        
+        showToast(`Skin "${skin.name}" erfolgreich übernommen! 🎉`, 'success', 3000);
+        
+        // Viewer aktualisieren
+        if (skinData && skinViewer) {
+            skinViewer.loadSkin(skinData);
+        } else {
+            loadSkinToViewer(skin.uuid);
+        }
+        
+        // Avatare sofort aus Skin-Textur aktualisieren
+        if (skinData) {
+            updateAvatarsFromSkinData(skinData);
+        } else {
+            // Fallback: Skin-Textur vom Server laden und Avatar daraus rendern
+            try {
+                const skinDataUrl = await invoke('get_skin_texture', { uuid: skin.uuid });
+                updateAvatarsFromSkinData(skinDataUrl);
+            } catch (e) {
+                debugLog('Avatar-Update fehlgeschlagen: ' + e, 'warning');
+            }
+        }
+        
+        const nameDisplay = document.getElementById('skin-player-name');
+        if (nameDisplay && activeAccount) nameDisplay.textContent = activeAccount.username;
+        
+        currentViewingUuid = null;
+        currentViewingSkinUrl = null;
+        const applyBtn = document.getElementById('skin-apply-btn');
+        if (applyBtn) applyBtn.style.display = 'none';
+        
+    } catch (error) {
+        showToast('Fehler: ' + error, 'error', 5000);
+    }
+}
+
+async function removeSavedSkin(index) {
+    const skin = savedSkins[index];
+    if (!skin) return;
+    
+    // Lokale Datei löschen
+    if (skin.filename) {
+        try {
+            await invoke('delete_saved_skin', { filename: skin.filename });
+        } catch (e) {
+            debugLog('Konnte lokale Skin-Datei nicht löschen: ' + e, 'warning');
+        }
+    }
+    
+    savedSkins.splice(index, 1);
+    localStorage.setItem('savedSkins', JSON.stringify(savedSkins));
+    renderSavedSkins();
+    showToast(`Skin "${skin.name}" entfernt`, 'info', 2000);
 }
 
 function showSkin(uuid, name) {
-    const render = document.getElementById('skin-3d-render');
+    loadSkinToViewer(uuid);
     const nameDisplay = document.getElementById('skin-player-name');
-
-    if (render) render.src = `https://mc-heads.net/body/${uuid}/150`;
     if (nameDisplay) nameDisplay.textContent = name;
+    
+    currentViewingUuid = uuid;
+    currentViewingSkinUrl = `https://mc-heads.net/skin/${uuid}`;
+    
+    // "Übernehmen" Button anzeigen
+    const applyBtn = document.getElementById('skin-apply-btn');
+    if (applyBtn) {
+        const isOwnSkin = activeAccount && activeAccount.uuid === uuid;
+        if (!isOwnSkin && activeAccount) {
+            applyBtn.style.display = 'block';
+            if (activeAccount.is_microsoft) {
+                applyBtn.textContent = `✨ Skin von ${name} übernehmen`;
+                applyBtn.disabled = false;
+                applyBtn.style.opacity = '1';
+            } else {
+                applyBtn.textContent = `🔒 Skin übernehmen (nur Microsoft)`;
+                applyBtn.disabled = true;
+                applyBtn.style.opacity = '0.5';
+            }
+        } else {
+            applyBtn.style.display = 'none';
+        }
+    }
+}
+
+// Schnell-Skin-Übernahme direkt aus der "Zuletzt angesehen"-Liste
+async function quickApplySkin(uuid, name) {
+    if (!activeAccount || !activeAccount.is_microsoft) {
+        showToast('Skin-Änderung funktioniert nur mit Microsoft-Accounts', 'error', 3000);
+        return;
+    }
+    
+    const skinUrl = `https://mc-heads.net/skin/${uuid}`;
+    try {
+        showToast(`Skin von ${name} wird übernommen...`, 'info', 5000);
+        const variant = document.querySelector('input[name="skin-variant"]:checked')?.value || 'classic';
+        await invoke('apply_skin_from_url', { skinUrl: skinUrl, variant: variant });
+        showToast(`Skin von ${name} erfolgreich übernommen! 🎉`, 'success', 3000);
+        
+        // Skin lokal speichern für "Gespeichert"-Sektion
+        try {
+            const skinDataUrl = await invoke('get_skin_texture', { uuid: uuid });
+            addToSavedSkins(name, uuid, skinDataUrl);
+            // Avatare sofort aus Skin-Textur aktualisieren (kein mc-heads.net Cache!)
+            updateAvatarsFromSkinData(skinDataUrl);
+        } catch (e) {
+            debugLog('Skin konnte nicht gespeichert werden: ' + e, 'warning');
+        }
+        
+        // Skin des Quell-Spielers im Viewer anzeigen (das ist jetzt unser neuer Skin)
+        // NICHT von mc-heads.net/activeAccount.uuid laden – dort ist noch der alte Skin gecacht!
+        loadSkinToViewer(uuid);
+        
+        const nameDisplay = document.getElementById('skin-player-name');
+        if (nameDisplay && activeAccount) nameDisplay.textContent = activeAccount.username;
+        
+        currentViewingUuid = null;
+        currentViewingSkinUrl = null;
+        const applyBtn = document.getElementById('skin-apply-btn');
+        if (applyBtn) applyBtn.style.display = 'none';
+        
+    } catch (error) {
+        showToast('Fehler: ' + error, 'error', 5000);
+    }
 }
 
 // Helpers

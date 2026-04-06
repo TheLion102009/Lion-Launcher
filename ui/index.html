@@ -6,6 +6,7 @@
     <title>Lion Launcher</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/skinview3d@3.4.1/bundles/skinview3d.bundle.js"></script>
 </head>
 <body>
     <div class="container">
@@ -227,14 +228,34 @@
                     <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 30px; height: calc(100vh - 180px);">
                         <!-- 3D Skin Viewer -->
                         <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; display: flex; flex-direction: column; align-items: center;">
-                            <h3 style="color: var(--gold); margin: 0 0 20px 0;">Dein Skin</h3>
-                            <div id="skin-viewer" style="flex: 1; width: 100%; display: flex; align-items: center; justify-content: center;">
-                                <img id="skin-3d-render" src="https://mc-heads.net/body/MHF_Steve/150" 
-                                     alt="3D Skin" style="max-height: 400px; image-rendering: pixelated;">
+                            <h3 style="color: var(--gold); margin: 0 0 15px 0;">Dein Skin</h3>
+                            <div id="skin-viewer" style="flex: 1; width: 100%; display: flex; align-items: center; justify-content: center; min-height: 300px;">
+                                <canvas id="skin-canvas"></canvas>
                             </div>
-                            <div style="margin-top: 20px; text-align: center;">
+                            <div style="margin-top: 10px; text-align: center;">
                                 <p id="skin-player-name" style="color: var(--text-primary); font-size: 18px; font-weight: bold;">Steve</p>
-                                <p style="color: var(--text-secondary); font-size: 12px;">Klicke auf einen Skin um ihn anzuzeigen</p>
+                                <p style="color: var(--text-secondary); font-size: 11px;">🖱️ Ziehe mit der Maus um den Skin zu drehen</p>
+                            </div>
+                            <!-- Skin Actions -->
+                            <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px; width: 100%;">
+                                <!-- Variante wählen -->
+                                <div style="display: flex; gap: 8px; justify-content: center;">
+                                    <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px; color: var(--text-secondary);">
+                                        <input type="radio" name="skin-variant" value="classic" checked style="accent-color: var(--gold);"> Classic
+                                    </label>
+                                    <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px; color: var(--text-secondary);">
+                                        <input type="radio" name="skin-variant" value="slim" style="accent-color: var(--gold);"> Slim (Alex)
+                                    </label>
+                                </div>
+                                <!-- Upload Button -->
+                                <input type="file" id="skin-file-input" accept=".png" style="display: none;" onchange="handleSkinFileSelect(event)">
+                                <button class="btn" onclick="document.getElementById('skin-file-input').click()" id="skin-upload-btn" style="width: 100%; padding: 10px;">
+                                    📤 Skin hochladen (.png)
+                                </button>
+                                <!-- Apply from player -->
+                                <button class="btn" onclick="applyViewedSkin()" id="skin-apply-btn" style="width: 100%; padding: 12px; display: none; font-weight: bold; font-size: 14px;">
+                                    ✨ Diesen Skin übernehmen
+                                </button>
                             </div>
                         </div>
                         
@@ -258,14 +279,21 @@
                                 <h3 style="color: var(--gold); margin: 0 0 15px 0;">Spieler-Skin anzeigen</h3>
                                 <div style="display: flex; gap: 10px; margin-bottom: 15px;">
                                     <input type="text" id="skin-search-input" placeholder="Spielername eingeben..." 
-                                           style="flex: 1; padding: 12px; background: var(--bg-dark); border: 2px solid var(--bg-light); border-radius: 8px; color: var(--text-primary);">
+                                           style="flex: 1; padding: 12px; background: var(--bg-dark); border: 2px solid var(--bg-light); border-radius: 8px; color: var(--text-primary);"
+                                           onkeydown="if(event.key==='Enter')searchPlayerSkin()">
                                     <button class="btn" onclick="searchPlayerSkin()">Anzeigen</button>
                                 </div>
                                 
-                                <!-- Zuletzt angesehene Skins -->
-                                <h4 style="color: var(--text-secondary); margin: 15px 0 10px 0; font-size: 14px;">Zuletzt angesehen</h4>
-                                <div id="recent-skins" style="display: flex; flex-wrap: wrap; gap: 10px; overflow-y: auto;">
+                                <!-- Zuletzt angesehene Skins (eine Zeile, horizontal scrollbar) -->
+                                <h4 style="color: var(--text-secondary); margin: 10px 0 8px 0; font-size: 14px;">Zuletzt angesehen</h4>
+                                <div id="recent-skins" class="skin-row-single">
                                     <p style="color: var(--text-secondary); font-size: 12px;">Noch keine Skins angesehen</p>
+                                </div>
+
+                                <!-- Gespeicherte Skins (unbegrenzt, vertikal scrollbar) -->
+                                <h4 style="color: var(--text-secondary); margin: 15px 0 8px 0; font-size: 14px;">💾 Gespeichert</h4>
+                                <div id="saved-skins" class="skin-grid-saved">
+                                    <p style="color: var(--text-secondary); font-size: 12px;">Noch keine Skins gespeichert – Equippe einen Skin um ihn hier zu speichern</p>
                                 </div>
                             </div>
                         </div>

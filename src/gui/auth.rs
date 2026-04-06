@@ -219,6 +219,317 @@ pub async fn refresh_account(uuid: String) -> Result<AccountInfo, String> {
     Ok(account_info)
 }
 
+#[tauri::command]
+pub async fn upload_skin_file(skin_data: String, variant: String) -> Result<(), String> {
+    use base64::{Engine as _, engine::general_purpose};
+
+    let (_, _, access_token) = get_active_access_token_refreshed()
+        .await
+        .ok_or_else(|| "Kein aktiver Microsoft-Account gefunden".to_string())?;
+
+    // Prüfe ob es ein Microsoft-Account ist
+    {
+        let state = AUTH_STATE.lock().await;
+        if let Some(active_uuid) = &state.active_account {
+            if let Some(acc) = state.accounts.iter().find(|a| &a.uuid == active_uuid) {
+                if !acc.is_microsoft {
+                    return Err("Skin-Upload funktioniert nur mit Microsoft-Accounts".to_string());
+                }
+            }
+        }
+    }
+
+    // Base64 dekodieren
+    let skin_bytes = general_purpose::STANDARD.decode(&skin_data)
+        .map_err(|e| format!("Ungültige Skin-Daten: {}", e))?;
+
+    let skin_variant = if variant == "slim" { "slim" } else { "classic" };
+
+    let client = reqwest::Client::new();
+    let part = reqwest::multipart::Part::bytes(skin_bytes)
+        .file_name("skin.png")
+        .mime_str("image/png")
+        .map_err(|e| e.to_string())?;
+
+    let form = reqwest::multipart::Form::new()
+        .text("variant", skin_variant.to_string())
+        .part("file", part);
+
+    let response = client
+        .post("https://api.minecraftservices.com/minecraft/profile/skins")
+        .header("Authorization", format!("Bearer {}", access_token))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("Fehler beim Upload: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Skin-Upload fehlgeschlagen ({}): {}", status, body));
+    }
+
+    tracing::info!("Skin erfolgreich hochgeladen!");
+    Ok(())
+}
+
+/// Skin von URL übernehmen (z.B. von einem anderen Spieler)
+/// Lädt den Skin erst herunter und sendet ihn dann als Multipart-Upload,
+/// da die Mojang-API nur URLs von textures.minecraft.net akzeptiert.
+#[tauri::command]
+pub async fn apply_skin_from_url(skin_url: String, variant: String) -> Result<(), String> {
+    let (_, _, access_token) = get_active_access_token_refreshed()
+        .await
+        .ok_or_else(|| "Kein aktiver Microsoft-Account gefunden".to_string())?;
+
+    // Prüfe ob es ein Microsoft-Account ist
+    {
+        let state = AUTH_STATE.lock().await;
+        if let Some(active_uuid) = &state.active_account {
+            if let Some(acc) = state.accounts.iter().find(|a| &a.uuid == active_uuid) {
+                if !acc.is_microsoft {
+                    return Err("Skin-Änderung funktioniert nur mit Microsoft-Accounts".to_string());
+                }
+            }
+        }
+    }
+
+    let skin_variant = if variant == "slim" { "slim" } else { "classic" };
+
+    let client = reqwest::Client::builder()
+        .user_agent("Lion-Launcher/1.0")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // Skin-Textur zuerst herunterladen
+    let download_response = client
+        .get(&skin_url)
+        .send()
+        .await
+        .map_err(|e| format!("Fehler beim Herunterladen des Skins: {}", e))?;
+
+    if !download_response.status().is_success() {
+        return Err(format!("Skin konnte nicht heruntergeladen werden ({})", download_response.status()));
+    }
+
+    let skin_bytes = download_response.bytes().await
+        .map_err(|e| format!("Fehler beim Lesen der Skin-Daten: {}", e))?;
+
+    // Als Multipart-Upload an Mojang senden
+    let part = reqwest::multipart::Part::bytes(skin_bytes.to_vec())
+        .file_name("skin.png")
+        .mime_str("image/png")
+        .map_err(|e| e.to_string())?;
+
+    let form = reqwest::multipart::Form::new()
+        .text("variant", skin_variant.to_string())
+        .part("file", part);
+
+    let response = client
+        .post("https://api.minecraftservices.com/minecraft/profile/skins")
+        .header("Authorization", format!("Bearer {}", access_token))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("Fehler beim Skin-Wechsel: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body_text = response.text().await.unwrap_or_default();
+        return Err(format!("Skin-Wechsel fehlgeschlagen ({}): {}", status, body_text));
+    }
+
+    tracing::info!("Skin erfolgreich von URL übernommen!");
+    Ok(())
+}
+
+/// Skin-Textur als Base64 Data-URL proxen (CORS-Umgehung für skinview3d)
+/// Holt den Skin direkt von Mojang's Session-Server (kein Cache wie mc-heads.net),
+/// damit nach einem Skin-Wechsel sofort der neue Skin angezeigt wird.
+#[tauri::command]
+pub async fn get_skin_texture(uuid: String) -> Result<String, String> {
+    use base64::{Engine as _, engine::general_purpose};
+
+    let client = reqwest::Client::builder()
+        .user_agent("Lion-Launcher/1.0")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // UUID ohne Bindestriche für Mojang API
+    let clean_uuid = uuid.replace('-', "");
+
+    // 1. Profil von Mojang's Session-Server holen (kein Cache!)
+    let profile_url = format!(
+        "https://sessionserver.mojang.com/session/minecraft/profile/{}",
+        clean_uuid
+    );
+
+    let profile_response = client
+        .get(&profile_url)
+        .send()
+        .await
+        .map_err(|e| format!("Fehler beim Laden des Profils: {}", e))?;
+
+    if !profile_response.status().is_success() {
+        // Fallback auf mc-heads.net für Offline-/unbekannte UUIDs
+        tracing::warn!("Mojang Session-Server gab {} zurück, Fallback auf mc-heads.net", profile_response.status());
+        return get_skin_texture_fallback(&client, &uuid).await;
+    }
+
+    let profile: serde_json::Value = profile_response.json().await
+        .map_err(|e| format!("Ungültige Profil-Antwort: {}", e))?;
+
+    // 2. Textures-Property aus dem Profil extrahieren und dekodieren
+    let skin_url = profile["properties"].as_array()
+        .and_then(|props| props.iter().find(|p| p["name"].as_str() == Some("textures")))
+        .and_then(|prop| prop["value"].as_str())
+        .and_then(|b64_value| general_purpose::STANDARD.decode(b64_value).ok())
+        .and_then(|decoded_bytes| String::from_utf8(decoded_bytes).ok())
+        .and_then(|json_str| serde_json::from_str::<serde_json::Value>(&json_str).ok())
+        .and_then(|textures| {
+            textures["textures"]["SKIN"]["url"].as_str().map(|s| s.to_string())
+        });
+
+    let skin_url = match skin_url {
+        Some(url) => url,
+        None => {
+            tracing::warn!("Keine Skin-URL im Profil gefunden, Fallback auf mc-heads.net");
+            return get_skin_texture_fallback(&client, &uuid).await;
+        }
+    };
+
+    // 3. Skin-Textur direkt von textures.minecraft.net herunterladen
+    let skin_response = client
+        .get(&skin_url)
+        .send()
+        .await
+        .map_err(|e| format!("Fehler beim Laden der Skin-Textur: {}", e))?;
+
+    if !skin_response.status().is_success() {
+        return Err(format!("Skin nicht gefunden ({})", skin_response.status()));
+    }
+
+    let bytes = skin_response.bytes().await.map_err(|e| e.to_string())?;
+    let encoded = general_purpose::STANDARD.encode(&bytes);
+
+    Ok(format!("data:image/png;base64,{}", encoded))
+}
+
+/// Fallback: Skin von mc-heads.net holen (für Offline-Accounts oder wenn Mojang API fehlschlägt)
+async fn get_skin_texture_fallback(client: &reqwest::Client, uuid: &str) -> Result<String, String> {
+    use base64::{Engine as _, engine::general_purpose};
+
+    let url = format!("https://mc-heads.net/skin/{}", uuid);
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Fehler beim Laden der Skin-Textur: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Skin nicht gefunden ({})", response.status()));
+    }
+
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    let encoded = general_purpose::STANDARD.encode(&bytes);
+
+    Ok(format!("data:image/png;base64,{}", encoded))
+}
+
+/// Skin lokal speichern (wird beim Equip aufgerufen)
+/// Speichert die Skin-Textur als PNG unter skins/{name}_{uuid}.png
+#[tauri::command]
+pub async fn save_skin_locally(uuid: String, name: String, skin_data: String) -> Result<String, String> {
+    use base64::{Engine as _, engine::general_purpose};
+
+    let skins_dir = crate::config::defaults::skins_dir();
+    std::fs::create_dir_all(&skins_dir).map_err(|e| format!("Konnte Skins-Verzeichnis nicht erstellen: {}", e))?;
+
+    // Base64 data URL dekodieren
+    let b64 = if skin_data.contains(",") {
+        skin_data.split(',').nth(1).unwrap_or(&skin_data).to_string()
+    } else {
+        skin_data
+    };
+
+    let bytes = general_purpose::STANDARD.decode(&b64)
+        .map_err(|e| format!("Ungültige Skin-Daten: {}", e))?;
+
+    let clean_name = name.replace(|c: char| !c.is_alphanumeric() && c != '_' && c != '-', "_");
+    let filename = format!("{}_{}.png", clean_name, uuid.replace('-', ""));
+    let path = skins_dir.join(&filename);
+
+    std::fs::write(&path, &bytes).map_err(|e| format!("Fehler beim Speichern: {}", e))?;
+
+    tracing::info!("Skin lokal gespeichert: {}", path.display());
+    Ok(filename)
+}
+
+/// Lokal gespeicherten Skin als Base64 Data-URL laden
+#[tauri::command]
+pub async fn load_saved_skin(filename: String) -> Result<String, String> {
+    use base64::{Engine as _, engine::general_purpose};
+
+    let path = crate::config::defaults::skins_dir().join(&filename);
+
+    if !path.exists() {
+        return Err("Skin-Datei nicht gefunden".to_string());
+    }
+
+    let bytes = std::fs::read(&path).map_err(|e| format!("Fehler beim Lesen: {}", e))?;
+    let encoded = general_purpose::STANDARD.encode(&bytes);
+
+    Ok(format!("data:image/png;base64,{}", encoded))
+}
+
+/// Lokal gespeicherten Skin löschen
+#[tauri::command]
+pub async fn delete_saved_skin(filename: String) -> Result<(), String> {
+    let path = crate::config::defaults::skins_dir().join(&filename);
+
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| format!("Fehler beim Löschen: {}", e))?;
+        tracing::info!("Skin gelöscht: {}", path.display());
+    }
+
+    Ok(())
+}
+
+/// Spieler-UUID über Mojang API auflösen (CORS-Proxy)
+#[tauri::command]
+pub async fn resolve_player_uuid(username: String) -> Result<(String, String), String> {
+
+    let url = format!("https://api.mojang.com/users/profiles/minecraft/{}", username);
+
+    let client = reqwest::Client::builder()
+        .user_agent("Lion-Launcher/1.0")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Fehler bei Mojang API: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err("Spieler nicht gefunden".to_string());
+    }
+
+    let data: serde_json::Value = response.json().await
+        .map_err(|e| format!("Ungültige Antwort: {}", e))?;
+
+    let uuid = data["id"].as_str()
+        .ok_or_else(|| "Keine UUID in Antwort".to_string())?
+        .to_string();
+    let name = data["name"].as_str()
+        .ok_or_else(|| "Kein Name in Antwort".to_string())?
+        .to_string();
+
+    Ok((uuid, name))
+}
+
 /// Öffnet eine URL im Standard-Browser
 #[tauri::command]
 pub async fn open_auth_url(url: String) -> Result<(), String> {
