@@ -106,26 +106,24 @@ jobs:
       - name: Tauri CLI installieren
         run: cargo install tauri-cli --version "^2" --locked
 
-      - name: tauri.conf.json patchen – Konsolen-Subsystem + Dev-Identifier
+      - name: tauri.conf.json patchen – Dev-Identifier
         shell: pwsh
         run: |
           $conf = Get-Content "tauri.conf.json" -Raw | ConvertFrom-Json
-          # Windows-Subsystem auf "console" setzen → Konsolenfenster bleibt offen
-          if (-not $conf.bundle.PSObject.Properties["windows"]) {
-            $conf.bundle | Add-Member -MemberType NoteProperty -Name "windows" -Value ([PSCustomObject]@{})
-          }
-          $conf.bundle.windows | Add-Member -MemberType NoteProperty -Name "subsystem" -Value "console" -Force
           # Produktname anpassen damit es sich vom Release unterscheidet
           $conf.productName = "Lion Launcher Dev"
           $conf | ConvertTo-Json -Depth 20 | Set-Content "tauri.conf.json"
-          Write-Host "✓ tauri.conf.json gepatcht (subsystem=console, productName=Lion Launcher Dev)"
+          Write-Host "✓ tauri.conf.json gepatcht (productName=Lion Launcher Dev)"
 
-      - name: Windows Dev-Build (Debug + Konsole)
+      - name: Windows Dev-Build (Debug + Konsole via RUSTFLAGS)
         run: cargo tauri build --debug
         env:
           TAURI_SIGNING_PRIVATE_KEY: ""
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
           RUST_LOG: "debug"
+          # /SUBSYSTEM:CONSOLE überschreibt das standard Windows-Subsystem →
+          # beim Start öffnet sich automatisch ein Konsolenfenster mit allen Logs
+          RUSTFLAGS: "-C link-arg=/SUBSYSTEM:CONSOLE"
 
       - name: Dev-EXE hochladen
         uses: actions/upload-artifact@v4
