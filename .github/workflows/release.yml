@@ -82,6 +82,61 @@ jobs:
           retention-days: 30
 
   # ─────────────────────────────────────────────────────────────
+  #  Windows – Dev .exe  (Debug-Build + Konsolenfenster sichtbar)
+  # ─────────────────────────────────────────────────────────────
+  build-windows-dev:
+    name: Windows Dev-EXE (Konsole sichtbar)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust stable installieren
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust-Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: windows-dev
+
+      - name: Tauri CLI installieren
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: tauri.conf.json patchen – Konsolen-Subsystem + Dev-Identifier
+        shell: pwsh
+        run: |
+          $conf = Get-Content "tauri.conf.json" -Raw | ConvertFrom-Json
+          # Windows-Subsystem auf "console" setzen → Konsolenfenster bleibt offen
+          if (-not $conf.bundle.PSObject.Properties["windows"]) {
+            $conf.bundle | Add-Member -MemberType NoteProperty -Name "windows" -Value ([PSCustomObject]@{})
+          }
+          $conf.bundle.windows | Add-Member -MemberType NoteProperty -Name "subsystem" -Value "console" -Force
+          # Produktname anpassen damit es sich vom Release unterscheidet
+          $conf.productName = "Lion Launcher Dev"
+          $conf | ConvertTo-Json -Depth 20 | Set-Content "tauri.conf.json"
+          Write-Host "✓ tauri.conf.json gepatcht (subsystem=console, productName=Lion Launcher Dev)"
+
+      - name: Windows Dev-Build (Debug + Konsole)
+        run: cargo tauri build --debug
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          RUST_LOG: "debug"
+
+      - name: Dev-EXE hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-dev-exe
+          path: |
+            target/debug/bundle/nsis/*.exe
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────
   #  Linux – .deb + .rpm
   # ─────────────────────────────────────────────────────────────
   build-linux:
@@ -141,12 +196,19 @@ jobs:
   create-release:
     name: GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-windows, build-linux]
+    needs: [build-windows, build-windows-dev, build-linux]
     if: startsWith(github.ref, 'refs/tags/')
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Windows Dev-EXE herunterladen
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-dev-exe
+          path: release-artifacts/windows-dev
+        continue-on-error: true
 
       - name: Windows Installer herunterladen
         uses: actions/download-artifact@v4
@@ -189,6 +251,7 @@ jobs:
             | Plattform | Paket |
             |-----------|-------|
             | Windows   | `Lion Launcher_*_x64-setup.exe` – NSIS Installer (enthält WebView2) |
+            | Windows   | `Lion Launcher Dev_*_x64-setup.exe` – Dev-Build (Konsolenfenster sichtbar) |
             | Linux     | `lion-launcher_*.deb` – Debian/Ubuntu |
             | Linux     | `lion-launcher-*.rpm` – Fedora/openSUSE |
 

@@ -1,19 +1,4 @@
 #!/bin/bash
-# ============================================================
-#  Lion Launcher – VOLLSTÄNDIGER RELEASE BUILD
-#
-#  Erstellt alle Pakete:
-#    Linux  →  .deb  |  .rpm  (lokal gebaut)
-#    Windows→  .exe  (NSIS Installer via GitHub Actions)
-#
-#  Die .exe kann NICHT auf Linux gebaut werden (Tauri 2 braucht
-#  MSVC + NSIS + WebView2 Bootstrapper — alles Windows-only).
-#  Deshalb baut GitHub Actions die .exe automatisch.
-#
-#  Nutzung:
-#    ./scripts/release.sh              # Baut .deb + .rpm lokal
-#    ./scripts/release.sh --tag v0.1.0 # Baut lokal + pusht Tag → .exe via CI
-# ============================================================
 
 set -e
 
