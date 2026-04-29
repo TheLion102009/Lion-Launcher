@@ -1,0 +1,75 @@
+app-id: com.lionlauncher.dev
+runtime: org.gnome.Platform
+runtime-version: '46'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: lion-launcher
+
+finish-args:
+  # Netzwerk (Mod-Downloads, Auth)
+  - --share=network
+  # IPC für X11-Unterstützung
+  - --share=ipc
+  # X11 + XWayland
+  - --socket=x11
+  # Native Wayland
+  - --socket=wayland
+  # GPU-Zugriff (für JavaFX / Minecraft Rendering)
+  - --device=dri
+  # Home-Verzeichnis (Profiles, JVM, Minecraft-Instanzen)
+  - --filesystem=home
+  # Secrets (z.B. Keyring für Microsoft-Auth)
+  - --talk-name=org.freedesktop.secrets
+  # Benachrichtigungen
+  - --talk-name=org.freedesktop.Notifications
+  # Portals für Dateidialoge
+  - --talk-name=org.freedesktop.portal.Desktop
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/lion-launcher/cargo
+    RUST_BACKTRACE: '1'
+
+modules:
+  # Abhängigkeit: libsoup3 (für Tauri/WebKit HTTP)
+  - name: libsoup3
+    buildsystem: meson
+    sources:
+      - type: git
+        url: https://gitlab.gnome.org/GNOME/libsoup.git
+        tag: 3.6.0
+    config-opts:
+      - -Dvapi=disabled
+      - -Dgobject_introspection=disabled
+      - -Dtests=false
+
+  # Haupt-App
+  - name: lion-launcher
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/lion-launcher/cargo
+        WEBKIT_DISABLE_DMABUF_RENDERER: '1'
+        WEBKIT_DISABLE_COMPOSITING_MODE: '1'
+    build-commands:
+      # Rust-Toolchain aktivieren
+      - /usr/lib/sdk/rust-stable/bin/rustup target add x86_64-unknown-linux-gnu
+      # Release-Build
+      - cargo build --release --locked
+      # Binary installieren
+      - install -Dm755 target/release/Lion-Launcher /app/bin/lion-launcher
+      # Desktop-Entry
+      - install -Dm644 flatpak/com.lionlauncher.dev.desktop /app/share/applications/com.lionlauncher.dev.desktop
+      # Icons
+      - install -Dm644 icons/32x32.png /app/share/icons/hicolor/32x32/apps/com.lionlauncher.dev.png
+      - install -Dm644 icons/128x128.png /app/share/icons/hicolor/128x128/apps/com.lionlauncher.dev.png
+      - install -Dm644 icons/icon.png /app/share/icons/hicolor/256x256/apps/com.lionlauncher.dev.png
+      # AppStream-Metadaten
+      - install -Dm644 flatpak/com.lionlauncher.dev.metainfo.xml /app/share/metainfo/com.lionlauncher.dev.metainfo.xml
+    sources:
+      - type: dir
+        path: ..
+

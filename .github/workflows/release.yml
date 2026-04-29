@@ -1,269 +1,515 @@
-name: Release Build
+name: 🦁 Release Build
 
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:   # Manuell über GitHub UI auslösbar
-
-permissions:
-  contents: write
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (z.B. 0.1.0)'
+        required: false
+        default: '0.1.0'
 
 env:
+  WEBKIT_DISABLE_DMABUF_RENDERER: 1
+  WEBKIT_DISABLE_COMPOSITING_MODE: 1
+  RUST_BACKTRACE: 1
   CARGO_TERM_COLOR: always
 
+# ─────────────────────────────────────────────────────────────
+#  Job 1: Debian (.deb) + RPM (.rpm)  →  ubuntu-22.04
+# ─────────────────────────────────────────────────────────────
 jobs:
-  # ─────────────────────────────────────────────────────────────
-  #  Windows – NSIS Installer (.exe)  mit eingebettetem WebView2
-  # ─────────────────────────────────────────────────────────────
-  build-windows:
-    name: Windows NSIS Installer
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Rust stable installieren
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Rust-Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: '. -> target'
-
-      - name: Tauri CLI installieren
-        run: cargo install tauri-cli --version "^2" --locked
-
-      - name: Windows-Build (NSIS .exe)
-        run: cargo tauri build
-        env:
-          # WebView2 Bootstrapper wird automatisch heruntergeladen und
-          # in den Installer eingebettet (embedBootstrapper in tauri.conf.json)
-          TAURI_SIGNING_PRIVATE_KEY: ""
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-
-      - name: WebView2-Bootstrapper im Installer verifizieren
-        shell: pwsh
-        run: |
-          Write-Host "=== WebView2 Bootstrapper Verification ==="
-          # Prüfe tauri.conf.json
-          $conf = Get-Content "tauri.conf.json" | ConvertFrom-Json
-          $mode = $conf.bundle.windows.webviewInstallMode.type
-          Write-Host "WebView install mode: $mode"
-          if ($mode -ne "embedBootstrapper") {
-            Write-Host "ERROR: webviewInstallMode ist nicht embedBootstrapper!"
-            exit 1
-          }
-          Write-Host "✓ embedBootstrapper konfiguriert"
-
-          # Prüfe ob NSIS Installer existiert und groß genug ist (>1MB = WebView2 drin)
-          $nsisDir = "target\release\bundle\nsis"
-          $exeFiles = Get-ChildItem -Path $nsisDir -Filter "*.exe" -Recurse -ErrorAction Stop
-          foreach ($f in $exeFiles) {
-            $sizeMB = [math]::Round($f.Length / 1MB, 2)
-            Write-Host "Installer: $($f.Name) ($sizeMB MB)"
-            if ($f.Length -lt 1048576) {
-              Write-Host "WARNING: Installer kleiner als 1MB — WebView2 fehlt möglicherweise!"
-            } else {
-              Write-Host "✓ Installer-Größe OK (WebView2 Bootstrapper eingebettet)"
-            }
-          }
-
-      - name: NSIS Installer hochladen
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-nsis-installer
-          path: |
-            target/release/bundle/nsis/*.exe
-          if-no-files-found: error
-          retention-days: 30
-
-  # ─────────────────────────────────────────────────────────────
-  #  Windows – Dev .exe  (Debug-Build + Konsolenfenster sichtbar)
-  # ─────────────────────────────────────────────────────────────
-  build-windows-dev:
-    name: Windows Dev-EXE (Konsole sichtbar)
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Rust stable installieren
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Rust-Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: '. -> target'
-          key: windows-dev
-
-      - name: Tauri CLI installieren
-        run: cargo install tauri-cli --version "^2" --locked
-
-      - name: tauri.conf.json patchen – Dev-Identifier
-        shell: pwsh
-        run: |
-          $conf = Get-Content "tauri.conf.json" -Raw | ConvertFrom-Json
-          # Produktname anpassen damit es sich vom Release unterscheidet
-          $conf.productName = "Lion Launcher Dev"
-          $conf | ConvertTo-Json -Depth 20 | Set-Content "tauri.conf.json"
-          Write-Host "✓ tauri.conf.json gepatcht (productName=Lion Launcher Dev)"
-
-      - name: Windows Dev-Build (Debug + Konsole via RUSTFLAGS)
-        run: cargo tauri build --debug
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ""
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-          RUST_LOG: "debug"
-          # /SUBSYSTEM:CONSOLE überschreibt das standard Windows-Subsystem →
-          # beim Start öffnet sich automatisch ein Konsolenfenster mit allen Logs
-          RUSTFLAGS: "-C link-arg=/SUBSYSTEM:CONSOLE"
-
-      - name: Dev-EXE hochladen
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-dev-exe
-          path: |
-            target/debug/bundle/nsis/*.exe
-          if-no-files-found: warn
-          retention-days: 14
-
-  # ─────────────────────────────────────────────────────────────
-  #  Linux – .deb + .rpm
-  # ─────────────────────────────────────────────────────────────
-  build-linux:
-    name: Linux Pakete (deb + rpm)
+  build-deb-rpm:
+    name: 📦 Linux – .deb & .rpm
     runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: System-Abhängigkeiten installieren
+      - name: System-Abhängigkeiten (Ubuntu/Debian)
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libgtk-3-dev \
             libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            libgtk-3-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
+            libsoup-3.0-dev \
             patchelf \
-            libssl-dev \
-            pkg-config
+            curl wget file rpm \
+            fakeroot dpkg-dev
 
-      - name: Rust stable installieren
+      - name: Rust Toolchain einrichten
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Rust-Cache
+      - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: '. -> target'
+          key: deb-rpm
 
       - name: Tauri CLI installieren
         run: cargo install tauri-cli --version "^2" --locked
 
-      - name: Linux-Build (.deb + .rpm)
-        run: cargo tauri build
-        env:
-          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
-          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+      - name: 🔨 Build .deb + .rpm
+        run: cargo tauri build --bundles deb,rpm
 
-      - name: .deb Paket hochladen
+      - name: Pakete sammeln
+        run: |
+          mkdir -p dist
+          find target/release/bundle -name "*.deb" -exec cp {} dist/ \;
+          find target/release/bundle -name "*.rpm" -exec cp {} dist/ \;
+          ls -lh dist/
+
+      - name: SHA256 Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload .deb
         uses: actions/upload-artifact@v4
         with:
           name: linux-deb
-          path: target/release/bundle/deb/*.deb
-          if-no-files-found: warn
+          path: dist/*.deb
+          if-no-files-found: error
 
-      - name: .rpm Paket hochladen
+      - name: Upload .rpm
         uses: actions/upload-artifact@v4
         with:
           name: linux-rpm
-          path: target/release/bundle/rpm/*.rpm
-          if-no-files-found: warn
+          path: dist/*.rpm
+          if-no-files-found: error
 
-  # ─────────────────────────────────────────────────────────────
-  #  GitHub Release erstellen (nur bei Tags)
-  # ─────────────────────────────────────────────────────────────
-  create-release:
-    name: GitHub Release
-    runs-on: ubuntu-latest
-    needs: [build-windows, build-windows-dev, build-linux]
-    if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload Checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-checksums
+          path: dist/SHA256SUMS.txt
+
+# ─────────────────────────────────────────────────────────────
+#  Job 2: AppImage (.AppImage)
+# ─────────────────────────────────────────────────────────────
+  build-appimage:
+    name: 📦 Linux – AppImage
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Windows Dev-EXE herunterladen
+      - name: System-Abhängigkeiten
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            patchelf curl wget file \
+            squashfs-tools
+
+      - name: Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: appimage
+
+      - name: Tauri CLI installieren
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: 🔨 Build AppImage
+        run: cargo tauri build --bundles appimage
+
+      - name: AppImage sammeln
+        run: |
+          mkdir -p dist
+          find target/release/bundle -name "*.AppImage" -exec cp {} dist/ \;
+          ls -lh dist/
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: dist/*.AppImage
+          if-no-files-found: warn
+
+# ─────────────────────────────────────────────────────────────
+#  Job 3: Snap (.snap)  →  ubuntu-22.04 + snapcraft
+# ─────────────────────────────────────────────────────────────
+  build-snap:
+    name: 📦 Linux – .snap
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: snap
+
+      - name: 🔨 Build Snap
+        uses: snapcore/action-build@v1
+        id: snap-build
+        with:
+          snapcraft-channel: stable
+
+      - name: Snap sammeln
+        run: |
+          mkdir -p dist
+          cp "${{ steps.snap-build.outputs.snap }}" dist/
+          ls -lh dist/
+
+      - name: Upload .snap
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-snap
+          path: dist/*.snap
+          if-no-files-found: error
+
+      # Optional: Snap veröffentlichen (benötigt SNAPCRAFT_STORE_CREDENTIALS Secret)
+      # - name: Snap veröffentlichen
+      #   uses: snapcore/action-publish@v1
+      #   env:
+      #     SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+      #   with:
+      #     snap: ${{ steps.snap-build.outputs.snap }}
+      #     release: stable
+
+# ─────────────────────────────────────────────────────────────
+#  Job 4: Flatpak (.flatpak + .flatpakref)  →  ubuntu-22.04
+# ─────────────────────────────────────────────────────────────
+  build-flatpak:
+    name: 📦 Linux – Flatpak
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Flatpak + Builder + GNOME SDK installieren
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y --noninteractive flathub \
+            org.gnome.Platform//46 \
+            org.gnome.Sdk//46 \
+            org.freedesktop.Sdk.Extension.rust-stable//23.08 || true
+
+      - name: 🔨 Flatpak bauen
+        run: |
+          flatpak-builder \
+            --repo=flatpak-repo \
+            --force-clean \
+            --disable-rofiles-fuse \
+            flatpak-build \
+            flatpak/com.lionlauncher.dev.yml
+
+      - name: Flatpak Bundle (.flatpak) erstellen
+        run: |
+          mkdir -p dist
+          flatpak build-bundle \
+            flatpak-repo \
+            dist/lion-launcher.flatpak \
+            com.lionlauncher.dev
+
+      - name: .flatpakref Datei erstellen
+        run: |
+          REPO_URL="${{ github.server_url }}/${{ github.repository }}"
+          cat > dist/lion-launcher.flatpakref << EOF
+          [Flatpak Ref]
+          Name=com.lionlauncher.dev
+          Branch=stable
+          Title=Lion Launcher
+          Comment=Ein moderner Minecraft Launcher
+          Url=https://dl.flathub.org/repo/
+          Homepage=${REPO_URL}
+          Icon=${REPO_URL}/raw/main/icons/icon.png
+          IsRuntime=false
+          SuggestRemoteName=flathub
+          EOF
+          cat dist/lion-launcher.flatpakref
+
+      - name: Upload .flatpak
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-flatpak
+          path: dist/lion-launcher.flatpak
+          if-no-files-found: error
+
+      - name: Upload .flatpakref
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-flatpakref
+          path: dist/lion-launcher.flatpakref
+          if-no-files-found: error
+
+# ─────────────────────────────────────────────────────────────
+#  Job 5: Arch Linux – PKGBUILD + .pkg.tar.zst
+#          läuft in archlinux:latest Docker-Container
+# ─────────────────────────────────────────────────────────────
+  build-arch:
+    name: 📦 Arch Linux – PKGBUILD + pkg.tar.zst
+    runs-on: ubuntu-22.04
+    container:
+      image: archlinux:latest
+      options: --privileged
+
+    steps:
+      - name: Pacman initialisieren & Systemupdate
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm
+
+      - name: Build-Abhängigkeiten installieren
+        run: |
+          pacman -S --noconfirm --needed \
+            base-devel rust cargo \
+            webkit2gtk-4.1 gtk3 libappindicator-gtk3 \
+            librsvg pkgconf openssl \
+            curl wget file git sudo libsoup3
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: arch
+
+      - name: Build-User anlegen (makepkg nicht als root)
+        run: |
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          chown -R builder:builder .
+
+      - name: Tauri CLI + Release-Binary bauen
+        run: |
+          export WEBKIT_DISABLE_DMABUF_RENDERER=1
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          su builder -c "
+            export PATH=\$HOME/.cargo/bin:\$PATH
+            if ! cargo tauri --version &>/dev/null; then
+              cargo install tauri-cli --version '^2' --locked
+            fi
+            cargo build --release --locked
+          "
+
+      - name: Version ermitteln
+        id: version
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          [ -z "$VERSION" ] && VERSION="0.1.0"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: CI-PKGBUILD (Prebuilt Binary) erzeugen
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p /tmp/pkgbuild-ws
+          cat > /tmp/pkgbuild-ws/PKGBUILD << 'PKGEOF'
+          pkgname=lion-launcher
+          pkgver=VERSION_PLACEHOLDER
+          pkgrel=1
+          pkgdesc="Ein moderner Minecraft Launcher"
+          arch=('x86_64')
+          url="https://github.com/${{ github.repository }}"
+          license=('MIT')
+          depends=('webkit2gtk-4.1' 'gtk3' 'libappindicator-gtk3' 'librsvg' 'openssl')
+
+          package() {
+            install -Dm755 "${startdir}/target/release/Lion-Launcher" \
+                "${pkgdir}/usr/bin/lion-launcher"
+            install -Dm644 "${startdir}/icons/32x32.png" \
+                "${pkgdir}/usr/share/icons/hicolor/32x32/apps/lion-launcher.png"
+            install -Dm644 "${startdir}/icons/128x128.png" \
+                "${pkgdir}/usr/share/icons/hicolor/128x128/apps/lion-launcher.png"
+            install -Dm644 "${startdir}/icons/icon.png" \
+                "${pkgdir}/usr/share/icons/hicolor/256x256/apps/lion-launcher.png"
+            install -Dm644 /dev/stdin \
+                "${pkgdir}/usr/share/applications/lion-launcher.desktop" << DESKTOP_EOF
+          [Desktop Entry]
+          Name=Lion Launcher
+          Comment=Ein moderner Minecraft Launcher
+          Exec=/usr/bin/lion-launcher
+          Icon=lion-launcher
+          Type=Application
+          Categories=Game;
+          Keywords=minecraft;launcher;mods;
+          StartupNotify=true
+          DESKTOP_EOF
+          }
+          PKGEOF
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/" /tmp/pkgbuild-ws/PKGBUILD
+          # Quellverzeichnis verlinken für startdir-Zugriff
+          ln -s "$(pwd)" /tmp/pkgbuild-ws/source-ref
+          chown -R builder:builder /tmp/pkgbuild-ws
+
+      - name: makepkg ausführen
+        run: |
+          su builder -c "
+            cd /tmp/pkgbuild-ws
+            makepkg -sf --noconfirm --noprogressbar \
+              BUILDDIR=/tmp/pkgbuild-ws/build \
+              PKGDEST=/tmp/pkgbuild-ws/out
+          "
+          ls -lh /tmp/pkgbuild-ws/out/ 2>/dev/null || \
+            ls -lh /tmp/pkgbuild-ws/*.pkg.tar.zst
+
+      - name: Pakete sammeln
+        run: |
+          mkdir -p dist
+          find /tmp/pkgbuild-ws -name "*.pkg.tar.zst" -exec cp {} dist/ \;
+          # Lesbares PKGBUILD-Template mitliefern
+          cp pkg/PKGBUILD dist/PKGBUILD
+          ls -lh dist/
+
+      - name: Upload .pkg.tar.zst + PKGBUILD
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-pkg
+          path: |
+            dist/*.pkg.tar.zst
+            dist/PKGBUILD
+          if-no-files-found: error
+
+# ─────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────
+#  Job 6: Windows – NSIS .exe Installer
+# ─────────────────────────────────────────────────────────────
+  build-windows:
+    name: "🪟 Windows – NSIS .exe"
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Rust stable installieren
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: windows
+      - name: Tauri CLI installieren
+        run: cargo install tauri-cli --version "^2" --locked
+      - name: "🔨 Windows-Build (NSIS .exe)"
+        run: cargo tauri build --bundles nsis
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+      - name: WebView2-Bootstrapper verifizieren
+        shell: pwsh
+        run: |
+          $conf = Get-Content "tauri.conf.json" | ConvertFrom-Json
+          $mode = $conf.bundle.windows.webviewInstallMode.type
+          Write-Host "WebView install mode: $mode"
+          if ($mode -ne "embedBootstrapper") {
+            Write-Host "ERROR: webviewInstallMode ist nicht embedBootstrapper!"; exit 1
+          }
+          Write-Host "OK embedBootstrapper konfiguriert"
+          $nsisDir = "target\release\bundle\nsis"
+          Get-ChildItem -Path $nsisDir -Filter "*.exe" -Recurse | ForEach-Object {
+            $sizeMB = [math]::Round($_.Length / 1MB, 2)
+            Write-Host "Installer: $($_.Name) ($sizeMB MB)"
+          }
+      - name: Upload .exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 30
+# ─────────────────────────────────────────────────────────────
+#  GitHub Release – alle Pakete zusammenführen
+# ─────────────────────────────────────────────────────────────
+  create-release:
+    name: "🚀 GitHub Release erstellen"
+    runs-on: ubuntu-22.04
+    needs:
+      - build-deb-rpm
+      - build-appimage
+      - build-snap
+      - build-flatpak
+      - build-arch
+      - build-windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Alle Artefakte herunterladen
         uses: actions/download-artifact@v4
         with:
-          name: windows-dev-exe
-          path: release-artifacts/windows-dev
-        continue-on-error: true
-
-      - name: Windows Installer herunterladen
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-nsis-installer
-          path: release-artifacts/windows
-
-      - name: Linux .deb herunterladen
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-deb
-          path: release-artifacts/linux
-        continue-on-error: true
-
-      - name: Linux .rpm herunterladen
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-rpm
-          path: release-artifacts/linux
-        continue-on-error: true
-
-      - name: SHA256 Checksums erstellen
+          path: release-artifacts
+      - name: Artefakte auflisten
+        run: find release-artifacts -type f | sort
+      - name: SHA256 Gesamtchecksums erstellen
         run: |
           cd release-artifacts
-          find . -type f \( -name "*.exe" -o -name "*.deb" -o -name "*.rpm" \) \
-            -exec sha256sum {} \; > SHA256SUMS.txt
+          find . -type f ! -name "SHA256SUMS*" ! -name "PKGBUILD" ! -name "*.flatpakref" \
+            | sort | xargs sha256sum > SHA256SUMS.txt
           cat SHA256SUMS.txt
-
+      - name: Version extrahieren
+        id: version
+        run: |
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       - name: GitHub Release veröffentlichen
         uses: softprops/action-gh-release@v2
         with:
-          name: "Lion Launcher ${{ github.ref_name }}"
+          name: "Lion Launcher ${{ steps.version.outputs.tag }}"
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(steps.version.outputs.tag, 'alpha') || contains(steps.version.outputs.tag, 'beta') || contains(steps.version.outputs.tag, 'rc') }}
           body: |
-            ## 🦁 Lion Launcher ${{ github.ref_name }}
-
-            ### Downloads
-
-            | Plattform | Paket |
-            |-----------|-------|
-            | Windows   | `Lion Launcher_*_x64-setup.exe` – NSIS Installer (enthält WebView2) |
-            | Windows   | `Lion Launcher Dev_*_x64-setup.exe` – Dev-Build (Konsolenfenster sichtbar) |
-            | Linux     | `lion-launcher_*.deb` – Debian/Ubuntu |
-            | Linux     | `lion-launcher-*.rpm` – Fedora/openSUSE |
-
-            ### Windows Installation
-            Lade `*-setup.exe` herunter und führe ihn aus.
-            WebView2 wird automatisch installiert, falls nicht vorhanden.
-
-            ### Linux Installation
-            **Debian/Ubuntu:** `sudo dpkg -i lion-launcher_*.deb`
-            **Fedora:** `sudo dnf install lion-launcher-*.rpm`
-
+            ## 🦁 Lion Launcher ${{ steps.version.outputs.tag }}
+            ### 📦 Verfügbare Pakete
+            | Format | Plattform | Installationsbefehl |
+            |--------|-----------|---------------------|
+            | `.deb` | Debian, Ubuntu, Mint, Pop!_OS | `sudo dpkg -i lion-launcher_*.deb` |
+            | `.rpm` | Fedora, RHEL, CentOS, openSUSE | `sudo rpm -i lion-launcher-*.rpm` |
+            | `.AppImage` | Alle Linux-Distros | `chmod +x && ./lion-launcher_*.AppImage` |
+            | `.snap` | Ubuntu + Snap-kompatible Distros | `sudo snap install *.snap --dangerous` |
+            | `.flatpak` | Alle Linux-Distros (Flatpak) | `flatpak install lion-launcher.flatpak` |
+            | `.flatpakref` | Direktinstallation | `flatpak install lion-launcher.flatpakref` |
+            | `PKGBUILD` | Arch Linux, Manjaro, EndeavourOS | `makepkg -si` |
+            | `.pkg.tar.zst` | Arch Linux (prebuilt) | `sudo pacman -U *.pkg.tar.zst` |
+            | `.exe` | Windows 10/11 | NSIS-Installer, WebView2 eingebettet |
+            ### 🐧 Arch Linux
+            ```bash
+            # Aus PKGBUILD bauen (AUR-kompatibel):
+            curl -O .../PKGBUILD && makepkg -si
+            # Oder Prebuilt:
+            sudo pacman -U lion-launcher-${{ steps.version.outputs.version }}-1-x86_64.pkg.tar.zst
+            ```
+            ### ✅ Checksums
+            Alle SHA-256 Checksums in `SHA256SUMS.txt`.
           files: |
-            release-artifacts/**/*.exe
             release-artifacts/**/*.deb
             release-artifacts/**/*.rpm
+            release-artifacts/**/*.AppImage
+            release-artifacts/**/*.snap
+            release-artifacts/**/*.flatpak
+            release-artifacts/**/*.flatpakref
+            release-artifacts/**/*.pkg.tar.zst
+            release-artifacts/**/PKGBUILD
+            release-artifacts/**/*.exe
             release-artifacts/SHA256SUMS.txt
-
+          token: ${{ secrets.GITHUB_TOKEN }}

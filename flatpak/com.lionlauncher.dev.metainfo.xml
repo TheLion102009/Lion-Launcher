@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.lionlauncher.dev</id>
+  <name>Lion Launcher</name>
+  <summary>Ein moderner Minecraft Launcher</summary>
+  <description>
+    <p>
+      Lion Launcher ist ein moderner, schneller Minecraft Launcher mit umfassender
+      Unterstützung für Fabric, Quilt, Forge und NeoForge. Er bietet eine intuitive
+      Benutzeroberfläche, einfache Mod-Installation aus CurseForge und Modrinth
+      sowie eine umfassende Profilverwaltung.
+    </p>
+    <ul>
+      <li>Mod-Loader: Fabric, Quilt, Forge, NeoForge</li>
+      <li>Mod-Quellen: CurseForge, Modrinth</li>
+      <li>Microsoft-Authentifizierung</li>
+      <li>Profilverwaltung mit mehreren Instanzen</li>
+      <li>Automatische Java-Erkennung</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">com.lionlauncher.dev.desktop</launchable>
+  <url type="homepage">https://github.com/thelion/Lion-Launcher</url>
+  <url type="bugtracker">https://github.com/thelion/Lion-Launcher/issues</url>
+  <categories>
+    <category>Game</category>
+  </categories>
+  <provides>
+    <binary>lion-launcher</binary>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2026-04-29">
+      <description>
+        <p>Erste öffentliche Version.</p>
+      </description>
+    </release>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>
+

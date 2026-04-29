@@ -1,0 +1,120 @@
+# Maintainer: Thorben Hess <your@email.com>
+# Contributor: Thorben Hess <your@email.com>
+
+pkgname=lion-launcher
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Ein moderner Minecraft Launcher mit Fabric, Quilt, Forge und NeoForge-Support"
+arch=('x86_64' 'aarch64')
+url="https://github.com/thelion/Lion-Launcher"
+license=('MIT')
+depends=(
+    'webkit2gtk-4.1'
+    'gtk3'
+    'libappindicator-gtk3'
+    'librsvg'
+    'glib2'
+    'pango'
+    'cairo'
+    'gdk-pixbuf2'
+    'atk'
+    'openssl'
+)
+makedepends=(
+    'rust'
+    'cargo'
+    'pkgconf'
+    'base-devel'
+    'curl'
+    'wget'
+    'file'
+    'libsoup3'
+)
+optdepends=(
+    'java-runtime: für Minecraft-Ausführung (empfohlen: jdk17-openjdk)'
+    'jdk17-openjdk: Minecraft 1.17+'
+    'jdk21-openjdk: Minecraft 1.21+'
+    'java-runtime-common: Gemeinsame Java-Werkzeuge'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')  # Wird beim Release mit echtem Hash ersetzt
+
+# Für lokale Builds aus dem Quell-Verzeichnis:
+# source=("$pkgname::git+file:///path/to/Lion-Launcher")
+# sha256sums=('SKIP')
+
+prepare() {
+    cd "Lion-Launcher-$pkgver"
+    # Stelle sicher, dass Rust-Ziel vorhanden ist
+    rustup target add x86_64-unknown-linux-gnu 2>/dev/null || true
+    # Cargo-Lock respektieren
+    export CARGO_NET_RETRY=3
+    export CARGO_HTTP_TIMEOUT=60
+}
+
+build() {
+    cd "Lion-Launcher-$pkgver"
+
+    export WEBKIT_DISABLE_DMABUF_RENDERER=1
+    export WEBKIT_DISABLE_COMPOSITING_MODE=1
+    export RUST_BACKTRACE=1
+
+    # Tauri CLI (falls nicht global installiert)
+    if ! cargo tauri --version &>/dev/null; then
+        cargo install tauri-cli --version "^2" --locked
+    fi
+
+    cargo build --release --locked
+}
+
+check() {
+    cd "Lion-Launcher-$pkgver"
+    # Prüfe ob Binary existiert
+    test -f target/release/Lion-Launcher
+}
+
+package() {
+    cd "Lion-Launcher-$pkgver"
+
+    # Haupt-Binary
+    install -Dm755 target/release/Lion-Launcher \
+        "$pkgdir/usr/bin/lion-launcher"
+
+    # Icons
+    install -Dm644 icons/32x32.png \
+        "$pkgdir/usr/share/icons/hicolor/32x32/apps/lion-launcher.png"
+    install -Dm644 icons/128x128.png \
+        "$pkgdir/usr/share/icons/hicolor/128x128/apps/lion-launcher.png"
+    install -Dm644 icons/128x128@2x.png \
+        "$pkgdir/usr/share/icons/hicolor/256x256/apps/lion-launcher.png"
+    install -Dm644 icons/icon.png \
+        "$pkgdir/usr/share/pixmaps/lion-launcher.png"
+
+    # Desktop-Eintrag
+    install -Dm644 /dev/stdin \
+        "$pkgdir/usr/share/applications/lion-launcher.desktop" << EOF
+[Desktop Entry]
+Name=Lion Launcher
+Comment=Ein moderner Minecraft Launcher
+Exec=/usr/bin/lion-launcher
+Icon=lion-launcher
+Type=Application
+Categories=Game;
+Keywords=minecraft;launcher;mods;fabric;forge;neoforge;quilt;
+StartupNotify=true
+StartupWMClass=lion-launcher
+EOF
+
+    # Lizenz
+    if [ -f LICENSE ]; then
+        install -Dm644 LICENSE \
+            "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    fi
+
+    # README
+    if [ -f README.md ]; then
+        install -Dm644 README.md \
+            "$pkgdir/usr/share/doc/$pkgname/README.md"
+    fi
+}
+
