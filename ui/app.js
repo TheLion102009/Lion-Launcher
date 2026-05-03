@@ -1743,7 +1743,7 @@ function renderProfileTabContent(tabName, profile) {
     switch (tabName) {
         case 'mods':
             return `
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                     <h3 style="color: var(--gold); margin: 0;">Installierte Mods</h3>
                     <div style="display: flex; gap: 8px;">
                         <button class="btn btn-secondary" onclick="checkForModUpdates('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
@@ -1757,9 +1757,23 @@ function renderProfileTabContent(tabName, profile) {
                         </button>
                     </div>
                 </div>
+
+                <!-- Suchleiste für installierte Mods -->
+                <div style="position: relative; margin-bottom: 12px;">
+                    <i class="bi bi-search" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-secondary); font-size: 13px; pointer-events: none;"></i>
+                    <input type="text" id="installed-mods-search"
+                           placeholder="Mods durchsuchen..."
+                           oninput="filterInstalledMods(this.value)"
+                           style="width: 100%; padding: 8px 10px 8px 32px; background: var(--bg-light);
+                                  border: 1px solid var(--bg-medium); border-radius: 6px;
+                                  color: var(--text-primary); font-size: 13px; box-sizing: border-box;
+                                  outline: none; transition: border-color 0.2s;"
+                           onfocus="this.style.borderColor='var(--gold)'"
+                           onblur="this.style.borderColor='var(--bg-medium)'">
+                </div>
                 
                 <!-- Bulk Actions Bar (hidden by default) -->
-                <div id="bulk-actions-bar" style="display: none; background: var(--bg-light); border-radius: 8px; padding: 10px 15px; margin-bottom: 15px; align-items: center; gap: 15px;">
+                <div id="bulk-actions-bar" style="display: none; background: var(--bg-light); border-radius: 8px; padding: 10px 15px; margin-bottom: 12px; align-items: center; gap: 15px;">
                     <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-secondary);">
                         <input type="checkbox" id="select-all-mods" onchange="toggleSelectAllMods()" style="width: 16px; height: 16px; cursor: pointer;">
                         <span id="selected-count">0 ausgewählt</span>
@@ -1776,7 +1790,7 @@ function renderProfileTabContent(tabName, profile) {
                     </button>
                 </div>
                 
-                <div id="profile-mods-list" style="display: grid; gap: 8px; max-height: 500px; overflow-y: auto; padding-right: 5px;">
+                <div id="profile-mods-list" style="display: grid; gap: 8px; max-height: 460px; overflow-y: auto; padding-right: 5px;">
                     <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                         <div class="spinner" style="margin: 0 auto 15px;"></div>
                         <p>Lade installierte Mods...</p>
@@ -2490,6 +2504,14 @@ async function loadInstalledMods(profileId) {
     try {
         const mods = await invoke('get_installed_mods', { profileId });
 
+        // Cache für Suchfilter speichern
+        installedModsCache = mods || [];
+        cachedModsProfileId = profileId;
+
+        // Suchfeld zurücksetzen beim Neuladen
+        const searchInput = document.getElementById('installed-mods-search');
+        if (searchInput) searchInput.value = '';
+
         if (!mods || mods.length === 0) {
             modsList.innerHTML = `
                 <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
@@ -2509,56 +2531,7 @@ async function loadInstalledMods(profileId) {
         // Zeige Bulk Actions Bar
         document.getElementById('bulk-actions-bar').style.display = 'flex';
 
-        modsList.innerHTML = mods.map(mod => {
-            const iconUrl = mod.icon_url || null;
-            const hasUpdate = mod.has_update;
-
-            return `
-            <div class="installed-mod-card" data-filename="${mod.filename}" 
-                 onclick="if(!event.target.closest('input, button')) { showModDetailsFromProfile('${mod.mod_id || ''}', '${mod.source || 'modrinth'}'); }"
-                 style="background: var(--bg-dark); border: 1px solid ${mod.disabled ? '#666' : 'var(--bg-light)'}; border-radius: 8px; padding: 12px; display: flex; align-items: center; gap: 12px; ${mod.disabled ? 'opacity: 0.6;' : ''} transition: all 0.2s; cursor: pointer;">
-                <!-- Checkbox -->
-                <input type="checkbox" class="mod-checkbox" data-filename="${mod.filename}" 
-                       onchange="toggleModSelection('${mod.filename}')"
-                       onclick="event.stopPropagation();"
-                       style="width: 18px; height: 18px; cursor: pointer; flex-shrink: 0; accent-color: var(--gold);">
-                
-                <!-- Icon -->
-                <div style="width: 44px; height: 44px; background: var(--bg-light); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden;">
-                    ${iconUrl
-                ? `<img src="${iconUrl}" style="width: 100%; height: 100%; object-fit: cover;" onerror="handleIconError(this)">`
-                : `<span style="font-size: 22px;"><i class="bi bi-box"></i></span>`
-            }
-                </div>
-                
-                <!-- Info -->
-                <div style="flex: 1; min-width: 0;">
-                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                        <h4 style="margin: 0; color: var(--text-primary); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;">
-                            ${mod.name || mod.filename}
-                        </h4>
-                        ${mod.disabled ? '<span style="background: #f44336; color: white; font-size: 9px; padding: 2px 5px; border-radius: 3px;">DEAKTIVIERT</span>' : ''}
-                        ${hasUpdate ? '<span style="background: var(--gold); color: var(--bg-dark); font-size: 9px; padding: 2px 5px; border-radius: 3px;">UPDATE</span>' : ''}
-                    </div>
-                    <p style="margin: 3px 0 0 0; color: var(--text-secondary); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                        ${mod.filename}
-                    </p>
-                    ${mod.version ? `<p style="margin: 2px 0 0 0; color: var(--gold); font-size: 10px;">v${mod.version}</p>` : ''}
-                </div>
-                
-                <!-- Actions -->
-                <div style="display: flex; gap: 6px; flex-shrink: 0;">
-                    <button class="btn btn-secondary" onclick="event.stopPropagation(); toggleMod('${profileId}', '${mod.filename}', ${mod.disabled})" 
-                            style="padding: 5px 10px; font-size: 11px;" title="${mod.disabled ? 'Aktivieren' : 'Deaktivieren'}">
-                        ${mod.disabled ? '<i class="bi bi-check"></i>' : '||'}
-                    </button>
-                    <button class="btn btn-secondary" onclick="event.stopPropagation(); deleteMod('${profileId}', '${mod.filename}')" 
-                            style="padding: 5px 10px; font-size: 11px; color: #f44336;" title="Löschen">
-                        ×
-                    </button>
-                </div>
-            </div>
-        `}).join('');
+        renderInstalledModsList(mods, profileId);
 
         // Versuche Icons von Modrinth zu laden (asynchron)
         loadModIcons(mods);
@@ -2576,6 +2549,93 @@ async function loadInstalledMods(profileId) {
             </div>
         `;
     }
+}
+
+/** Filtert die installierte Mod-Liste anhand des Suchbegriffs (client-seitig) */
+function filterInstalledMods(query) {
+    if (!cachedModsProfileId) return;
+
+    const q = query.trim().toLowerCase();
+    const filtered = q.length === 0
+        ? installedModsCache
+        : installedModsCache.filter(mod => {
+            const name = (mod.name || mod.filename || '').toLowerCase();
+            const filename = (mod.filename || '').toLowerCase();
+            const version = (mod.version || '').toLowerCase();
+            return name.includes(q) || filename.includes(q) || version.includes(q);
+        });
+
+    const modsList = document.getElementById('profile-mods-list');
+    if (!modsList) return;
+
+    if (filtered.length === 0) {
+        modsList.innerHTML = `
+            <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                <i class="bi bi-search" style="font-size: 32px; display: block; margin-bottom: 12px;"></i>
+                <p>Keine Mods gefunden für <strong style="color: var(--text-primary);">${query}</strong></p>
+            </div>
+        `;
+        return;
+    }
+
+    renderInstalledModsList(filtered, cachedModsProfileId);
+}
+
+/** Rendert eine Liste von installierten Mods in #profile-mods-list */
+function renderInstalledModsList(mods, profileId) {
+    const modsList = document.getElementById('profile-mods-list');
+    if (!modsList) return;
+
+    modsList.innerHTML = mods.map(mod => {
+        const iconUrl = mod.icon_url || null;
+        const hasUpdate = mod.has_update;
+
+        return `
+        <div class="installed-mod-card" data-filename="${mod.filename}" 
+             onclick="if(!event.target.closest('input, button')) { showModDetailsFromProfile('${mod.mod_id || ''}', '${mod.source || 'modrinth'}'); }"
+             style="background: var(--bg-dark); border: 1px solid ${mod.disabled ? '#666' : 'var(--bg-light)'}; border-radius: 8px; padding: 12px; display: flex; align-items: center; gap: 12px; ${mod.disabled ? 'opacity: 0.6;' : ''} transition: all 0.2s; cursor: pointer;">
+            <!-- Checkbox -->
+            <input type="checkbox" class="mod-checkbox" data-filename="${mod.filename}" 
+                   onchange="toggleModSelection('${mod.filename}')"
+                   onclick="event.stopPropagation();"
+                   style="width: 18px; height: 18px; cursor: pointer; flex-shrink: 0; accent-color: var(--gold);">
+            
+            <!-- Icon -->
+            <div style="width: 44px; height: 44px; background: var(--bg-light); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden;">
+                ${iconUrl
+                ? `<img src="${iconUrl}" style="width: 100%; height: 100%; object-fit: cover;" onerror="handleIconError(this)">`
+                : `<span style="font-size: 22px;"><i class="bi bi-box"></i></span>`
+            }
+            </div>
+            
+            <!-- Info -->
+            <div style="flex: 1; min-width: 0;">
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <h4 style="margin: 0; color: var(--text-primary); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;">
+                        ${mod.name || mod.filename}
+                    </h4>
+                    ${mod.disabled ? '<span style="background: #f44336; color: white; font-size: 9px; padding: 2px 5px; border-radius: 3px;">DEAKTIVIERT</span>' : ''}
+                    ${hasUpdate ? '<span style="background: var(--gold); color: var(--bg-dark); font-size: 9px; padding: 2px 5px; border-radius: 3px;">UPDATE</span>' : ''}
+                </div>
+                <p style="margin: 3px 0 0 0; color: var(--text-secondary); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    ${mod.filename}
+                </p>
+                ${mod.version ? `<p style="margin: 2px 0 0 0; color: var(--gold); font-size: 10px;">v${mod.version}</p>` : ''}
+            </div>
+            
+            <!-- Actions -->
+            <div style="display: flex; gap: 6px; flex-shrink: 0;">
+                <button class="btn btn-secondary" onclick="event.stopPropagation(); toggleMod('${profileId}', '${mod.filename}', ${mod.disabled})" 
+                        style="padding: 5px 10px; font-size: 11px;" title="${mod.disabled ? 'Aktivieren' : 'Deaktivieren'}">
+                    ${mod.disabled ? '<i class="bi bi-check"></i>' : '||'}
+                </button>
+                <button class="btn btn-secondary" onclick="event.stopPropagation(); deleteMod('${profileId}', '${mod.filename}')" 
+                        style="padding: 5px 10px; font-size: 11px; color: #f44336;" title="Löschen">
+                    ×
+                </button>
+            </div>
+        </div>
+    `}).join('');
 }
 
 function refreshInstalledMods(profileId) {
@@ -3970,6 +4030,8 @@ async function createProfile() {
 
 // Mod Browser
 let installedModIds = new Set(); // Cache für installierte Mod-IDs
+let installedModsCache = []; // Cache der geladenen installierten Mods (für Suchfilter)
+let cachedModsProfileId = null; // Profil-ID zu der der Cache gehört
 let installedResourcePackNames = new Set(); // Cache für installierte Resource Packs
 let installedShaderPackNames = new Set(); // Cache für installierte Shader Packs
 
@@ -4659,33 +4721,18 @@ async function loadInstalledModIds() {
 
         mods.forEach(mod => {
             // Die mod_id aus der Metadaten-Datei (Modrinth ID wie "AANobbMI")
+            // Exakte Übereinstimmung – kein Fuzzy-Matching, um False Positives zu vermeiden
             if (mod.mod_id) {
                 installedModIds.add(mod.mod_id.toLowerCase());
                 debugLog('  Added mod_id: ' + mod.mod_id.toLowerCase(), 'info');
             }
 
-            // Der Mod-Name (z.B. "Sodium")
+            // Den vollständigen Slug/Namen als Fallback (z.B. "sodium" oder "distant-horizons")
+            // KEIN firstName (erstes Wort) und KEIN firstPart (erster Dateinamenteil),
+            // da dies zu False Positives führt (z.B. "create" matcht "Create Additions").
             if (mod.name) {
                 const cleanName = mod.name.toLowerCase().replace(/\s+/g, '-');
                 installedModIds.add(cleanName);
-                // Auch nur den ersten Teil (vor dem ersten Leerzeichen)
-                const firstName = mod.name.toLowerCase().split(' ')[0];
-                if (firstName.length > 2) {
-                    installedModIds.add(firstName);
-                }
-            }
-
-            // Auch den Dateinamen parsen (z.B. "sodium-fabric-0.5.8" -> "sodium")
-            if (mod.filename) {
-                const cleanFilename = mod.filename
-                    .toLowerCase()
-                    .replace('.jar', '')
-                    .replace('.disabled', '');
-                // Ersten Teil vor dem ersten Bindestrich (oft der Mod-Slug)
-                const firstPart = cleanFilename.split('-')[0];
-                if (firstPart.length > 2) {
-                    installedModIds.add(firstPart);
-                }
             }
         });
 
@@ -4802,11 +4849,11 @@ function renderMods(mods, page = 0) {
 
             let isInst = false;
             if (currentContentType === 'mods') {
-                isInst = installedModIds.has(modSlug) ||
-                    installedModIds.has(modName) ||
-                    installedModIds.has(modId) ||
-                    installedModIds.has(modFirstName) ||
-                    (modSlug && Array.from(installedModIds).some(id => id === modSlug || modSlug === id));
+                // Nur exakte Treffer: Modrinth-Projekt-ID oder vollständiger Slug/Name
+                // Kein modFirstName-Check – erzeugt False Positives bei Seite 2+
+                isInst = installedModIds.has(modId) ||
+                    installedModIds.has(modSlug) ||
+                    installedModIds.has(modName);
             } else if (currentContentType === 'resourcepacks') {
                 isInst = installedResourcePackNames.has(modSlug) ||
                     installedResourcePackNames.has(modName) ||
@@ -4850,11 +4897,11 @@ function renderMods(mods, page = 0) {
             const modFirstName = mod.name ? mod.name.toLowerCase().split(' ')[0] : '';
 
             if (currentContentType === 'mods') {
-                isInstalled = installedModIds.has(modSlug) ||
-                    installedModIds.has(modName) ||
-                    installedModIds.has(modId) ||
-                    installedModIds.has(modFirstName) ||
-                    (modSlug && Array.from(installedModIds).some(id => id === modSlug || modSlug === id));
+                // Nur exakte Treffer: Modrinth-Projekt-ID oder vollständiger Slug/Name
+                // Kein modFirstName-Check – erzeugt False Positives bei Seite 2+
+                isInstalled = installedModIds.has(modId) ||
+                    installedModIds.has(modSlug) ||
+                    installedModIds.has(modName);
             } else if (currentContentType === 'resourcepacks') {
                 isInstalled = installedResourcePackNames.has(modSlug) ||
                     installedResourcePackNames.has(modName) ||
