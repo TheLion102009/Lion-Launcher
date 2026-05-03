@@ -1,0 +1,58 @@
+# CI-spezifisches Flatpak-Manifest
+# Verwendet ein vorgebautes Binary (kein Rust-SDK nötig)
+# Wird nur im GitHub-CI verwendet; für lokale Builds → com.lionlauncher.dev.yml
+
+app-id: com.lionlauncher.dev
+runtime: org.freedesktop.Platform
+runtime-version: '23.08'
+sdk: org.freedesktop.Sdk
+command: lion-launcher
+
+finish-args:
+  # Netzwerk (Mod-Downloads, Auth)
+  - --share=network
+  # IPC für X11-Unterstützung
+  - --share=ipc
+  # X11 + XWayland
+  - --socket=x11
+  # Native Wayland
+  - --socket=wayland
+  # GPU-Zugriff
+  - --device=dri
+  # Home-Verzeichnis (Profiles, JVM, Minecraft-Instanzen)
+  - --filesystem=home
+  # Secrets (Keyring für Microsoft-Auth)
+  - --talk-name=org.freedesktop.secrets
+  # Benachrichtigungen
+  - --talk-name=org.freedesktop.Notifications
+  # Portals für Dateidialoge
+  - --talk-name=org.freedesktop.portal.Desktop
+
+modules:
+  - name: lion-launcher
+    buildsystem: simple
+    # Binary + Assets stammen aus dem CI-pre-build (werden ins flatpak/-Verzeichnis kopiert)
+    build-commands:
+      - install -Dm755 lion-launcher /app/bin/lion-launcher
+      - install -Dm644 icon-32.png /app/share/icons/hicolor/32x32/apps/com.lionlauncher.dev.png
+      - install -Dm644 icon-128.png /app/share/icons/hicolor/128x128/apps/com.lionlauncher.dev.png
+      - install -Dm644 icon-256.png /app/share/icons/hicolor/256x256/apps/com.lionlauncher.dev.png
+      - install -Dm644 com.lionlauncher.dev.desktop /app/share/applications/com.lionlauncher.dev.desktop
+      - install -Dm644 com.lionlauncher.dev.metainfo.xml /app/share/metainfo/com.lionlauncher.dev.metainfo.xml
+    sources:
+      # Vorgebautes Binary (wird vom CI in dieses Verzeichnis kopiert)
+      - type: file
+        path: lion-launcher
+      # Icons (direkt aus dem flatpak/-Verzeichnis)
+      - type: file
+        path: icon-32.png
+      - type: file
+        path: icon-128.png
+      - type: file
+        path: icon-256.png
+      # Desktop-Metadaten
+      - type: file
+        path: com.lionlauncher.dev.desktop
+      - type: file
+        path: com.lionlauncher.dev.metainfo.xml
+
