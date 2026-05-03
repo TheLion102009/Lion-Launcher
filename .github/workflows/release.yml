@@ -1,9 +1,18 @@
 name: 🦁 Release Build
 
 on:
+  # Jeder Push auf main/master löst einen Build aus
   push:
+    branches:
+      - main
+      - master
     tags:
       - 'v*'
+  # Pull Requests gegen main/master auch bauen (kein Release-Job)
+  pull_request:
+    branches:
+      - main
+      - master
   workflow_dispatch:
     inputs:
       version:
@@ -199,10 +208,14 @@ jobs:
           sudo snap install snapcraft --classic
 
       - name: 🔨 Snap bauen (destructive-mode)
-        env:
-          # Kein Container / kein LXD – baut direkt auf dem Host
-          SNAPCRAFT_BUILD_ENVIRONMENT: host
-        run: snapcraft --destructive-mode
+        # snapcraft braucht Superuser-Rechte um build-packages zu installieren.
+        # PATH + HOME beibehalten damit cargo (von dtolnay/rust-toolchain) erreichbar ist.
+        run: |
+          sudo env \
+            PATH="$PATH" \
+            HOME="$HOME" \
+            SNAPCRAFT_BUILD_ENVIRONMENT=host \
+            snapcraft --destructive-mode
 
       - name: Snap sammeln
         run: |
@@ -248,7 +261,7 @@ jobs:
         with:
           key: flatpak
 
-      - name: Build-Abhängigkeiten installieren
+      - name: Build-Abhängigkeiten + Flatpak-Tools installieren
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -258,33 +271,51 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libsoup-3.0-dev \
-            patchelf curl wget file
+            patchelf curl wget file \
+            flatpak flatpak-builder
+
+      - name: Flatpak SDKs installieren (org.freedesktop.Platform/Sdk//23.08)
+        # OHNE || true: Fehler sind sofort sichtbar
+        run: |
+          sudo flatpak remote-add --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y --noninteractive flathub \
+            org.freedesktop.Platform//23.08 \
+            org.freedesktop.Sdk//23.08
 
       - name: 🔨 Release-Binary bauen (vor Flatpak-Packaging)
         run: cargo build --release --locked
 
       - name: Vorgebautes Binary + Assets ins flatpak/-Verzeichnis kopieren
-        # Das CI-Manifest (com.lionlauncher.dev.ci.yml) referenziert alle
-        # Dateien relativ zu flatpak/ → kein "../"-Pfad-Problem
+        # Das CI-Manifest referenziert alle Dateien relativ zu flatpak/
         run: |
           cp target/release/Lion-Launcher  flatpak/lion-launcher
           cp icons/32x32.png               flatpak/icon-32.png
           cp icons/128x128.png             flatpak/icon-128.png
           cp icons/icon.png                flatpak/icon-256.png
-          # com.lionlauncher.dev.desktop + metainfo.xml liegen bereits in flatpak/
           ls -lh flatpak/
 
-      - name: 🔨 Flatpak Bundle bauen
-        # Installiert org.freedesktop.Platform/Sdk//23.08 automatisch
-        uses: bilelmoussaoui/flatpak-github-actions/build-bundle@v6
-        with:
-          bundle: lion-launcher.flatpak
-          manifest-path: flatpak/com.lionlauncher.dev.ci.yml
-          cache-key: flatpak-builder-${{ hashFiles('Cargo.lock') }}
+      - name: 🔨 Flatpak bauen
+        # --disable-rofiles-fuse: FUSE nicht verfügbar auf GH-Actions-Runnern
+        run: |
+          flatpak-builder \
+            --repo=flatpak-repo \
+            --force-clean \
+            --disable-rofiles-fuse \
+            flatpak-build \
+            flatpak/com.lionlauncher.dev.ci.yml
+
+      - name: Flatpak Bundle (.flatpak) erstellen
+        run: |
+          mkdir -p dist
+          flatpak build-bundle \
+            flatpak-repo \
+            dist/lion-launcher.flatpak \
+            com.lionlauncher.dev
+          ls -lh dist/
 
       - name: .flatpakref Datei erstellen
         run: |
-          mkdir -p dist
           REPO_URL="${{ github.server_url }}/${{ github.repository }}"
           cat > dist/lion-launcher.flatpakref << EOF
           [Flatpak Ref]
@@ -304,7 +335,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-flatpak
-          path: lion-launcher.flatpak
+          path: dist/lion-launcher.flatpak
           if-no-files-found: warn
 
       - name: Upload .flatpakref
