@@ -15,13 +15,13 @@
             <div class="sidebar-logo">
                 <img src="./lionlogo.png" alt="Lion Launcher" class="sidebar-logo-img" loading="eager" decoding="sync">
             </div>
-            <div class="nav-item active" data-page="profiles" title="Profiles">
+            <div class="nav-item active" data-page="profiles" data-i18n-title="nav_profiles" title="Profiles">
                 <i class="bi bi-house"></i>
             </div>
-            <div class="nav-item" data-page="mods" title="Content Browser">
+            <div class="nav-item" data-page="mods" data-i18n-title="nav_content_browser" title="Content Browser">
                 <i class="bi bi-grid"></i>
             </div>
-            <div class="nav-item" data-page="skins" title="Skins">
+            <div class="nav-item" data-page="skins" data-i18n-title="nav_skins" title="Skins">
                 <i class="bi bi-person-circle"></i>
             </div>
             <div style="flex: 1;"></div>
@@ -36,7 +36,7 @@
             </div>
 
             <!-- Settings unter Account -->
-            <div class="nav-item" data-page="settings" title="Settings" style="margin-top: 6px;">
+            <div class="nav-item" data-page="settings" data-i18n-title="nav_settings" title="Settings" style="margin-top: 6px;">
                 <i class="bi bi-gear"></i>
             </div>
         </div>
@@ -46,11 +46,11 @@
             <!-- Profiles Page -->
             <div id="page-profiles" class="page">
                 <div class="header">
-                    <h1>Profiles</h1>
+                    <h1 data-i18n="nav_profiles">Profiles</h1>
                 </div>
                 <div class="content">
                     <div class="profiles-grid" id="profiles-grid">
-                        <div class="loading">Loading profiles...</div>
+                        <div class="loading" data-i18n="loading_profiles">Loading profiles...</div>
                     </div>
                 </div>
             </div>
@@ -59,55 +59,60 @@
             <div id="page-mods" class="page hidden">
                 <div class="header">
                     <button id="back-to-profile-btn" class="btn btn-secondary" onclick="backToProfileFromModBrowser()"
-                            style="display: none; position: absolute; left: 0; padding: 8px 16px;">
+                            style="display: none; position: absolute; left: 0; padding: 8px 16px;"
+                            data-i18n="btn_back_to_profile">
                         ← Back to Profile
                     </button>
-                    <h1>Content Browser</h1>
+                    <h1 data-i18n="nav_content_browser">Content Browser</h1>
                 </div>
                 <div class="content">
-                    <input type="text" class="search-bar" id="mod-search" placeholder="Search content...">
+                    <input type="text" class="search-bar" id="mod-search" data-i18n-placeholder="search_placeholder" placeholder="Search content...">
 
                     <!-- Content Categories -->
                     <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
                         <button class="btn btn-secondary active" data-content-type="mods"
                                 onclick="switchContentType('mods')"
-                                style="padding: 8px 20px; font-size: 14px;">
+                                style="padding: 8px 20px; font-size: 14px;"
+                                data-i18n="btn_mods">
                              Mods
                         </button>
                         <button class="btn btn-secondary" data-content-type="resourcepacks"
                                 onclick="switchContentType('resourcepacks')"
-                                style="padding: 8px 20px; font-size: 14px;">
+                                style="padding: 8px 20px; font-size: 14px;"
+                                data-i18n="btn_resource_packs">
                              Resource Packs
                         </button>
                         <button class="btn btn-secondary" data-content-type="shaderpacks"
                                 onclick="switchContentType('shaderpacks')"
-                                style="padding: 8px 20px; font-size: 14px;">
+                                style="padding: 8px 20px; font-size: 14px;"
+                                data-i18n="btn_shader_packs">
                              Shader Packs
                         </button>
                         <button class="btn btn-secondary" data-content-type="modpacks"
                                 onclick="switchContentType('modpacks')"
-                                style="padding: 8px 20px; font-size: 14px;">
+                                style="padding: 8px 20px; font-size: 14px;"
+                                data-i18n="btn_modpacks">
                              Modpacks
                         </button>
                     </div>
 
                     <div class="mod-browser">
                         <div class="mod-list" id="mod-list">
-                            <div class="loading">Search for content to get started</div>
+                            <div class="loading" data-i18n="search_start">Search for content to get started</div>
                         </div>
                         <div class="filters" style="max-height: calc(100vh - 200px); overflow-y: auto; padding-right: 10px;">
                             <!-- Sort By - Collapsible -->
                             <div class="filter-section">
                                 <h3 class="filter-header" onclick="toggleFilterSection('sort')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-                                    <span>Sort By</span>
+                                    <span data-i18n="sort_by">Sort By</span>
                                     <span class="collapse-icon" id="collapse-sort" style="transition: transform 0.2s;">▼</span>
                                 </h3>
                                 <div id="filter-sort-content" class="filter-content">
                                     <select id="filter-sort" class="filter-option" style="width: 100%; padding: 10px; background: var(--bg-dark); border: 2px solid var(--bg-light); border-radius: 8px; color: #666666; cursor: pointer;">
-                                        <option value="relevance">Relevance</option>
-                                        <option value="downloads" selected>Downloads</option>
-                                        <option value="updated">Recently Updated</option>
-                                        <option value="newest">Newest</option>
+                                        <option value="relevance" data-i18n-opt="sort_relevance">Relevance</option>
+                                        <option value="downloads" selected data-i18n-opt="sort_downloads">Downloads</option>
+                                        <option value="updated" data-i18n-opt="sort_updated">Recently Updated</option>
+                                        <option value="newest" data-i18n-opt="sort_newest">Newest</option>
                                     </select>
                                 </div>
                             </div>
@@ -115,16 +120,16 @@
                             <!-- Minecraft Version - Collapsible -->
                             <div class="filter-section">
                                 <h3 class="filter-header" onclick="toggleFilterSection('version')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-                                    <span>Minecraft Version</span>
+                                    <span data-i18n="mc_version">Minecraft Version</span>
                                     <span class="collapse-icon" id="collapse-version" style="transition: transform 0.2s;">▼</span>
                                 </h3>
                                 <div id="filter-version-content" class="filter-content">
                                     <select id="filter-version" class="filter-option" style="width: 100%; border: none;">
-                                        <option value="">All Versions</option>
+                                        <option value="" data-i18n-opt="all_versions">All Versions</option>
                                     </select>
                                     <label style="display: block; margin-top: 10px; font-size: 12px; cursor: pointer;">
                                         <input type="checkbox" id="show-snapshots" style="margin-right: 5px;">
-                                        Show Snapshots
+                                        <span data-i18n="show_snapshots">Show Snapshots</span>
                                     </label>
                                 </div>
                             </div>
@@ -132,12 +137,12 @@
                             <!-- Mod Loader - Collapsible -->
                             <div class="filter-section" id="loader-filter-section">
                                 <h3 class="filter-header" onclick="toggleFilterSection('loader')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-                                    <span>Mod Loader</span>
+                                    <span data-i18n="mod_loader">Mod Loader</span>
                                     <span class="collapse-icon" id="collapse-loader" style="transition: transform 0.2s;">▼</span>
                                 </h3>
                                 <div id="filter-loader-content" class="filter-content">
                                     <select id="filter-loader" class="filter-option" style="width: 100%; padding: 10px; background: var(--bg-dark); border: 2px solid var(--bg-light); border-radius: 8px; color: #666666; cursor: pointer;">
-                                        <option value="">All Loaders</option>
+                                        <option value="" data-i18n-opt="all_loaders">All Loaders</option>
                                         <option value="fabric">Fabric</option>
                                         <option value="forge">Forge</option>
                                         <option value="neoforge">NeoForge</option>
@@ -150,36 +155,36 @@
                             <div class="filter-section" id="installed-filter-section">
                                 <label style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; font-size: 13px;" onmouseover="this.style.background='var(--bg-light)'" onmouseout="this.style.background='transparent'">
                                     <input type="checkbox" id="filter-hide-installed" style="cursor: pointer; width: 16px; height: 16px; accent-color: var(--gold);">
-                                    <span style="color: var(--text-primary); flex: 1;">Hide Installed</span>
+                                    <span style="color: var(--text-primary); flex: 1;" data-i18n="hide_installed">Hide Installed</span>
                                 </label>
                             </div>
 
                             <!-- Environment - Collapsible -->
                             <div class="filter-section" id="environment-filter-section">
                                 <h3 class="filter-header" onclick="toggleFilterSection('environment')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-                                    <span>Environment</span>
+                                    <span data-i18n="environment">Environment</span>
                                     <span class="collapse-icon" id="collapse-environment" style="transition: transform 0.2s;">▼</span>
                                 </h3>
                                 <div id="filter-environment-content" class="filter-content">
                                     <label id="env-client-label" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; font-size: 13px;" onmouseover="this.style.background='var(--bg-light)'" onmouseout="this.style.background='transparent'">
                                         <input type="checkbox" id="filter-client" value="client" style="cursor: pointer; width: 16px; height: 16px; accent-color: var(--gold);">
                                         <!-- Icon wird hier von JS eingefügt -->
-                                        <span style="color: var(--text-primary); flex: 1;">Client</span>
+                                        <span style="color: var(--text-primary); flex: 1;" data-i18n="env_client">Client</span>
                                     </label>
                                     <label id="env-server-label" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; font-size: 13px;" onmouseover="this.style.background='var(--bg-light)'" onmouseout="this.style.background='transparent'">
                                         <input type="checkbox" id="filter-server" value="server" style="cursor: pointer; width: 16px; height: 16px; accent-color: var(--gold);">
                                         <!-- Icon wird hier von JS eingefügt -->
-                                        <span style="color: var(--text-primary); flex: 1;">Server</span>
+                                        <span style="color: var(--text-primary); flex: 1;" data-i18n="env_server">Server</span>
                                     </label>
                                     <label id="env-both-label" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; font-size: 13px;" onmouseover="this.style.background='var(--bg-light)'" onmouseout="this.style.background='transparent'">
                                         <input type="checkbox" id="filter-both" value="both" style="cursor: pointer; width: 16px; height: 16px; accent-color: var(--gold);">
                                         <!-- Icon wird hier von JS eingefügt -->
-                                        <span style="color: var(--text-primary); flex: 1;">Client and Server</span>
+                                        <span style="color: var(--text-primary); flex: 1;" data-i18n="env_both">Client and Server</span>
                                     </label>
                                     <label id="env-or-label" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; font-size: 13px;" onmouseover="this.style.background='var(--bg-light)'" onmouseout="this.style.background='transparent'">
                                         <input type="checkbox" id="filter-or" value="or" style="cursor: pointer; width: 16px; height: 16px; accent-color: var(--gold);">
                                         <!-- Icon wird hier von JS eingefügt -->
-                                        <span style="color: var(--text-primary); flex: 1;">Client or Server</span>
+                                        <span style="color: var(--text-primary); flex: 1;" data-i18n="env_or">Client or Server</span>
                                     </label>
                                 </div>
                             </div>
@@ -187,12 +192,12 @@
                             <!-- Categories - Collapsible -->
                             <div class="filter-section" id="categories-filter-section">
                                 <h3 class="filter-header" onclick="toggleFilterSection('categories')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-                                    <span>Categories</span>
+                                    <span data-i18n="categories">Categories</span>
                                     <span class="collapse-icon" id="collapse-categories" style="transition: transform 0.2s;">▼</span>
                                 </h3>
                                 <div id="filter-categories-content" class="filter-content">
                                     <div id="filter-categories">
-                                        <div style="color: var(--text-secondary); font-size: 12px; padding: 10px;">
+                                        <div style="color: var(--text-secondary); font-size: 12px; padding: 10px;" data-i18n="loading_categories">
                                             Loading categories...
                                         </div>
                                     </div>
@@ -207,14 +212,15 @@
             <div id="page-mod-details" class="page hidden">
                 <div class="header">
                     <button class="btn btn-secondary" onclick="backFromModDetails()"
-                            style="position: absolute; left: 0; padding: 8px 16px;">
+                            style="position: absolute; left: 0; padding: 8px 16px;"
+                            data-i18n="btn_back">
                         ← Back
                     </button>
-                    <h1 id="mod-details-name">Mod Details</h1>
+                    <h1 id="mod-details-name" data-i18n="mod_details_title">Mod Details</h1>
                 </div>
                 <div class="content" style="overflow-y: auto; max-height: calc(100vh - 140px);">
                     <div id="mod-details-content" style="max-width: 1200px; margin: 0 auto;">
-                        <div class="loading">Loading...</div>
+                        <div class="loading" data-i18n="loading">Loading...</div>
                     </div>
                 </div>
             </div>
@@ -222,38 +228,38 @@
             <!-- Skins Page -->
             <div id="page-skins" class="page hidden">
                 <div class="header">
-                    <h1>Skins</h1>
+                    <h1 data-i18n="nav_skins">Skins</h1>
                 </div>
                 <div class="content">
                     <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 30px; height: calc(100vh - 180px);">
                         <!-- 3D Skin Viewer -->
                         <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; display: flex; flex-direction: column; align-items: center;">
-                            <h3 style="color: var(--gold); margin: 0 0 15px 0;">Dein Skin</h3>
+                            <h3 style="color: var(--gold); margin: 0 0 15px 0;" data-i18n="your_skin">Dein Skin</h3>
                             <div id="skin-viewer" style="flex: 1; width: 100%; display: flex; align-items: center; justify-content: center; min-height: 300px;">
                                 <canvas id="skin-canvas"></canvas>
                             </div>
                             <div style="margin-top: 10px; text-align: center;">
                                 <p id="skin-player-name" style="color: var(--text-primary); font-size: 18px; font-weight: bold;">Steve</p>
-                                <p style="color: var(--text-secondary); font-size: 11px;">🖱️ Ziehe mit der Maus um den Skin zu drehen</p>
+                                <p style="color: var(--text-secondary); font-size: 11px;" data-i18n="rotate_hint">🖱️ Ziehe mit der Maus um den Skin zu drehen</p>
                             </div>
                             <!-- Skin Actions -->
                             <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px; width: 100%;">
                                 <!-- Variante wählen -->
                                 <div style="display: flex; gap: 8px; justify-content: center;">
                                     <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px; color: var(--text-secondary);">
-                                        <input type="radio" name="skin-variant" value="classic" checked style="accent-color: var(--gold);"> Classic
+                                        <input type="radio" name="skin-variant" value="classic" checked style="accent-color: var(--gold);"> <span data-i18n="variant_classic">Classic</span>
                                     </label>
                                     <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px; color: var(--text-secondary);">
-                                        <input type="radio" name="skin-variant" value="slim" style="accent-color: var(--gold);"> Slim (Alex)
+                                        <input type="radio" name="skin-variant" value="slim" style="accent-color: var(--gold);"> <span data-i18n="variant_slim">Slim (Alex)</span>
                                     </label>
                                 </div>
                                 <!-- Upload Button -->
                                 <input type="file" id="skin-file-input" accept=".png" style="display: none;" onchange="handleSkinFileSelect(event)">
-                                <button class="btn" onclick="document.getElementById('skin-file-input').click()" id="skin-upload-btn" style="width: 100%; padding: 10px;">
+                                <button class="btn" onclick="document.getElementById('skin-file-input').click()" id="skin-upload-btn" style="width: 100%; padding: 10px;" data-i18n="upload_skin">
                                     📤 Skin hochladen (.png)
                                 </button>
                                 <!-- Apply from player -->
-                                <button class="btn" onclick="applyViewedSkin()" id="skin-apply-btn" style="width: 100%; padding: 12px; display: none; font-weight: bold; font-size: 14px;">
+                                <button class="btn" onclick="applyViewedSkin()" id="skin-apply-btn" style="width: 100%; padding: 12px; display: none; font-weight: bold; font-size: 14px;" data-i18n="apply_skin">
                                     ✨ Diesen Skin übernehmen
                                 </button>
                             </div>
@@ -263,37 +269,37 @@
                         <div style="display: flex; flex-direction: column; gap: 20px;">
                             <!-- Aktueller Account Skin -->
                             <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px;">
-                                <h3 style="color: var(--gold); margin: 0 0 15px 0;">Aktueller Skin</h3>
+                                <h3 style="color: var(--gold); margin: 0 0 15px 0;" data-i18n="current_skin">Aktueller Skin</h3>
                                 <div id="current-skin-info" style="display: flex; align-items: center; gap: 15px;">
                                     <img id="current-skin-head" src="https://mc-heads.net/avatar/MHF_Steve/64" 
                                          style="width: 64px; height: 64px; border-radius: 8px; image-rendering: pixelated;">
                                     <div>
-                                        <p id="current-skin-name" style="color: var(--text-primary); font-weight: bold;">Nicht angemeldet</p>
-                                        <p style="color: var(--text-secondary); font-size: 12px;">Melde dich mit deinem Microsoft-Account an um deinen Skin zu sehen</p>
+                                        <p id="current-skin-name" style="color: var(--text-primary); font-weight: bold;" data-i18n="not_logged_in_skin">Nicht angemeldet</p>
+                                        <p style="color: var(--text-secondary); font-size: 12px;" data-i18n="login_for_skin">Melde dich mit deinem Microsoft-Account an um deinen Skin zu sehen</p>
                                     </div>
                                 </div>
                             </div>
                             
                             <!-- Skin Suche -->
                             <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; flex: 1; overflow: hidden; display: flex; flex-direction: column;">
-                                <h3 style="color: var(--gold); margin: 0 0 15px 0;">Spieler-Skin anzeigen</h3>
+                                <h3 style="color: var(--gold); margin: 0 0 15px 0;" data-i18n="player_skin_view">Spieler-Skin anzeigen</h3>
                                 <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                                    <input type="text" id="skin-search-input" placeholder="Spielername eingeben..." 
+                                    <input type="text" id="skin-search-input" data-i18n-placeholder="enter_player_name" placeholder="Spielername eingeben..."
                                            style="flex: 1; padding: 12px; background: var(--bg-dark); border: 2px solid var(--bg-light); border-radius: 8px; color: var(--text-primary);"
                                            onkeydown="if(event.key==='Enter')searchPlayerSkin()">
-                                    <button class="btn" onclick="searchPlayerSkin()">Anzeigen</button>
+                                    <button class="btn" onclick="searchPlayerSkin()" data-i18n="btn_show">Anzeigen</button>
                                 </div>
                                 
                                 <!-- Zuletzt angesehene Skins (eine Zeile, horizontal scrollbar) -->
-                                <h4 style="color: var(--text-secondary); margin: 10px 0 8px 0; font-size: 14px;">Zuletzt angesehen</h4>
+                                <h4 style="color: var(--text-secondary); margin: 10px 0 8px 0; font-size: 14px;" data-i18n="recently_viewed">Zuletzt angesehen</h4>
                                 <div id="recent-skins" class="skin-row-single">
-                                    <p style="color: var(--text-secondary); font-size: 12px;">Noch keine Skins angesehen</p>
+                                    <p style="color: var(--text-secondary); font-size: 12px;" data-i18n="no_recent_skins">Noch keine Skins angesehen</p>
                                 </div>
 
                                 <!-- Gespeicherte Skins (unbegrenzt, vertikal scrollbar) -->
-                                <h4 style="color: var(--text-secondary); margin: 15px 0 8px 0; font-size: 14px;">💾 Gespeichert</h4>
+                                <h4 style="color: var(--text-secondary); margin: 15px 0 8px 0; font-size: 14px;" data-i18n="saved_skins">💾 Gespeichert</h4>
                                 <div id="saved-skins" class="skin-grid-saved">
-                                    <p style="color: var(--text-secondary); font-size: 12px;">Noch keine Skins gespeichert – Equippe einen Skin um ihn hier zu speichern</p>
+                                    <p style="color: var(--text-secondary); font-size: 12px;" data-i18n="no_saved_skins">Noch keine Skins gespeichert – Equippe einen Skin um ihn hier zu speichern</p>
                                 </div>
                             </div>
                         </div>
@@ -304,27 +310,27 @@
             <!-- Settings Page -->
             <div id="page-settings" class="page hidden">
                 <div class="header">
-                    <h1>Settings</h1>
+                    <h1 data-i18n="nav_settings">Settings</h1>
                 </div>
                 <div class="content" style="max-height: calc(100vh - 120px); overflow-y: auto;">
                     
                     <!-- Account Settings -->
                     <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
-                        <h3 style="color: var(--gold); margin: 0 0 20px 0;">👤 Minecraft Account</h3>
-                        
+                        <h3 style="color: var(--gold); margin: 0 0 20px 0;" data-i18n="mc_account">👤 Minecraft Account</h3>
+
                         <!-- Aktiver Account -->
                         <div id="active-account-display" style="background: var(--bg-light); border-radius: 8px; padding: 15px; margin-bottom: 20px;">
-                            <div style="text-align: center; color: var(--text-secondary);">
+                            <div style="text-align: center; color: var(--text-secondary);" data-i18n="no_account">
                                 Kein Account angemeldet
                             </div>
                         </div>
                         
                         <!-- Account Buttons -->
                         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                            <button class="btn" onclick="startMicrosoftLogin()" style="flex: 1; min-width: 150px;">
+                            <button class="btn" onclick="startMicrosoftLogin()" style="flex: 1; min-width: 150px;" data-i18n="btn_ms_login">
                                 🔐 Microsoft Login
                             </button>
-                            <button class="btn btn-secondary" onclick="showOfflineAccountModal()" style="flex: 1; min-width: 150px;">
+                            <button class="btn btn-secondary" onclick="showOfflineAccountModal()" style="flex: 1; min-width: 150px;" data-i18n="btn_offline_account">
                                 👤 Offline Account
                             </button>
                         </div>
@@ -335,18 +341,20 @@
                     
                     <!-- Theme Settings -->
                     <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
-                        <h3 style="color: var(--gold); margin: 0 0 20px 0;">🎨 Erscheinungsbild</h3>
+                        <h3 style="color: var(--gold); margin: 0 0 20px 0;" data-i18n="appearance">🎨 Erscheinungsbild</h3>
 
                         <!-- Dark/Light Mode -->
                         <div class="form-group" style="margin-bottom: 20px;">
-                            <label style="margin-bottom: 10px; display: block;">Theme</label>
+                            <label style="margin-bottom: 10px; display: block;" data-i18n="theme_label">Theme</label>
                             <div style="display: flex; gap: 15px;">
                                 <button id="theme-dark-btn" class="theme-btn active" onclick="setTheme('dark')"
-                                        style="flex: 1; padding: 15px; background: #1a1a1a; border: 2px solid var(--gold); border-radius: 8px; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px;">
+                                        style="flex: 1; padding: 15px; background: #1a1a1a; border: 2px solid var(--gold); border-radius: 8px; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px;"
+                                        data-i18n="theme_dark">
                                     🌙 Dark
                                 </button>
                                 <button id="theme-light-btn" class="theme-btn" onclick="setTheme('light')"
-                                        style="flex: 1; padding: 15px; background: #f5f5f5; border: 2px solid transparent; border-radius: 8px; color: #1a1a1a; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px;">
+                                        style="flex: 1; padding: 15px; background: #f5f5f5; border: 2px solid transparent; border-radius: 8px; color: #1a1a1a; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px;"
+                                        data-i18n="theme_light">
                                     ☀️ Light
                                 </button>
                             </div>
@@ -354,7 +362,7 @@
 
                         <!-- Accent Color -->
                         <div class="form-group">
-                            <label style="margin-bottom: 10px; display: block;">Akzentfarbe</label>
+                            <label style="margin-bottom: 10px; display: block;" data-i18n="accent_color">Akzentfarbe</label>
                             <div id="color-palette" style="display: flex; flex-wrap: wrap; gap: 10px;">
                                 <div class="color-option active" data-color="gold" onclick="setAccentColor('gold')"
                                      style="width: 45px; height: 45px; background: #FFD700; border-radius: 8px; cursor: pointer; border: 3px solid var(--gold);"></div>
@@ -376,18 +384,28 @@
                         </div>
                     </div>
 
+                    <!-- Language Settings -->
+                    <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                        <h3 style="color: var(--gold); margin: 0 0 20px 0;" data-i18n="language_section">🌐 Language</h3>
+                        <div class="form-group">
+                            <label style="margin-bottom: 8px; display: block;" data-i18n="language_select_label">Select Language</label>
+                            <div id="language-select-container"></div>
+                            <p style="color: var(--text-secondary); font-size: 12px; margin-top: 8px;" data-i18n="restart_note">The app will reload when you save with a new language.</p>
+                        </div>
+                    </div>
+
                     <!-- General Settings -->
                     <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px;">
-                        <h3 style="color: var(--gold); margin: 0 0 20px 0;">⚙️ Allgemein</h3>
+                        <h3 style="color: var(--gold); margin: 0 0 20px 0;" data-i18n="general">⚙️ Allgemein</h3>
                         <div class="form-group">
-                            <label>Memory (MB)</label>
+                            <label data-i18n="memory_label">Memory (MB)</label>
                             <input type="number" id="settings-memory" placeholder="4096">
                         </div>
                         <div class="form-group">
-                            <label>Java Path (Optional)</label>
-                            <input type="text" id="settings-java" placeholder="Leave empty to auto-detect">
+                            <label data-i18n="java_path_label">Java Path (Optional)</label>
+                            <input type="text" id="settings-java" data-i18n-placeholder="java_path_placeholder" placeholder="Leave empty to auto-detect">
                         </div>
-                        <button class="btn" id="save-settings-btn">Save Settings</button>
+                        <button class="btn" id="save-settings-btn" data-i18n="save_settings">Save Settings</button>
                     </div>
                 </div>
             </div>
@@ -397,24 +415,24 @@
     <!-- Create Profile Modal -->
     <div id="create-profile-modal" class="modal">
         <div class="modal-content">
-            <div class="modal-header">Create New Profile</div>
+            <div class="modal-header" data-i18n="create_profile_title">Create New Profile</div>
             <div class="form-group">
-                <label>Profile Name</label>
-                <input type="text" id="profile-name" placeholder="My Profile">
+                <label data-i18n="profile_name_label">Profile Name</label>
+                <input type="text" id="profile-name" data-i18n-placeholder="profile_name_placeholder" placeholder="My Profile">
             </div>
             <div class="form-group">
-                <label>Minecraft Version</label>
+                <label data-i18n="mc_version_label">Minecraft Version</label>
                 <select id="profile-mc-version" style="font-weight: 600; color: #999;">
-                    <option value="">Loading versions...</option>
+                    <option value="" data-i18n-opt="loading_versions">Loading versions...</option>
                 </select>
             </div>
             <div class="form-group">
-                <label>Mod Loader</label>
+                <label data-i18n="mod_loader_label">Mod Loader</label>
                 <select id="profile-loader" style="font-weight: 600; color: #999;">
                     <option value="vanilla">vanilla</option>
                     <option value="fabric" selected>fabric</option>
                     <option value="quilt">quilt</option>
-                    <option value="forge">Forge ⚠️ (Experimental)</option>
+                    <option value="forge" data-i18n-opt="forge_experimental">Forge ⚠️ (Experimental)</option>
                     <option value="neoforge">neoforge</option>
                 </select>
                 <div id="loader-warning" style="display: none; background: rgba(255, 152, 0, 0.1); border: 1px solid #ff9800; border-radius: 6px; padding: 10px; margin-top: 10px; font-size: 12px; color: #ff9800;">
@@ -422,18 +440,19 @@
                 </div>
             </div>
             <div class="form-group">
-                <label>Loader Version</label>
+                <label data-i18n="loader_version_label">Loader Version</label>
                 <select id="profile-loader-version" style="font-weight: 600; color: #999;">
-                    <option value="latest">Latest</option>
+                    <option value="latest" data-i18n-opt="loader_latest">Latest</option>
                 </select>
             </div>
             <div class="modal-actions">
-                <button class="btn btn-secondary" id="cancel-profile-btn">Cancel</button>
-                <button class="btn" id="save-profile-btn">Create</button>
+                <button class="btn btn-secondary" id="cancel-profile-btn" data-i18n="btn_cancel">Cancel</button>
+                <button class="btn" id="save-profile-btn" data-i18n="btn_create">Create</button>
             </div>
         </div>
     </div>
 
+    <script src="i18n.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

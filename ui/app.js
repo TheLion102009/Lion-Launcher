@@ -221,6 +221,11 @@ async function stopProfile(profileId) {
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     debugLog('Lion Launcher starting...', 'info');
+
+    // Apply i18n translations as early as possible
+    applyTranslations();
+    buildLanguageSelector();
+
     await resolveEmbeddedLogoUrl();
     initSidebarLogo();
 
@@ -1762,7 +1767,7 @@ function renderProfileTabContent(tabName, profile) {
                 <div style="position: relative; margin-bottom: 12px;">
                     <i class="bi bi-search" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-secondary); font-size: 13px; pointer-events: none;"></i>
                     <input type="text" id="installed-mods-search"
-                           placeholder="Mods durchsuchen..."
+                           placeholder="${t('search_mods_placeholder')}"
                            oninput="filterInstalledMods(this.value)"
                            style="width: 100%; padding: 8px 10px 8px 32px; background: var(--bg-light);
                                   border: 1px solid var(--bg-medium); border-radius: 6px;
@@ -1793,7 +1798,7 @@ function renderProfileTabContent(tabName, profile) {
                 <div id="profile-mods-list" style="display: grid; gap: 8px; max-height: 460px; overflow-y: auto; padding-right: 5px;">
                     <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                         <div class="spinner" style="margin: 0 auto 15px;"></div>
-                        <p>Lade installierte Mods...</p>
+                        <p>${t('loading_mods')}</p>
                     </div>
                 </div>
             `;
@@ -2486,7 +2491,6 @@ function stopModsWatcher() {
     }
 }
 
-// Generiert einen Hash aus der Mod-Liste um Änderungen zu erkennen
 function generateModsHash(mods) {
     if (!mods || mods.length === 0) return 'empty';
     return mods.map(m => `${m.filename}:${m.disabled}`).sort().join('|');
@@ -2516,7 +2520,7 @@ async function loadInstalledMods(profileId) {
             modsList.innerHTML = `
                 <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
                     <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-box"></i></div>
-                    <p>Noch keine Mods installiert</p>
+                    <p>${t('no_mods_installed')}</p>
                     <p style="font-size: 14px; margin-top: 10px;">
                         Gehe zum <a href="#" onclick="switchPage('mods'); return false;" style="color: var(--gold);">Mod Browser</a> um Mods zu installieren
                     </p>
@@ -2572,7 +2576,7 @@ function filterInstalledMods(query) {
         modsList.innerHTML = `
             <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                 <i class="bi bi-search" style="font-size: 32px; display: block; margin-bottom: 12px;"></i>
-                <p>Keine Mods gefunden für <strong style="color: var(--text-primary);">${query}</strong></p>
+                <p>${t('no_mods_found')}</p>
             </div>
         `;
         return;
@@ -5235,7 +5239,7 @@ function loadSettings() {
 
     const usernameDisplay = document.getElementById('username-display');
     if (usernameDisplay) {
-        usernameDisplay.textContent = 'Player: ' + username;
+        usernameDisplay.textContent = t('player_label') + username;
     }
 
     const usernameInput = document.getElementById('settings-username');
@@ -5277,7 +5281,7 @@ function setTheme(theme, save = true) {
 
     if (save) {
         localStorage.setItem('theme', theme);
-        showToast(`Theme: ${theme === 'dark' ? '<i class="bi bi-moon-fill"></i> Dark' : '<i class="bi bi-sun-fill"></i> Light'}`, 'success', 2000);
+        showToast(`${t('theme_changed')} ${theme === 'dark' ? t('toast_theme_dark') : t('toast_theme_light')}`, 'success', 2000);
     }
 }
 
@@ -5298,7 +5302,7 @@ function setAccentColor(color, save = true) {
 
     if (save) {
         localStorage.setItem('accentColor', color);
-        showToast(`Akzentfarbe geändert!`, 'success', 2000);
+        showToast(t('toast_accent_changed'), 'success', 2000);
     }
 }
 
@@ -5307,6 +5311,7 @@ if (saveSettingsBtn) {
     saveSettingsBtn.addEventListener('click', () => {
         const usernameInput = document.getElementById('settings-username');
         const memoryInput = document.getElementById('settings-memory');
+        const languageSelect = document.getElementById('settings-language');
 
         if (usernameInput && memoryInput) {
             const username = usernameInput.value;
@@ -5318,10 +5323,22 @@ if (saveSettingsBtn) {
             currentUsername = username;
             const usernameDisplay = document.getElementById('username-display');
             if (usernameDisplay) {
-                usernameDisplay.textContent = 'Player: ' + username;
+                usernameDisplay.textContent = t('player_label') + username;
             }
 
-            showToast('Einstellungen gespeichert!', 'success', 3000);
+            // Language change: save and reload
+            if (languageSelect) {
+                const newLang = languageSelect.value;
+                const oldLang = localStorage.getItem('language') || 'en';
+                localStorage.setItem('language', newLang);
+                if (newLang !== oldLang) {
+                    showToast(t('toast_settings_saved'), 'success', 1500);
+                    setTimeout(() => window.location.reload(), 1200);
+                    return;
+                }
+            }
+
+            showToast(t('toast_settings_saved'), 'success', 3000);
         }
     });
 }
