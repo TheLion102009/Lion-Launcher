@@ -87,6 +87,7 @@ fn main() {
             gui::delete_shaderpack,
             // Modpacks
             gui::search_modpacks,
+            gui::install_modpack,
             // Worlds
             gui::get_worlds,
             gui::launch_world,

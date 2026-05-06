@@ -4655,17 +4655,176 @@ async function searchShaderPacks(query, page = 0) {
 }
 
 async function installModpack(packId, source) {
-    // Modpacks können nicht direkt installiert werden - öffne Modrinth Seite
-    const url = `https://modrinth.com/modpack/${packId}`;
+    // Suche den Modpack-Namen aus der Mod-Card im DOM
+    let packName = packId;
+    const card = document.querySelector(`[data-mod-id="${packId}"]`);
+    if (card) {
+        const nameEl = card.querySelector('.mod-name');
+        if (nameEl) packName = nameEl.textContent.trim();
+    }
 
-    // Zeige Info-Dialog
-    showToast('Modpacks müssen manuell heruntergeladen werden. Öffne Modrinth...', 'info', 3000);
+    // Zeige Installations-Dialog
+    const modalId = 'modpack-install-modal';
+    const existingModal = document.getElementById(modalId);
+    if (existingModal) existingModal.remove();
 
-    // Öffne im Browser
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.85); display: flex; align-items: center;
+        justify-content: center; z-index: 10000;
+    `;
+    modal.innerHTML = `
+        <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 12px;
+                    padding: 40px; text-align: center; min-width: 420px; max-width: 520px;">
+            <div style="font-size: 48px; margin-bottom: 20px;"><i class="bi bi-collection"></i></div>
+            <h2 style="color: var(--gold); margin: 0 0 10px 0;">Modpack installieren</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 25px;" id="mp-pack-name">${escapeHtml(packName)}</p>
+
+            <div id="mp-status" style="color: var(--text-secondary); margin-bottom: 20px; font-size: 14px;">
+                Vorbereitung...
+            </div>
+
+            <div style="background: var(--bg-light); border-radius: 8px; height: 8px; overflow: hidden; margin-bottom: 25px;">
+                <div id="mp-progress-bar" style="background: var(--gold); height: 100%; width: 0%;
+                     transition: width 0.4s ease; border-radius: 8px;"></div>
+            </div>
+
+            <div id="mp-result" style="display: none;">
+                <div id="mp-result-icon" style="font-size: 40px; margin-bottom: 12px;"></div>
+                <p id="mp-result-text" style="margin-bottom: 20px; font-size: 14px;"></p>
+                <button class="btn" onclick="document.getElementById('${modalId}').remove(); loadProfiles();"
+                        style="padding: 10px 30px;">
+                    OK
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const setStatus = (text, pct) => {
+        const el = document.getElementById('mp-status');
+        const bar = document.getElementById('mp-progress-bar');
+        if (el) el.textContent = text;
+        if (bar) bar.style.width = pct + '%';
+    };
+
+    const showResult = (success, message) => {
+        const statusDiv = document.getElementById('mp-status');
+        const bar = document.getElementById('mp-progress-bar');
+        const result = document.getElementById('mp-result');
+        const icon = document.getElementById('mp-result-icon');
+        const text = document.getElementById('mp-result-text');
+        if (statusDiv) statusDiv.style.display = 'none';
+        if (bar) { bar.style.width = '100%'; bar.style.background = success ? '#4caf50' : '#f44336'; }
+        if (result) result.style.display = 'block';
+        if (icon) icon.innerHTML = success
+            ? '<i class="bi bi-check-circle-fill" style="color:#4caf50;"></i>'
+            : '<i class="bi bi-x-circle-fill" style="color:#f44336;"></i>';
+        if (text) { text.textContent = message; text.style.color = success ? '#4caf50' : '#f44336'; }
+    };
+
     try {
-        await invoke('open_auth_url', { url });
-    } catch (e) {
-        window.open(url, '_blank');
+        setStatus('🖼️ Lade Modpack-Icon & Versions-Info...', 10);
+        await new Promise(r => setTimeout(r, 100));
+
+        setStatus('📥 Lade .mrpack herunter...', 25);
+
+        const result = await invoke('install_modpack', {
+            packId,
+            packName,
+            versionId: null
+        });
+
+        setStatus('✅ Abgeschlossen!', 100);
+        await new Promise(r => setTimeout(r, 300));
+
+        const modsCount = result.mods_downloaded || 0;
+        const overrides = result.overrides_copied || 0;
+        const hasIcon = result.has_icon ? ' · Icon übernommen ✓' : '';
+        showResult(true,
+            `"${escapeHtml(result.profile_name)}" erfolgreich installiert!\n\n` +
+            `🎮 Minecraft ${result.minecraft_version}\n` +
+            `📦 ${modsCount} Mods heruntergeladen\n` +
+            `📁 ${overrides} Config/Override-Dateien kopiert${hasIcon}\n\n` +
+            `Das Profil wurde automatisch erstellt.`
+        );
+
+        showToast(`Modpack "${escapeHtml(packName)}" installiert!`, 'success', 4000);
+
+    } catch (error) {
+        debugLog('Modpack install failed: ' + error, 'error');
+        showResult(false, 'Installation fehlgeschlagen:\n' + String(error));
+        showToast('Modpack-Installation fehlgeschlagen: ' + error, 'error', 5000);
+    }
+}
+
+// ==================== MODPACKS ====================
+
+async function loadPopularModpacks(page = 0) {
+    const modList = document.getElementById('mod-list');
+    if (!modList) return;
+
+    currentModPage = page;
+    currentModSearchQuery = '';
+
+    modList.innerHTML = '<div class="loading"><div class="spinner" style="margin: 20px auto;"></div><p>Lade beliebte Modpacks...</p></div>';
+
+    try {
+        const packs = await invoke('search_modpacks', {
+            query: '',
+            gameVersion: selectedFilters.version || null,
+            loader: selectedFilters.loader || null,
+            categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
+            sortBy: 'downloads',
+            offset: page * getEffectiveLimit(),
+            limit: getEffectiveLimit()
+        });
+
+        renderMods(packs, page);
+    } catch (error) {
+        debugLog('Failed to load modpacks: ' + error, 'error');
+        modList.innerHTML = `
+            <div class="loading" style="text-align: center; padding: 40px;">
+                <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-collection"></i></div>
+                <p style="color: var(--gold); margin-bottom: 10px;">Beliebte Modpacks</p>
+                <p style="color: var(--text-secondary);">Gib einen Suchbegriff ein oder versuche es später erneut</p>
+                <p style="color: #f44336; font-size: 12px; margin-top: 10px;">${escapeHtml(String(error))}</p>
+            </div>
+        `;
+    }
+}
+
+async function searchModpacks(query, page = 0) {
+    const modList = document.getElementById('mod-list');
+    if (!modList) return;
+
+    currentModSearchQuery = query || '';
+    currentModPage = page;
+
+    if (!query || query.length < 2) {
+        loadPopularModpacks(page);
+        return;
+    }
+
+    modList.innerHTML = '<div class="loading"><div class="spinner" style="margin: 20px auto;"></div><p>Suche Modpacks...</p></div>';
+
+    try {
+        const packs = await invoke('search_modpacks', {
+            query,
+            gameVersion: selectedFilters.version || null,
+            loader: selectedFilters.loader || null,
+            categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
+            sortBy: selectedFilters.sort || 'downloads',
+            offset: page * getEffectiveLimit(),
+            limit: getEffectiveLimit()
+        });
+
+        renderMods(packs, page);
+    } catch (error) {
+        debugLog('Modpack search failed: ' + error, 'error');
+        modList.innerHTML = '<div class="loading">Suche fehlgeschlagen: ' + escapeHtml(String(error)) + '</div>';
     }
 }
 

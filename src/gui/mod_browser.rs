@@ -670,6 +670,335 @@ pub async fn install_shaderpack(
 
 // ==================== MODPACKS ====================
 
+/// Installiert ein Modrinth Modpack (.mrpack Format):
+/// 1. Holt Projekt-Icon + Versionen von Modrinth
+/// 2. Lädt .mrpack herunter
+/// 3. Liest modrinth.index.json
+/// 4. Erstellt neues Profil mit Modpack-Icon
+/// 5. Lädt alle Dateien aus dem Manifest herunter (mods, configs, ...)
+/// 6. Kopiert ALLE Overrides (overrides/ + client-overrides/ + server-overrides/)
+///    inkl. Unterordner wie config/, saves/, resourcepacks/, options.txt usw.
+#[tauri::command]
+pub async fn install_modpack(
+    pack_id: String,
+    pack_name: String,
+    version_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    use std::io::Read;
+    use base64::Engine as _;
+    use crate::core::profiles::ProfileManager;
+    use crate::types::profile::Profile;
+    use crate::types::version::ModLoader;
+
+    tracing::info!("🎮 Installing modpack: {} ({})", pack_name, pack_id);
+
+    let client = reqwest::Client::builder()
+        .user_agent("LionLauncher/1.0")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // ── 1a. Projekt-Info holen (für Icon-URL) ────────────────────────────────
+    #[derive(serde::Deserialize)]
+    struct ProjectInfo {
+        icon_url: Option<String>,
+    }
+
+    let project_url = format!("https://api.modrinth.com/v2/project/{}", pack_id);
+    let icon_data_url: Option<String> = match client.get(&project_url).send().await {
+        Ok(resp) => {
+            match resp.json::<ProjectInfo>().await {
+                Ok(info) => {
+                    if let Some(icon_url) = info.icon_url {
+                        tracing::info!("🖼️ Fetching modpack icon: {}", icon_url);
+                        match client.get(&icon_url).send().await {
+                            Ok(img_resp) => {
+                                // Content-Type für korrekten Mime-Type
+                                let mime = img_resp.headers()
+                                    .get("content-type")
+                                    .and_then(|v| v.to_str().ok())
+                                    .unwrap_or("image/png")
+                                    .split(';').next()
+                                    .unwrap_or("image/png")
+                                    .to_string();
+                                match img_resp.bytes().await {
+                                    Ok(img_bytes) => {
+                                        let b64 = base64::engine::general_purpose::STANDARD.encode(&img_bytes);
+                                        Some(format!("data:{};base64,{}", mime, b64))
+                                    }
+                                    Err(e) => { tracing::warn!("Icon bytes failed: {}", e); None }
+                                }
+                            }
+                            Err(e) => { tracing::warn!("Icon fetch failed: {}", e); None }
+                        }
+                    } else { None }
+                }
+                Err(e) => { tracing::warn!("Project info parse failed: {}", e); None }
+            }
+        }
+        Err(e) => { tracing::warn!("Project info fetch failed: {}", e); None }
+    };
+
+    // ── 1b. Versionen holen ──────────────────────────────────────────────────
+    #[derive(serde::Deserialize)]
+    struct MrpackFile {
+        url: String,
+        filename: String,
+        primary: bool,
+        #[allow(dead_code)]
+        size: u64,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct MrpackVersion {
+        id: String,
+        #[allow(dead_code)]
+        name: String,
+        #[allow(dead_code)]
+        version_number: String,
+        #[allow(dead_code)]
+        game_versions: Vec<String>,
+        #[allow(dead_code)]
+        loaders: Vec<String>,
+        files: Vec<MrpackFile>,
+    }
+
+    let versions_url = format!("https://api.modrinth.com/v2/project/{}/version", pack_id);
+    let versions_resp = client.get(&versions_url).send().await.map_err(|e| e.to_string())?;
+    let versions: Vec<MrpackVersion> = versions_resp.json().await.map_err(|e| e.to_string())?;
+
+    let version = if let Some(vid) = version_id {
+        versions.iter().find(|v| v.id == vid)
+    } else {
+        versions.first()
+    }.ok_or_else(|| "Keine Modpack-Version gefunden".to_string())?;
+
+    let mrpack_file = version.files.iter().find(|f| f.filename.ends_with(".mrpack") && f.primary)
+        .or_else(|| version.files.iter().find(|f| f.filename.ends_with(".mrpack")))
+        .or_else(|| version.files.first())
+        .ok_or_else(|| "Keine .mrpack Datei in dieser Version gefunden".to_string())?;
+
+    // ── 2. .mrpack herunterladen in temp-Datei ──────────────────────────────
+    let temp_dir = std::env::temp_dir().join(format!("lion_modpack_{}", uuid::Uuid::new_v4()));
+    tokio::fs::create_dir_all(&temp_dir).await.map_err(|e| e.to_string())?;
+    let mrpack_path = temp_dir.join(&mrpack_file.filename);
+
+    tracing::info!("📥 Downloading mrpack from: {}", mrpack_file.url);
+
+    let resp = client.get(&mrpack_file.url).send().await.map_err(|e| e.to_string())?;
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    tokio::fs::write(&mrpack_path, &bytes).await.map_err(|e| e.to_string())?;
+
+    tracing::info!("✅ mrpack downloaded: {} bytes", bytes.len());
+
+    // ── 3. modrinth.index.json lesen ────────────────────────────────────────
+    #[derive(serde::Deserialize)]
+    struct IndexFile {
+        path: String,
+        hashes: IndexHashes,
+        #[allow(dead_code)]
+        env: Option<serde_json::Value>,
+        downloads: Vec<String>,
+        #[serde(rename = "fileSize")]
+        #[allow(dead_code)]
+        file_size: Option<u64>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct IndexHashes {
+        sha1: Option<String>,
+        #[allow(dead_code)]
+        sha512: Option<String>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct ModrinthIndex {
+        #[allow(dead_code)]
+        name: String,
+        #[allow(dead_code)]
+        summary: Option<String>,
+        files: Vec<IndexFile>,
+        dependencies: std::collections::HashMap<String, String>,
+    }
+
+    let zip_file = std::fs::File::open(&mrpack_path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(zip_file).map_err(|e| e.to_string())?;
+
+    let index_json = {
+        let mut index_file = archive.by_name("modrinth.index.json")
+            .map_err(|_| "modrinth.index.json nicht im Modpack gefunden".to_string())?;
+        let mut content = String::new();
+        index_file.read_to_string(&mut content).map_err(|e| e.to_string())?;
+        content
+    };
+
+    let index: ModrinthIndex = serde_json::from_str(&index_json).map_err(|e| e.to_string())?;
+
+    let mc_version = index.dependencies.get("minecraft")
+        .cloned()
+        .ok_or_else(|| "Minecraft-Version nicht im Modpack angegeben".to_string())?;
+
+    let (loader, loader_version) = if let Some(v) = index.dependencies.get("fabric-loader") {
+        (ModLoader::Fabric, v.clone())
+    } else if let Some(v) = index.dependencies.get("neoforge") {
+        (ModLoader::NeoForge, v.clone())
+    } else if let Some(v) = index.dependencies.get("forge") {
+        (ModLoader::Forge, v.clone())
+    } else if let Some(v) = index.dependencies.get("quilt-loader") {
+        (ModLoader::Quilt, v.clone())
+    } else {
+        (ModLoader::Vanilla, String::new())
+    };
+
+    tracing::info!("Modpack: {} – MC {} {:?} {}", pack_name, mc_version, loader, loader_version);
+
+    // ── 4. Profil erstellen (mit Modpack-Icon) ──────────────────────────────
+    let mut profile = Profile::new(pack_name.clone(), mc_version.clone(), loader, loader_version);
+
+    // Modpack-Icon als Profil-Icon setzen (als data-URL in icon_path)
+    if let Some(ref data_url) = icon_data_url {
+        profile.icon_path = Some(std::path::PathBuf::from(data_url.clone()));
+        tracing::info!("✅ Modpack icon set as profile icon");
+    }
+
+    let profile_dir = profile.game_dir.clone();
+    let profile_id = profile.id.clone();
+
+    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    profile_manager.create_profile(profile).await.map_err(|e| e.to_string())?;
+
+    // ── 5. Manifest-Dateien herunterladen (Mods + alle anderen Pfade) ────────
+    // Das Manifest kann nicht nur mods/ enthalten, sondern auch config/, saves/, etc.
+    let mods_dir = profile_dir.join("mods");
+    tokio::fs::create_dir_all(&mods_dir).await.map_err(|e| e.to_string())?;
+
+    let total = index.files.len();
+    tracing::info!("📦 Downloading {} manifest files...", total);
+
+    for (i, file) in index.files.iter().enumerate() {
+        if let Some(download_url) = file.downloads.first() {
+            // Normalisiere Pfad (Windows-Backslashes → Forward Slashes)
+            let normalized_path = file.path.replace('\\', "/");
+
+            // Ziel: immer relativ zum profile_dir (game directory)
+            let target_path = profile_dir.join(&normalized_path);
+
+            // Stelle sicher dass alle Parent-Ordner existieren
+            if let Some(parent) = target_path.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    tracing::warn!("Could not create dir {:?}: {}", parent, e);
+                }
+            }
+
+            tracing::info!("[{}/{}] Downloading: {}", i + 1, total, normalized_path);
+
+            let resp = client.get(download_url).send().await;
+            match resp {
+                Ok(r) => {
+                    match r.bytes().await {
+                        Ok(file_bytes) => {
+                            if let Err(e) = tokio::fs::write(&target_path, &file_bytes).await {
+                                tracing::warn!("Failed to write {}: {}", normalized_path, e);
+                            } else if let Some(expected_sha1) = &file.hashes.sha1 {
+                                use sha1::Digest;
+                                let hash = sha1::Sha1::digest(&file_bytes);
+                                let actual = hex::encode(hash);
+                                if &actual != expected_sha1 {
+                                    tracing::warn!("⚠️ SHA1 mismatch for {}", normalized_path);
+                                }
+                            }
+                        }
+                        Err(e) => tracing::warn!("Failed to read bytes for {}: {}", normalized_path, e),
+                    }
+                }
+                Err(e) => tracing::warn!("Failed to download {}: {}", normalized_path, e),
+            }
+        }
+    }
+
+    // ── 6. Overrides kopieren (ALLE Typen + ALLE Unterordner) ───────────────
+    // overrides/          → alles (config/, mods/, options.txt, ...)
+    // client-overrides/   → client-seitige Dateien
+    // server-overrides/   → serverseitige Dateien (auch relevant für configs)
+    //
+    // Alle Pfad-Komponenten bleiben erhalten:
+    //   overrides/config/sodium/sodium-options.json → profile_dir/config/sodium/sodium-options.json
+    //   overrides/options.txt                       → profile_dir/options.txt
+    //   overrides/resourcepacks/MyPack.zip          → profile_dir/resourcepacks/MyPack.zip
+    let zip_file2 = std::fs::File::open(&mrpack_path).map_err(|e| e.to_string())?;
+    let mut archive2 = zip::ZipArchive::new(zip_file2).map_err(|e| e.to_string())?;
+
+    // Alle drei Override-Typen unterstützen
+    let override_prefixes: &[&str] = &["overrides/", "client-overrides/", "server-overrides/"];
+    let mut overrides_copied = 0;
+
+    for i in 0..archive2.len() {
+        let mut entry = archive2.by_index(i).map_err(|e| e.to_string())?;
+        let raw_name = entry.name().to_string();
+
+        // Normalisiere Backslashes
+        let entry_name = raw_name.replace('\\', "/");
+
+        // Ordner-Einträge überspringen (werden implizit durch create_dir_all erstellt)
+        if entry_name.ends_with('/') {
+            continue;
+        }
+
+        // Suche passenden Override-Prefix
+        let matched_prefix = override_prefixes.iter().find(|&&prefix| entry_name.starts_with(prefix));
+
+        if let Some(prefix) = matched_prefix {
+            // Relative Pfadkomponente nach dem Prefix
+            let rel = &entry_name[prefix.len()..];
+
+            // Ziel: profile_dir/<rel>
+            // Beispiele:
+            //   overrides/config/mod.json       → profile_dir/config/mod.json
+            //   overrides/options.txt           → profile_dir/options.txt
+            //   client-overrides/resourcepacks/ → profile_dir/resourcepacks/
+            let target = profile_dir.join(rel);
+
+            // Erstelle alle Parent-Verzeichnisse (inkl. tief verschachtelte config-Ordner)
+            if let Some(parent) = target.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    tracing::warn!("Failed to create override dir {:?}: {}", parent, e);
+                    continue;
+                }
+            }
+
+            let mut content = Vec::new();
+            if let Err(e) = entry.read_to_end(&mut content) {
+                tracing::warn!("Failed to read override entry {}: {}", rel, e);
+                continue;
+            }
+
+            match std::fs::write(&target, &content) {
+                Ok(_) => {
+                    tracing::debug!("Override: {} → {:?}", rel, target);
+                    overrides_copied += 1;
+                }
+                Err(e) => tracing::warn!("Override write failed for {}: {}", rel, e),
+            }
+        }
+    }
+
+    tracing::info!("✅ Overrides kopiert: {} Dateien", overrides_copied);
+
+    // ── 7. Temp-Ordner aufräumen ────────────────────────────────────────────
+    tokio::fs::remove_dir_all(&temp_dir).await.ok();
+
+    tracing::info!("🎉 Modpack '{}' erfolgreich installiert! Profil-ID: {}", pack_name, profile_id);
+
+    Ok(serde_json::json!({
+        "success": true,
+        "profile_id": profile_id,
+        "profile_name": pack_name,
+        "minecraft_version": mc_version,
+        "mods_downloaded": total,
+        "overrides_copied": overrides_copied,
+        "has_icon": icon_data_url.is_some(),
+    }))
+}
+
 #[tauri::command]
 pub async fn search_modpacks(
     query: String,
