@@ -354,9 +354,10 @@ pub async fn install_neoforge(
     }
 
     // 7. Parse Game-Argumente - EXAKT wie in der offiziellen NeoForge version.json!
-    // KRITISCH: fml.fmlVersion ist NICHT die NeoForge-Version, sondern die FML-Version (4.0.42)!
-    // KRITISCH: fml.neoFormVersion wird aus der version.json extrahiert (dynamisch für jede MC-Version!)
-    let fml_version = "4.0.42"; // FML Loader Version für NeoForge 21.1.x
+    // KRITISCH: fml.fmlVersion und fml.neoFormVersion DYNAMISCH aus der version.json lesen,
+    // da sie sich zwischen NeoForge-Versionen unterscheiden.
+    let fml_version = extract_fml_version(&version);
+    tracing::info!("✅ Detected FML version: {}", fml_version);
 
     let game_args = vec![
         "--fml.neoForgeVersion".to_string(),
@@ -532,16 +533,29 @@ fn extract_version_json(installer_path: &Path) -> Result<String> {
 
 /// Extrahiert die NeoForm-Version aus der NeoForge version.json
 fn extract_neoform_version(version: &NeoForgeVersion) -> Result<String> {
+    extract_game_arg_value(version, "--fml.neoFormVersion")
+        .ok_or_else(|| anyhow::anyhow!("Could not extract NeoForm version from version.json"))
+}
+
+/// Extrahiert die FML-Version aus der NeoForge version.json
+fn extract_fml_version(version: &NeoForgeVersion) -> String {
+    extract_game_arg_value(version, "--fml.fmlVersion")
+        .unwrap_or_else(|| {
+            tracing::warn!("--fml.fmlVersion not found in version.json, using fallback 4.0.42");
+            "4.0.42".to_string()
+        })
+}
+
+/// Allgemeine Hilfsfunktion: Sucht den Wert nach einem bestimmten Schlüssel in arguments.game
+fn extract_game_arg_value(version: &NeoForgeVersion, key: &str) -> Option<String> {
     if let Some(args) = &version.arguments {
         if let Some(game) = &args.game {
-            // Suche nach --fml.neoFormVersion und dem folgenden Wert
             for i in 0..game.len() {
                 if let Some(arg_str) = game[i].as_str() {
-                    if arg_str == "--fml.neoFormVersion" {
-                        // Der nächste Eintrag ist die Version
+                    if arg_str == key {
                         if i + 1 < game.len() {
                             if let Some(version_str) = game[i + 1].as_str() {
-                                return Ok(version_str.to_string());
+                                return Some(version_str.to_string());
                             }
                         }
                     }
@@ -549,8 +563,7 @@ fn extract_neoform_version(version: &NeoForgeVersion) -> Result<String> {
             }
         }
     }
-
-    bail!("Could not extract NeoForm version from version.json");
+    None
 }
 
 /// Findet die Game-JAR: entweder die neue patched-JAR oder die alte SRG-JAR
@@ -655,12 +668,31 @@ pub fn build_launch_command(
     version: &str,
     asset_index: &str,
 ) -> Command {
-    let mut cmd = Command::new(java_path);
+    // Auf Windows javaw.exe nutzen um kein CMD-Fenster zu öffnen.
+    // Tauri-Apps sind windowless (windows_subsystem = "windows"), daher würde java.exe
+    // ein CMD-Fenster öffnen. javaw.exe ist eine Windows-GUI-Anwendung ohne Konsole.
+    let java_bin = if cfg!(windows) {
+        // Robuste Konvertierung: nur das letzte Segment ersetzen
+        let p = std::path::Path::new(java_path);
+        if p.file_name().and_then(|n| n.to_str()) == Some("java.exe") {
+            p.with_file_name("javaw.exe").display().to_string()
+        } else {
+            java_path.to_string()
+        }
+    } else {
+        java_path.to_string()
+    };
+
+    let mut cmd = Command::new(&java_bin);
 
     // JVM-Optionen
     cmd.arg(format!("-Xmx{}M", memory_mb));
     cmd.arg(format!("-Xms{}M", memory_mb / 2));
+    // java.library.path: Standard-JVM-Pfad für native Bibliotheken (alle Versionen)
     cmd.arg(format!("-Djava.library.path={}", natives_dir.display()));
+    // org.lwjgl.librarypath: LWJGL 3.3.2+ bevorzugt diese Property auf Windows.
+    // Ohne sie findet LWJGL lwjgl.dll nicht auch wenn java.library.path korrekt gesetzt ist.
+    cmd.arg(format!("-Dorg.lwjgl.librarypath={}", natives_dir.display()));
 
     // KRITISCHE System Properties für NeoForge/BootstrapLauncher
     cmd.arg("-Djava.net.preferIPv6Addresses=system");
@@ -668,7 +700,6 @@ pub fn build_launch_command(
     cmd.arg(format!("-DlibraryDirectory={}", libraries_dir.display()));
     let cp_sep = if cfg!(windows) { ";" } else { ":" };
     cmd.arg(format!("-DlegacyClassPath={}", installation.classpath.join(cp_sep)));
-
 
     // NeoForge JVM-Args
     for arg in &installation.jvm_args {
@@ -695,6 +726,14 @@ pub fn build_launch_command(
         cmd.arg(arg);
     }
 
+    // userType: "msa" für Microsoft-Accounts, "legacy" für Offline-Accounts.
+    // NICHT hardcoden – bei Offline-Accounts führt "msa" zu Auth-Fehlern.
+    let user_type = if !access_token.is_empty() && access_token != "0" {
+        "msa"
+    } else {
+        "legacy"
+    };
+
     // Vanilla Game Args
     cmd.arg("--username").arg(username);
     cmd.arg("--version").arg(version);
@@ -703,11 +742,23 @@ pub fn build_launch_command(
     cmd.arg("--assetIndex").arg(asset_index);
     cmd.arg("--uuid").arg(uuid);
     cmd.arg("--accessToken").arg(access_token);
-    cmd.arg("--userType").arg("msa");
+    cmd.arg("--userType").arg(user_type);
 
     cmd.current_dir(game_dir);
-    cmd.stdout(Stdio::inherit());
-    cmd.stderr(Stdio::inherit());
+
+    // Auf Windows: Stdio::null() statt inherit(), da der Tauri-Prozess kein Konsolenfenster hat
+    // (windows_subsystem = "windows"). Inherit würde ungültige Handles vererben.
+    // NeoForge schreibt Logs ohnehin in debug.log / latest.log im GameDir.
+    #[cfg(windows)]
+    {
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::null());
+    }
+    #[cfg(not(windows))]
+    {
+        cmd.stdout(Stdio::inherit());
+        cmd.stderr(Stdio::inherit());
+    }
 
     cmd
 }

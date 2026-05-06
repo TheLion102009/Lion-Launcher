@@ -1125,8 +1125,18 @@ maxThreads = -1
 
         // Starte den Prozess
         cmd.current_dir(game_dir);
-        cmd.stdout(Stdio::inherit());
-        cmd.stderr(Stdio::inherit());
+        // Auf Windows: Stdio::null() statt inherit(), da Tauri kein Konsolenfenster hat.
+        // Forge schreibt Logs ohnehin in latest.log / debug.log im GameDir.
+        #[cfg(windows)]
+        {
+            cmd.stdout(Stdio::null());
+            cmd.stderr(Stdio::null());
+        }
+        #[cfg(not(windows))]
+        {
+            cmd.stdout(Stdio::inherit());
+            cmd.stderr(Stdio::inherit());
+        }
 
         tracing::info!("Launching Forge {} for MC {}...", loader_version, version);
 
