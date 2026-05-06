@@ -668,9 +668,20 @@ maxThreads = -1
         for jar_path in &install_result.native_jars {
             let path = std::path::Path::new(jar_path);
             let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let is_my_os = (os == "linux" && (fname.contains("natives-linux") || fname.contains("linux")))
-                || (os == "windows" && fname.contains("natives-windows"))
-                || (os == "osx" && (fname.contains("natives-osx") || fname.contains("natives-macos")));
+            // Architektur-bewusste Filterung: natives-windows-arm64 auf Windows x64 NICHT extrahieren
+            let fname_lower = fname.to_lowercase();
+            let is_my_os = if os == "linux" {
+                (fname_lower.contains("natives-linux") || fname_lower.contains("linux"))
+                    && Self::should_extract_native_for_platform(&fname_lower, &os)
+            } else if os == "windows" {
+                fname_lower.contains("natives-windows")
+                    && Self::should_extract_native_for_platform(&fname_lower, &os)
+            } else if os == "osx" {
+                (fname_lower.contains("natives-osx") || fname_lower.contains("natives-macos"))
+                    && Self::should_extract_native_for_platform(&fname_lower, &os)
+            } else {
+                false
+            };
             if is_my_os && path.exists() {
                 tracing::info!("Extracting Forge native: {}", fname);
                 self.extract_native(path, natives_dir)?;
@@ -693,6 +704,11 @@ maxThreads = -1
             if let Some(dl) = &lib.downloads {
                 if let Some(art) = &dl.artifact {
                     if art.path.contains(native_os_suffix) {
+                        // Architektur-Filter: natives-windows-arm64 auf x64 NICHT extrahieren
+                        if !Self::should_extract_native_for_platform(&art.path, &os) {
+                            tracing::debug!("Skipping wrong-arch native (Forge Quelle 2): {}", art.path);
+                            continue;
+                        }
                         let native_path = libraries_dir.join(&art.path);
                         if native_path.exists() {
                             let fname = native_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -1192,7 +1208,12 @@ maxThreads = -1
 
         cmd.arg(format!("-Xmx{}M", memory_mb));
         cmd.arg(format!("-Xms{}M", memory_mb / 2));
+        // java.library.path: Standard-JVM-Pfad für native Bibliotheken (alle Versionen)
         cmd.arg(format!("-Djava.library.path={}", natives_dir.display()));
+        // org.lwjgl.librarypath: LWJGL 3.3.2+ bevorzugt diese Property gegenüber java.library.path.
+        // Ohne diese Property findet LWJGL auf Windows keine lwjgl.dll (auch wenn java.library.path gesetzt ist).
+        // Forge setzt beide Properties – Fabric/Quilt/Vanilla muss das ebenfalls tun.
+        cmd.arg(format!("-Dorg.lwjgl.librarypath={}", natives_dir.display()));
         cmd.arg("-XX:+UseG1GC");
         cmd.arg("-Dminecraft.launcher.brand=lion-launcher");
         cmd.arg("-Dminecraft.launcher.version=1.0");
@@ -2637,17 +2658,18 @@ maxThreads = -1
 
                     // Modernes Format (1.19+): natives-JARs haben "natives-<os>" im Pfad
                     // z.B. lwjgl-3.3.3-natives-linux.jar → extrahieren, NICHT in Classpath
+                    // Wichtig: Architektur-spezifische Varianten korrekt filtern:
+                    //   natives-windows.jar (x64), natives-windows-arm64.jar, natives-windows-x86.jar
+                    //   natives-linux.jar (x64), natives-linux-arm64.jar, natives-linux-aarch64.jar
+                    //   natives-osx.jar (x64), natives-macos-arm64.jar
                     let is_native_jar = art.path.contains("natives-linux")
                         || art.path.contains("natives-windows")
                         || art.path.contains("natives-osx")
                         || art.path.contains("natives-macos");
 
                     if is_native_jar {
-                        // Nur Linux-Natives auf Linux extrahieren
-                        if (os == "linux" && art.path.contains("natives-linux"))
-                            || (os == "windows" && art.path.contains("natives-windows"))
-                            || (os == "osx" && (art.path.contains("natives-osx") || art.path.contains("natives-macos")))
-                        {
+                        // Architektur- und OS-bewusste Extraktion:
+                        if Self::should_extract_native_for_platform(&art.path, &os) {
                             if !Self::is_valid_zip(&dest) {
                                 tracing::warn!("Corrupt native archive detected, re-downloading: {:?}", dest);
                                 tokio::fs::remove_file(&dest).await.ok();
@@ -3117,6 +3139,83 @@ maxThreads = -1
         else { "linux" }.to_string()
     }
 
+    /// Prüft ob ein natives-JAR für das aktuelle Betriebssystem UND die aktuelle CPU-Architektur
+    /// extrahiert werden soll.
+    ///
+    /// Hintergrund: Minecraft 1.21.5+ (LWJGL 3.4.1-snapshot) liefert separate Natives-JARs pro
+    /// Betriebssystem-Architektur:
+    ///   - natives-windows.jar          → Windows x86_64
+    ///   - natives-windows-arm64.jar    → Windows ARM64
+    ///   - natives-windows-x86.jar      → Windows 32-bit (veraltet)
+    ///   - natives-linux.jar            → Linux x86_64
+    ///   - natives-linux-arm64.jar      → Linux ARM64
+    ///   - natives-linux-aarch64.jar    → Linux ARM64 (alternatives Namensschema)
+    ///   - natives-macos.jar / natives-osx.jar  → macOS x86_64
+    ///   - natives-macos-arm64.jar      → macOS Apple Silicon
+    ///
+    /// Nur das passende JAR extrahieren – sonst überschreiben arm64-DLLs die x64-DLLs!
+    fn should_extract_native_for_platform(path: &str, os: &str) -> bool {
+        let arch = std::env::consts::ARCH; // "x86_64", "aarch64", ...
+
+        match os {
+            "windows" => {
+                if !path.contains("natives-windows") { return false; }
+                match arch {
+                    "x86_64" => {
+                        // Nur natives-windows (x64) – NICHT arm64 oder x86
+                        !path.contains("natives-windows-arm64")
+                            && !path.contains("natives-windows-x86")
+                    }
+                    "aarch64" => {
+                        // Nur natives-windows-arm64
+                        path.contains("natives-windows-arm64")
+                    }
+                    _ => {
+                        // Fallback: nur wenn kein Architektur-Suffix vorhanden
+                        !path.contains("natives-windows-arm64")
+                            && !path.contains("natives-windows-x86")
+                    }
+                }
+            }
+            "linux" => {
+                if !path.contains("natives-linux") { return false; }
+                match arch {
+                    "x86_64" => {
+                        // Nur natives-linux (x64) – NICHT arm64 / aarch64
+                        !path.contains("natives-linux-arm64")
+                            && !path.contains("natives-linux-aarch64")
+                    }
+                    "aarch64" => {
+                        // Nur arm64/aarch64 Varianten
+                        path.contains("natives-linux-arm64")
+                            || path.contains("natives-linux-aarch64")
+                    }
+                    _ => {
+                        !path.contains("natives-linux-arm64")
+                            && !path.contains("natives-linux-aarch64")
+                    }
+                }
+            }
+            "osx" => {
+                if !path.contains("natives-osx") && !path.contains("natives-macos") {
+                    return false;
+                }
+                match arch {
+                    "x86_64" => {
+                        // Nur x64-Natives (ohne arm64-Suffix)
+                        !path.contains("arm64")
+                    }
+                    "aarch64" => {
+                        // Apple Silicon: natives-macos-arm64 bevorzugen, Fallback auf universale
+                        path.contains("arm64") || (!path.contains("natives-macos-arm64") && !path.contains("natives-osx-arm64"))
+                    }
+                    _ => !path.contains("arm64"),
+                }
+            }
+            _ => false,
+        }
+    }
+
     fn check_rules(&self, rules: &[Rule]) -> bool {
         let os = Self::get_os();
         for r in rules {
@@ -3133,41 +3232,68 @@ maxThreads = -1
 
 /// Sucht alle natives-JARs für das gegebene OS im libraries-Verzeichnis.
 /// Inkludiert LWJGL, jtracy (Mojang 1.21.11+) und andere Minecraft-natives.
+/// Filtert Architektur-spezifische Varianten (arm64, x86) für die aktuelle Plattform.
 fn walkdir_lwjgl_natives(dir: &Path, os: &str) -> std::io::Result<Vec<PathBuf>> {
     let suffix = match os {
-        "linux"   => "-natives-linux.jar",
-        "windows" => "-natives-windows.jar",
-        "osx"     => "-natives-macos.jar",
-        _         => "-natives-linux.jar",
+        "linux"   => "-natives-linux",
+        "windows" => "-natives-windows",
+        "osx"     => "-natives-macos",
+        _         => "-natives-linux",
     };
-    // Alle relevanten natives inkl. jtracy (ab MC 1.21.11) und LWJGL
-    let all = walkdir_find_natives(dir, suffix)?;
-    Ok(all.into_iter().filter(|p| {
-        p.file_name()
+    let arch = std::env::consts::ARCH;
+    // Alle natives-JARs für das OS suchen
+    let all = walkdir_find_natives_suffix(dir, &format!("{}.jar", suffix))?;
+    // Architektur-spezifische Varianten inkludieren
+    let arm_suffix = format!("{}-arm64.jar", suffix);
+    let aarch64_suffix = format!("{}-aarch64.jar", suffix);
+    let _x86_suffix = format!("{}-x86.jar", suffix);
+    let mut arm_variants = walkdir_find_natives_suffix(dir, &arm_suffix)?;
+    let mut aarch64_variants = walkdir_find_natives_suffix(dir, &aarch64_suffix)?;
+    arm_variants.append(&mut aarch64_variants);
+
+    // Welche JARs sollen für die aktuelle Architektur genutzt werden?
+    let combined: Vec<PathBuf> = match arch {
+        "x86_64" => all, // x64: nur natives ohne architektur-Suffix (arm64/x86 filtern)
+        "aarch64" => {
+            // ARM64: arm64-Varianten bevorzugen, sonst universelle
+            if arm_variants.is_empty() { all } else { arm_variants }
+        }
+        _ => all,
+    };
+
+    // Nach relevanten LWJGL-Komponenten filtern
+    Ok(combined.into_iter().filter(|p| {
+        let fname = p.file_name()
             .and_then(|n| n.to_str())
-            .map(|n| {
-                n.starts_with("lwjgl")
-                    || n.contains("glfw")
-                    || n.contains("openal")
-                    || n.contains("jemalloc")
-                    || n.contains("stb")
-                    || n.contains("freetype")
-                    || n.contains("jtracy")   // Mojang Tracy profiler (MC 1.21.11+)
-                    || n.contains("tinyfd")
-            })
-            .unwrap_or(false)
+            .unwrap_or("");
+        let fname_lower = fname.to_lowercase();
+        // Architektur-Suffix nochmals prüfen: keine arm64 auf x86_64 usw.
+        let wrong_arch = match arch {
+            "x86_64" => fname_lower.contains("-arm64") || (fname_lower.contains("-x86.") && !fname_lower.contains("x86_64")),
+            "aarch64" => false, // arm64 nimmt alles
+            _ => false,
+        };
+        if wrong_arch { return false; }
+        fname_lower.starts_with("lwjgl")
+            || fname_lower.contains("glfw")
+            || fname_lower.contains("openal")
+            || fname_lower.contains("jemalloc")
+            || fname_lower.contains("stb")
+            || fname_lower.contains("freetype")
+            || fname_lower.contains("jtracy")
+            || fname_lower.contains("tinyfd")
     }).collect())
 }
 
 /// Durchsucht `dir` rekursiv nach JARs die `suffix` im Dateinamen haben.
-fn walkdir_find_natives(dir: &Path, suffix: &str) -> std::io::Result<Vec<PathBuf>> {
+fn walkdir_find_natives_suffix(dir: &Path, suffix: &str) -> std::io::Result<Vec<PathBuf>> {
     let mut results = Vec::new();
     if !dir.is_dir() { return Ok(results); }
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            if let Ok(mut sub) = walkdir_find_natives(&path, suffix) {
+            if let Ok(mut sub) = walkdir_find_natives_suffix(&path, suffix) {
                 results.append(&mut sub);
             }
         } else if path.file_name()
