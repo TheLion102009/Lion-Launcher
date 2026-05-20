@@ -574,6 +574,142 @@ jobs:
           retention-days: 30
 
 # ─────────────────────────────────────────────────────────────
+#  Job 7: Nightly – GitHub Pre-Release erstellen & Backend
+#          benachrichtigen (läuft nur bei Push auf main/master,
+#          NICHT bei Tag-Pushes)
+#
+#  Benötigt GitHub-Secrets:
+#    LAUNCHER_WEBHOOK_SECRET  – muss mit [launcher] webhook_secret
+#                               in config.toml übereinstimmen
+# ─────────────────────────────────────────────────────────────
+  release-nightly:
+    name: "🌙 Nightly – GitHub Release & Backend"
+    needs:
+      - build-deb-rpm
+      - build-appimage
+      - build-windows
+    runs-on: ubuntu-22.04
+    if: |
+      github.event_name == 'push' &&
+      !startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Alle Build-Artefakte herunterladen
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Artefakte auflisten
+        run: find artifacts -type f | sort
+
+      - name: Alte "nightly" Release + Tag löschen (falls vorhanden)
+        run: |
+          gh release delete nightly --yes --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh api -X DELETE "/repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" 2>/dev/null || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🚀 Nightly GitHub-Release erstellen & Artefakte hochladen
+        id: nightly_release
+        run: |
+          FILES=()
+          for f in \
+            artifacts/linux-deb/*.deb \
+            artifacts/linux-rpm/*.rpm \
+            artifacts/linux-appimage/*.AppImage \
+            artifacts/windows-installer/*.exe; do
+            [ -f "$f" ] && FILES+=("$f")
+          done
+
+          echo "📦 Lade folgende Dateien hoch:"
+          printf '   %s\n' "${FILES[@]}"
+
+          gh release create nightly \
+            --target "${GITHUB_SHA}" \
+            --title "🌙 Nightly – $(date -u +'%Y-%m-%d') (${GITHUB_SHA:0:7})" \
+            --notes "$(printf '**Automatischer Nightly-Build**\n\n- Commit: `%s`\n- Kurzform: `%s`\n- Branch: `%s`\n- Datum: %s\n\n> ⚠️ Dieser Release wird bei jedem Push auf `main` automatisch überschrieben.' \
+              "$GITHUB_SHA" \
+              "${GITHUB_SHA:0:7}" \
+              "${{ github.ref_name }}" \
+              "$(date -u +'%Y-%m-%dT%H:%M:%SZ')")" \
+            --prerelease \
+            --repo "$GITHUB_REPOSITORY" \
+            "${FILES[@]}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📡 Backend-API – Nightly Releases registrieren
+        continue-on-error: true
+        run: |
+          if [ -z "$LAUNCHER_WEBHOOK_SECRET" ]; then
+            echo "⚠️  LAUNCHER_WEBHOOK_SECRET nicht gesetzt – Backend-Benachrichtigung übersprungen."
+            echo "   Tipp: Unter Settings → Secrets → LAUNCHER_WEBHOOK_SECRET eintragen."
+            exit 0
+          fi
+
+          REPO="${{ github.repository }}"
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          BASE_URL="https://github.com/${REPO}/releases/download/nightly"
+
+          post_release() {
+            local PLATFORM="$1" FORMAT="$2" FILE="$3"
+            local FILENAME SIZE
+            FILENAME=$(basename "$FILE")
+            SIZE=$(du -sh "$FILE" 2>/dev/null | awk '{print $1}')
+
+            echo "📤 Registriere: channel=nightly platform=$PLATFORM format=$FORMAT version=$SHORT_SHA"
+            echo "   Datei: $FILENAME  |  Größe: $SIZE"
+            echo "   URL:   ${BASE_URL}/${FILENAME}"
+
+            HTTP_CODE=$(curl -s -o /tmp/api_resp.json -w "%{http_code}" \
+              -X POST "https://api.lion-craft.net/api/launcher/releases" \
+              -H "X-Webhook-Token: $LAUNCHER_WEBHOOK_SECRET" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"channel\": \"nightly\",
+                \"platform\": \"$PLATFORM\",
+                \"format\": \"$FORMAT\",
+                \"version\": \"$SHORT_SHA\",
+                \"download_url\": \"${BASE_URL}/${FILENAME}\",
+                \"file_size\": \"$SIZE\",
+                \"git_sha\": \"$GITHUB_SHA\"
+              }")
+
+            if [ "$HTTP_CODE" = "201" ]; then
+              echo "   ✅ HTTP $HTTP_CODE – Erfolgreich registriert"
+            else
+              echo "   ⚠️  HTTP $HTTP_CODE – Antwort: $(cat /tmp/api_resp.json)"
+            fi
+            echo ""
+          }
+
+          # Linux .deb
+          for f in artifacts/linux-deb/*.deb; do
+            [ -f "$f" ] && post_release "linux" "deb" "$f"
+          done
+
+          # Linux .rpm
+          for f in artifacts/linux-rpm/*.rpm; do
+            [ -f "$f" ] && post_release "linux" "rpm" "$f"
+          done
+
+          # Linux AppImage
+          for f in artifacts/linux-appimage/*.AppImage; do
+            [ -f "$f" ] && post_release "linux" "AppImage" "$f"
+          done
+
+          # Windows .exe
+          for f in artifacts/windows-installer/*.exe; do
+            [ -f "$f" ] && post_release "windows" "exe" "$f"
+          done
+
+          echo "✅ Alle Nightly-Releases im Backend registriert"
+        env:
+          LAUNCHER_WEBHOOK_SECRET: ${{ secrets.LAUNCHER_WEBHOOK_SECRET }}
+
+# ─────────────────────────────────────────────────────────────
 #  GitHub Release – alle Pakete zusammenführen
 #  Snap/Flatpak/Arch haben continue-on-error: true →
 #  Release wird auch erstellt wenn einzelne Jobs fehlschlagen.
@@ -652,3 +788,72 @@ jobs:
             release-artifacts/**/*.exe
             release-artifacts/SHA256SUMS.txt
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📡 Backend-API – Stable Release registrieren
+        continue-on-error: true
+        run: |
+          # LAUNCHER_ADMIN_JWT wird als GitHub Secret gespeichert.
+          # Der Admin loggt sich ein (POST /api/auth/login), kopiert den JWT
+          # und hinterlegt ihn unter Settings → Secrets → LAUNCHER_ADMIN_JWT.
+          # Standard-Ablaufzeit: 24h – für CI empfiehlt sich ein längerer Wert
+          # (expiry_hours in config.toml auf z.B. 8760 = 1 Jahr setzen).
+          if [ -z "$LAUNCHER_ADMIN_JWT" ]; then
+            echo "⚠️  LAUNCHER_ADMIN_JWT nicht gesetzt – Stable-Backend-Benachrichtigung übersprungen."
+            echo "   Tipp: Unter Settings → Secrets → LAUNCHER_ADMIN_JWT eintragen."
+            exit 0
+          fi
+
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          REPO="${{ github.repository }}"
+          BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
+
+          post_stable() {
+            local PLATFORM="$1" FORMAT="$2" FILE="$3"
+            local FILENAME SIZE
+            FILENAME=$(basename "$FILE")
+            SIZE=$(du -sh "$FILE" 2>/dev/null | awk '{print $1}')
+
+            echo "📤 Registriere: channel=stable platform=$PLATFORM format=$FORMAT version=$VERSION"
+            echo "   Datei: $FILENAME  |  Größe: $SIZE"
+            echo "   URL:   ${BASE_URL}/${FILENAME}"
+
+            HTTP_CODE=$(curl -s -o /tmp/api_resp.json -w "%{http_code}" \
+              -X POST "https://api.lion-craft.net/api/launcher/releases" \
+              -H "Authorization: Bearer $LAUNCHER_ADMIN_JWT" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"channel\": \"stable\",
+                \"platform\": \"$PLATFORM\",
+                \"format\": \"$FORMAT\",
+                \"version\": \"$VERSION\",
+                \"download_url\": \"${BASE_URL}/${FILENAME}\",
+                \"file_size\": \"$SIZE\",
+                \"git_sha\": \"$GITHUB_SHA\"
+              }")
+
+            if [ "$HTTP_CODE" = "201" ]; then
+              echo "   ✅ HTTP $HTTP_CODE – Erfolgreich registriert"
+            else
+              echo "   ⚠️  HTTP $HTTP_CODE – Antwort: $(cat /tmp/api_resp.json)"
+            fi
+            echo ""
+          }
+
+          for f in release-artifacts/linux-deb/*.deb; do
+            [ -f "$f" ] && post_stable "linux" "deb" "$f"
+          done
+          for f in release-artifacts/linux-rpm/*.rpm; do
+            [ -f "$f" ] && post_stable "linux" "rpm" "$f"
+          done
+          for f in release-artifacts/linux-appimage/*.AppImage; do
+            [ -f "$f" ] && post_stable "linux" "AppImage" "$f"
+          done
+          for f in release-artifacts/windows-installer/*.exe; do
+            [ -f "$f" ] && post_stable "windows" "exe" "$f"
+          done
+
+          echo "✅ Alle Stable-Releases im Backend registriert"
+        env:
+          LAUNCHER_ADMIN_JWT: ${{ secrets.LAUNCHER_ADMIN_JWT }}
+
