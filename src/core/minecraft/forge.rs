@@ -56,6 +56,7 @@ impl ForgeInstaller {
         forge_version: &str,
         libraries_dir: &Path,
         client_jar: &Path,
+        java_path: Option<&str>,
     ) -> Result<ForgeInstallResult> {
         use crate::api::forge::ForgeClient;
 
@@ -387,6 +388,7 @@ impl ForgeInstaller {
             mc_version,
             forge_version,
             &mcp_version,
+            java_path,
         ).await?;
 
         tracing::info!("--gameJar: {:?}", patched_client_jar.file_name().unwrap_or_default());
@@ -524,6 +526,7 @@ impl ForgeInstaller {
         mc_version: &str,
         forge_version: &str,
         mcp_version: &str,
+        java_path_hint: Option<&str>,
     ) -> Result<PathBuf> {
         // ── Resolve-Funktion für einzelne Werte ─────────────────────────────────
         // Verarbeitet:
@@ -604,7 +607,11 @@ impl ForgeInstaller {
         }
 
         tracing::info!("Führe {} Forge-Prozessoren aus...", processors.len());
-        let java = find_java_binary();
+        let java = java_path_hint
+            .filter(|p| !p.is_empty() && std::path::Path::new(p).exists())
+            .map(|p| p.to_string())
+            .unwrap_or_else(find_java_binary);
+        tracing::info!("Forge-Prozessoren Java: {}", java);
 
         // ── Prozessoren ausführen ────────────────────────────────────────────────
         for proc in processors {
@@ -808,13 +815,23 @@ impl ForgeInstaller {
             }
         }
 
-        // Suche in libraries/net/minecraft/client/ nach beliebiger JAR mit MC-Klassen
+        // Suche in libraries/net/minecraft/client/ nach JAR mit MC-Klassen – NUR für die richtige MC-Version!
+        // WICHTIG: Verzeichnisname ist z.B. "1.21.1-20240808.144430" → muss mit mc_version beginnen,
+        // gefolgt von "-" oder exact match. "1.21.1-..." darf NICHT für MC "1.21.11" verwendet werden!
         let mc_client_dir = libraries_dir.join("net/minecraft/client");
         if mc_client_dir.exists() {
             if let Ok(entries) = std::fs::read_dir(&mc_client_dir) {
                 for entry in entries.flatten() {
                     let p = entry.path();
                     if p.is_dir() {
+                        let dir_name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        // Exakter Match (z.B. "1.21.1") ODER "1.21.1-..." aber NICHT "1.21.11-..."
+                        let matches_version = dir_name == mc_version
+                            || dir_name.starts_with(&format!("{}-", mc_version));
+                        if !matches_version {
+                            tracing::debug!("Überspringe Verzeichnis für andere MC-Version: {} (suche: {})", dir_name, mc_version);
+                            continue;
+                        }
                         if let Ok(inner) = std::fs::read_dir(&p) {
                             for file in inner.flatten() {
                                 let fp = file.path();
@@ -991,7 +1008,10 @@ impl ForgeInstaller {
                     let vd = entry.path();
                     if !vd.is_dir() { continue; }
                     let vname = vd.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-                    if vname.starts_with(mc_version) && vname != target_suffix {
+                    // Exakter MC-Versionsprefix-Check: "1.21.1-" darf NICHT "1.21.11-" matchen!
+                    let is_same_mc = vname == target_suffix
+                        || vname.starts_with(&format!("{}-", mc_version));
+                    if is_same_mc && vname != target_suffix {
                         tracing::info!("Entferne alte Forge-Version: {:?}", vd);
                         tokio::fs::remove_dir_all(&vd).await.ok();
                     }
@@ -1027,7 +1047,10 @@ impl ForgeInstaller {
                 for entry in entries.flatten() {
                     let p = entry.path();
                     let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-                    if fname.starts_with(&format!("{}-", mc_version)) && fname != target_suffix {
+                    // Exakter Versionsprefix: "1.21.1-..." darf nicht für "1.21.11" gelöscht werden
+                    let is_same_mc_data = fname.starts_with(&format!("{}-", mc_version))
+                        || fname == format!("{}-{}", mc_version, "");
+                    if is_same_mc_data && fname != target_suffix {
                         tracing::info!("Entferne alte Installer-Daten: {:?}", p);
                         tokio::fs::remove_dir_all(&p).await.ok();
                     }
@@ -1080,10 +1103,26 @@ pub fn find_java_binary() -> String {
         let p = PathBuf::from(&home).join("bin").join(java_bin_name);
         if p.exists() { return p.display().to_string(); }
     }
-    // Launcher-managed Java
+    // Launcher-managed Java – direkt
     let managed = crate::config::defaults::java_dir().join("bin").join(java_bin_name);
     if managed.exists() {
         return managed.display().to_string();
+    }
+    // Launcher-managed Java – in Unterverzeichnissen (z.B. java/java-21/bin/java)
+    // Bevorzuge Java 21 vor 17 vor anderen Versionen
+    let java_dir = crate::config::defaults::java_dir();
+    for preferred in &["java-21", "java-17", "java-11", "java-8"] {
+        let p = java_dir.join(preferred).join("bin").join(java_bin_name);
+        if p.exists() { return p.display().to_string(); }
+    }
+    // Fallback: beliebiges gefundenes Java im java_dir
+    if let Ok(entries) = std::fs::read_dir(&java_dir) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                let p = entry.path().join("bin").join(java_bin_name);
+                if p.exists() { return p.display().to_string(); }
+            }
+        }
     }
 
     // Platform-specific system paths

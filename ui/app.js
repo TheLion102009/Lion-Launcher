@@ -48,7 +48,7 @@ function resolveUiAssetUrl(fileName) {
     }
 }
 
-let LION_LOGO_URL = resolveUiAssetUrl('lionlogo.png');
+let LION_LOGO_URL = resolveUiAssetUrl('icon.png');
 
 async function resolveEmbeddedLogoUrl() {
     try {

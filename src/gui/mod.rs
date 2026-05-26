@@ -14,7 +14,7 @@ pub fn greet(name: &str) -> String {
 pub fn get_embedded_logo_data_url() -> String {
     use base64::{Engine as _, engine::general_purpose};
 
-    let logo_bytes = include_bytes!("../../icons/lionlogo.png");
+    let logo_bytes = include_bytes!("../../icons/icon.png");
     let encoded = general_purpose::STANDARD.encode(logo_bytes);
     format!("data:image/png;base64,{}", encoded)
 }
@@ -746,19 +746,19 @@ pub async fn check_mod_updates(profile_id: String, _mc_version: String, _loader:
         if let Some(mod_id) = &mod_info.mod_id {
             // Versuche Mod auf Modrinth zu finden
             if let Ok(Some(latest)) = search_modrinth_by_name(mod_id).await {
-                    let has_update = mod_info.version.as_ref()
-                        .map(|v| v != &latest.version)
-                        .unwrap_or(false);
+                let has_update = mod_info.version.as_ref()
+                    .map(|v| v != &latest.version)
+                    .unwrap_or(false);
 
-                    if has_update {
-                        updates.push(ModUpdateInfo {
-                            filename: mod_info.filename.clone(),
-                            current_version: mod_info.version.clone(),
-                            latest_version: Some(latest.version),
-                            mod_id: latest.mod_id,
-                            icon_url: latest.icon_url,
-                        });
-                    }
+                if has_update {
+                    updates.push(ModUpdateInfo {
+                        filename: mod_info.filename.clone(),
+                        current_version: mod_info.version.clone(),
+                        latest_version: Some(latest.version),
+                        mod_id: latest.mod_id,
+                        icon_url: latest.icon_url,
+                    });
+                }
             }
         }
     }
@@ -1437,4 +1437,3 @@ fn migrate_old_metadata(mods_dir: &std::path::Path, modinfos_dir: &std::path::Pa
         }
     }
 }
-

@@ -82,7 +82,7 @@ body {
 
 /* Sidebar */
 .sidebar {
-    width: 72px;
+    width: 75px;
     background-color: var(--bg-medium);
     padding: 15px 8px;
     display: flex;
@@ -141,8 +141,8 @@ body {
 }
 
 .sidebar-logo-img {
-    height: 130px;
-    width: 130px;
+    height: 80px;
+    width: 80px;
     object-fit: contain;
     border-radius: 6px;
     margin-left: 15px;
