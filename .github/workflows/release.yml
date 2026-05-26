@@ -695,7 +695,7 @@ jobs:
 #    LAUNCHER_WEBHOOK_SECRET  – muss mit [launcher] webhook_secret
 #                               in config.toml übereinstimmen
 # ─────────────────────────────────────────────────────────────
-  release-nightly:
+  release-nightly2204:
     name: "🌙 Nightly – GitHub Release & Backend"
     needs:
       - build-deb-rpm
