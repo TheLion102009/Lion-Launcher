@@ -488,6 +488,9 @@ impl MinecraftLauncher {
                 cmd.env("XDG_RUNTIME_DIR", xdg);
             }
             cmd.env("_JAVA_AWT_WM_NONREPARENTING", "1");
+
+            // libflite.so: Systemlib → Symlink; kein System-flite → Stub via GCC
+            Self::ensure_flite_stub(natives_dir);
         }
 
         // Extra-Args (Quick Play) — fehlte hier komplett!
@@ -498,6 +501,9 @@ impl MinecraftLauncher {
                 cmd.arg(arg);
             }
         }
+
+        // options.txt: fullscreen=false + narrator=0 setzen
+        Self::patch_game_options(game_dir).await;
 
         tracing::info!("✅ Starting NeoForge...");
 
@@ -644,7 +650,7 @@ maxThreads = -1
 
         let forge_installer = forge::ForgeInstaller::new(self.download_manager.clone());
         let install_result = forge_installer.install_forge_complete(
-            version, &loader_version, libraries_dir, client_jar
+            version, &loader_version, libraries_dir, client_jar, Some(&java_path)
         ).await?;
 
         // Natives-Verzeichnis leeren und neu befüllen
@@ -751,21 +757,8 @@ maxThreads = -1
         tracing::info!("Natives directory populated: {} files",
             std::fs::read_dir(natives_dir).map(|d| d.count()).unwrap_or(0));
 
-        // options.txt: fullscreen deaktivieren um Absturz-Loop nach unfertigem Start zu verhindern.
-        // Minecraft speichert "fullscreen:true" und versucht beim nächsten Start sofort
-        // Fullscreen zu aktivieren — ohne GL-Context → Absturz → Loop.
-        {
-            let options_file = game_dir.join("options.txt");
-            if options_file.exists() {
-                if let Ok(content) = tokio::fs::read_to_string(&options_file).await {
-                    if content.contains("fullscreen:true") {
-                        let patched = content.replace("fullscreen:true", "fullscreen:false");
-                        tokio::fs::write(&options_file, patched).await.ok();
-                        tracing::info!("Patched options.txt: fullscreen→false");
-                    }
-                }
-            }
-        }
+        // options.txt: fullscreen=false + narrator=0 setzen
+        Self::patch_game_options(game_dir).await;
 
         let memory_mb = profile.memory_mb.unwrap_or(4096);
         let token = access_token.unwrap_or("0");
@@ -839,6 +832,12 @@ maxThreads = -1
             // LWJGL: EGL-X11 Plattform statt Standard-GLX wählen
             // Das umgeht den GLX BadValue Bug bei NVIDIA Version-Mismatch
             cmd.env("LIBGL_KOPPER_DISABLE", "1");
+
+            // ── libflite.so (Minecraft Narrator / text2speech) ──────────────────
+            // Stellt sicher dass libflite.so im natives-Dir vorhanden ist:
+            // Systemlib → Symlink; kein System-flite → Stub-Kompilierung via GCC.
+            Self::ensure_flite_stub(natives_dir);
+            // ─────────────────────────────────────────────────────────────────────
         }
         // ────────────────────────────────────────────────────────────────────────
 
@@ -849,6 +848,10 @@ maxThreads = -1
         // ignoriert java.library.path und liest stattdessen org.lwjgl.librarypath
         cmd.arg(format!("-Djava.library.path={}", natives_dir.display()));
         cmd.arg(format!("-Dorg.lwjgl.librarypath={}", natives_dir.display()));
+        // JNA-Bibliothekspfad: nötig damit text2speech/libflite.so gefunden wird.
+        // Der Symlink (oder die direkte lib) liegt im natives-Verzeichnis.
+        #[cfg(target_os = "linux")]
+        cmd.arg(format!("-Djna.library.path={}", natives_dir.display()));
         // Forge EarlyDisplay auf Linux deaktivieren: vermeidet GLFW BadValue-Fehler
         // durch das frühe OpenGL-Fenster das Forge vor dem eigentlichen MC öffnet.
         // GLFW versucht dort alle GL-Profile 4.6..3.2 und scheitert auf NVIDIA/GLX.
@@ -1213,6 +1216,11 @@ maxThreads = -1
                 cmd.env("WAYLAND_DISPLAY", wd);
             }
             cmd.env("_JAVA_AWT_WM_NONREPARENTING", "1");
+
+            // ── libflite.so für Minecraft Narrator ──────────────────────────────
+            // Systemlib → Symlink; kein System-flite → Stub-Kompilierung via GCC.
+            Self::ensure_flite_stub(natives_dir);
+            // ────────────────────────────────────────────────────────────────────
         }
         // ────────────────────────────────────────────────────────────────────────
 
@@ -1224,6 +1232,9 @@ maxThreads = -1
         // Ohne diese Property findet LWJGL auf Windows keine lwjgl.dll (auch wenn java.library.path gesetzt ist).
         // Forge setzt beide Properties – Fabric/Quilt/Vanilla muss das ebenfalls tun.
         cmd.arg(format!("-Dorg.lwjgl.librarypath={}", natives_dir.display()));
+        // JNA-Bibliothekspfad: damit text2speech/libflite.so im natives-Dir gefunden wird.
+        #[cfg(target_os = "linux")]
+        cmd.arg(format!("-Djna.library.path={}", natives_dir.display()));
         cmd.arg("-XX:+UseG1GC");
         cmd.arg("-Dminecraft.launcher.brand=lion-launcher");
         cmd.arg("-Dminecraft.launcher.version=1.0");
@@ -1276,6 +1287,9 @@ maxThreads = -1
             cmd.arg(arg);
         }
 
+        // options.txt: fullscreen=false + narrator=0 setzen
+        Self::patch_game_options(game_dir).await;
+
         cmd.current_dir(game_dir);
         // stdout/stderr pipen und via tracing loggen (funktioniert auch ohne Terminal)
         cmd.stdout(Stdio::piped());
@@ -1326,6 +1340,161 @@ maxThreads = -1
         });
 
         Ok(())
+    }
+
+    /// Stellt sicher dass libflite.so im natives-Verzeichnis vorhanden ist.
+    ///
+    /// Strategie (Priorität):
+    /// 1. Schon vorhanden → nichts tun
+    /// 2. Systemweite libflite.so (oder libflite.so.X) gefunden → Symlink erstellen
+    /// 3. GCC verfügbar → minimalen Stub kompilieren (No-Op-Exports)
+    ///    → JNA findet die Lib, `narrator:0` in options.txt sorgt dafür
+    ///    dass die Speak-Funktionen nie aufgerufen werden.
+    ///
+    /// Nur für Linux relevant.
+    #[cfg(target_os = "linux")]
+    fn ensure_flite_stub(natives_dir: &Path) {
+        let so_path = natives_dir.join("libflite.so");
+        if so_path.exists() {
+            return; // Schon vorhanden (echte Lib oder vorheriger Stub)
+        }
+
+        // ── 1. System-Suche ──────────────────────────────────────────────────
+        let search_dirs = [
+            "/usr/lib",
+            "/usr/lib/x86_64-linux-gnu",
+            "/usr/lib64",
+            "/usr/local/lib",
+            "/lib",
+            "/lib/x86_64-linux-gnu",
+        ];
+        for dir in &search_dirs {
+            let dir_path = std::path::Path::new(dir);
+            // Direkte unversionierte lib
+            let direct = dir_path.join("libflite.so");
+            if direct.exists() {
+                if std::os::unix::fs::symlink(&direct, &so_path).is_ok() {
+                    tracing::info!("libflite.so: Symlink auf {} erstellt", direct.display());
+                }
+                return;
+            }
+            // Versionierte Variante (libflite.so.1, libflite.so.2 …)
+            if let Ok(entries) = std::fs::read_dir(dir_path) {
+                for entry in entries.flatten() {
+                    let fname = entry.file_name().to_string_lossy().to_string();
+                    if fname.starts_with("libflite.so.") {
+                        if std::os::unix::fs::symlink(entry.path(), &so_path).is_ok() {
+                            tracing::info!(
+                                "libflite.so: Symlink auf {} erstellt",
+                                entry.path().display()
+                            );
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+
+        // ── 2. Stub-Kompilierung via GCC ──────────────────────────────────────
+        // Alle Symbole die com.mojang.text2speech.NarratorLinux$FliteLibrary
+        // per JNA auflöst.  Mit narrator:0 werden Speak-Funktionen nie aufgerufen;
+        // flite_init() muss aber 0 (Erfolg) zurückliefern damit kein
+        // InitializeException geworfen wird.
+        let c_source = r#"
+/* Lion-Launcher: libflite.so stub – generiert zur Laufzeit.
+ * Exportiert alle Symbole die NarratorLinux$FliteLibrary über JNA lädt.
+ * flite_init() gibt 0 zurück = Erfolg; alle TTS-Funktionen sind No-Ops.
+ * options.txt narrator:0 stellt sicher dass Speak nie aufgerufen wird.
+ */
+int   flite_init(void)                                   { return 0; }
+void* flite_synth_text(const char* t, void* v, void* w) { return (void*)0; }
+void* utt_wave(void* u)                                  { return (void*)0; }
+void  play_wave(void* w)                                 {}
+void  cst_wave_rescale(void* w, int n)                   {}
+void  delete_utterance(void* u)                          {}
+void* flite_cmu_us_kal16(const char* d)                  { return (void*)0; }
+void* register_cmu_us_kal16(const char* d)               { return (void*)0; }
+int   flite_add_lang(const char* l, void* a, void* b)    { return 0; }
+void* flite_voice_load(const char* p)                    { return (void*)0; }
+"#;
+
+        let src_path = std::env::temp_dir().join("lion_flite_stub.c");
+        if std::fs::write(&src_path, c_source).is_err() {
+            tracing::warn!("libflite.so-Stub: Quell-Datei konnte nicht geschrieben werden");
+            return;
+        }
+
+        let result = std::process::Command::new("gcc")
+            .args(["-shared", "-fPIC", "-O0", "-o"])
+            .arg(&so_path)
+            .arg(&src_path)
+            .output();
+
+        let _ = std::fs::remove_file(&src_path); // Temp-Datei immer entfernen
+
+        match result {
+            Ok(out) if out.status.success() => {
+                tracing::info!(
+                    "libflite.so-Stub kompiliert → Narrator-Fehler unterdrückt (Narrator ist via options.txt deaktiviert)"
+                );
+            }
+            Ok(out) => {
+                tracing::warn!(
+                    "libflite.so-Stub: gcc fehlgeschlagen: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "libflite.so-Stub: gcc nicht verfügbar ({}). \
+                     Installiere 'flite' um Narrator-Meldungen zu vermeiden.",
+                    e
+                );
+            }
+        }
+    }
+
+    /// Setzt wichtige Minecraft-Optionen in options.txt auf sichere Werte.
+    ///
+    /// Wird VOR dem Spielstart aufgerufen:
+    /// - `fullscreen:false`  → verhindert Absturz-Loop (GLFW ohne GL-Context)
+    /// - `narrator:0`        → deaktiviert Text-to-Speech; libflite.so wird nicht gesucht
+    ///
+    /// Existiert die Datei noch nicht, wird sie mit den sicheren Defaults angelegt.
+    async fn patch_game_options(game_dir: &Path) {
+        let options_file = game_dir.join("options.txt");
+
+        // Vorhandene Datei lesen; bei fehlendem File leeren String verwenden
+        let content = tokio::fs::read_to_string(&options_file).await.unwrap_or_default();
+        let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+
+        // (Schlüssel, gewünschter Wert) – Format in options.txt: "key:value"
+        let patches: &[(&str, &str)] = &[
+            ("fullscreen", "false"),
+            ("narrator",   "0"),
+        ];
+
+        for (key, value) in patches {
+            let prefix   = format!("{}:", key);
+            let new_line = format!("{}:{}", key, value);
+
+            if let Some(pos) = lines.iter().position(|l| l.starts_with(&prefix)) {
+                if lines[pos] != new_line {
+                    tracing::info!("options.txt patch: {} → {}", lines[pos], new_line);
+                    lines[pos] = new_line;
+                }
+            } else {
+                tracing::info!("options.txt: füge hinzu: {}", new_line);
+                lines.push(new_line);
+            }
+        }
+
+        let patched = lines.join("\n") + "\n";
+        if let Err(e) = tokio::fs::write(&options_file, patched).await {
+            tracing::warn!("Konnte options.txt nicht patchen: {}", e);
+        } else {
+            tracing::info!("options.txt gepatcht (fullscreen=false, narrator=0)");
+        }
     }
 
     /// Entfernt doppelte Einträge aus dem Classpath

@@ -220,9 +220,9 @@ pub async fn install_neoforge(
     // 1. Lade den NeoForge-Installer
     let installer_path = download_neoforge_installer(&actual_version, libraries_dir).await?;
 
-    // 2. Führe den Installer aus um die SRG-JAR zu erstellen
+    // 2. Führe den Installer aus um die PATCHED-Client-JAR zu erstellen
     let launcher_dir = libraries_dir.parent().unwrap();
-    run_neoforge_installer(&installer_path, launcher_dir, java_path, mc_version).await?;
+    run_neoforge_installer(&installer_path, launcher_dir, java_path, mc_version, &actual_version).await?;
 
     // 3. Extrahiere die version.json aus dem Installer
     let version_json = extract_version_json(&installer_path)?;
@@ -425,60 +425,24 @@ async fn run_neoforge_installer(
     installer_path: &Path,
     launcher_dir: &Path,
     java_path: &str,
-    mc_version: &str,
+    _mc_version: &str,
+    neoforge_version: &str,
 ) -> Result<()> {
-    // Prüfe ob die Game-JAR für DIESE Minecraft-Version bereits existiert
-    // Zwei mögliche Formate:
-    // ALT: libraries/net/minecraft/client/{mc}-{neoform}/client-{mc}-{neoform}-srg.jar
-    // NEU: libraries/net/neoforged/minecraft-client-patched/{nf}/minecraft-client-patched-{nf}.jar
-
-    // Prüfe neues Format: patched JARs
-    let patched_dir = launcher_dir.join("libraries/net/neoforged/minecraft-client-patched");
-    if patched_dir.exists() {
-        let has_patched = std::fs::read_dir(&patched_dir)
-            .map(|entries| {
-                entries.filter_map(|e| e.ok())
-                    .filter(|e| e.path().is_dir())
-                    .any(|dir_entry| {
-                        let ver = dir_entry.file_name().to_string_lossy().to_string();
-                        let jar = dir_entry.path().join(format!("minecraft-client-patched-{}.jar", ver));
-                        jar.exists()
-                    })
-            })
-            .unwrap_or(false);
-
-        if has_patched {
-            tracing::info!("✅ Patched-JAR für MC {} existiert bereits, Installer wird übersprungen", mc_version);
-            return Ok(());
-        }
+    // CRITISCH: Der PATCHED Client JAR ist die einzig korrekte Datei die den Installer-Abschluss beweist.
+    // Format: libraries/net/neoforged/neoforge/{version}/neoforge-{version}-client.jar
+    // Dieser JAR wird durch die Installer-Prozessoren erstellt und enthält die gepatchte Minecraft-Version.
+    // NUR dieser JAR registriert sich bei FML als "minecraft" und "neoforge" Mod korrekt.
+    let patched_client_jar = launcher_dir.join(format!(
+        "libraries/net/neoforged/neoforge/{}/neoforge-{}-client.jar",
+        neoforge_version, neoforge_version
+    ));
+    tracing::info!("🔍 Prüfe patched client JAR: {:?}", patched_client_jar);
+    if patched_client_jar.exists() && is_valid_zip_file(&patched_client_jar) {
+        tracing::info!("✅ Patched client JAR für NeoForge {} existiert bereits, Installer wird übersprungen", neoforge_version);
+        return Ok(());
     }
 
-    // Prüfe altes Format: SRG JARs
-    let srg_jar_dir = launcher_dir.join("libraries/net/minecraft/client");
-    if srg_jar_dir.exists() {
-        let has_correct_srg = std::fs::read_dir(&srg_jar_dir)
-            .map(|entries| {
-                entries.filter_map(|e| e.ok())
-                    .filter(|e| e.path().is_dir())
-                    .filter(|e| e.file_name().to_string_lossy().starts_with(mc_version))
-                    .any(|dir_entry| {
-                        std::fs::read_dir(dir_entry.path())
-                            .map(|sub| sub.filter_map(|f| f.ok()).any(|f| {
-                                let name = f.file_name().to_string_lossy().to_string();
-                                name.ends_with("-srg.jar")
-                            }))
-                            .unwrap_or(false)
-                    })
-            })
-            .unwrap_or(false);
-
-        if has_correct_srg {
-            tracing::info!("✅ SRG-JAR für MC {} existiert bereits, Installer wird übersprungen", mc_version);
-            return Ok(());
-        }
-    }
-
-    tracing::info!("⚠️  Keine Game-JAR für MC {} gefunden, Installer wird ausgeführt...", mc_version);
+    tracing::info!("⚠️  Patched client JAR für NeoForge {} fehlt, Installer wird ausgeführt...", neoforge_version);
 
     // Erstelle launcher_profiles.json falls nicht vorhanden
     let profiles_path = launcher_dir.join("launcher_profiles.json");
@@ -566,31 +530,36 @@ fn extract_game_arg_value(version: &NeoForgeVersion, key: &str) -> Option<String
     None
 }
 
-/// Findet die Game-JAR: entweder die neue patched-JAR oder die alte SRG-JAR
+/// Findet die Game-JAR: der durch den Installer erstellte PATCHED Client JAR
 fn find_game_jar(mc_version: &str, neoform_version: &str, neoforge_version: &str, libraries_dir: &Path) -> Result<PathBuf> {
-    // NEU (NeoForge ≥21.5): net/neoforged/minecraft-client-patched/{neoforge_version}/minecraft-client-patched-{neoforge_version}.jar
-    let patched_jar = libraries_dir.join(format!(
-        "net/neoforged/minecraft-client-patched/{}/minecraft-client-patched-{}.jar",
+    tracing::info!("🔍 Suche NeoForge Game-JAR (NeoForge {}, MC {}, NeoForm {})...", neoforge_version, mc_version, neoform_version);
+
+    // PRIMÄR (NeoForge 21.x / 1.21.x): Der PATCHED Client JAR der durch Installer-Prozessoren erstellt wird.
+    // Koordinate: [net.neoforged:neoforge:{version}:client]
+    // Pfad: libraries/net/neoforged/neoforge/{version}/neoforge-{version}-client.jar
+    // Dieser JAR wird von NeoForge/FML als "minecraft" und "neoforge" Mod erkannt.
+    let patched_client = libraries_dir.join(format!(
+        "net/neoforged/neoforge/{}/neoforge-{}-client.jar",
         neoforge_version, neoforge_version
     ));
-    tracing::info!("🔍 Suche Game-JAR (NeoForge {}, NeoForm {})...", neoforge_version, neoform_version);
-    tracing::info!("  [patched] Prüfe: {:?}", patched_jar);
-    if patched_jar.exists() && is_valid_zip_file(&patched_jar) {
-        tracing::info!("  ✅ Patched-JAR gefunden: {:?}", patched_jar);
-        return Ok(patched_jar);
+    tracing::info!("  [1/3] Prüfe PATCHED client JAR: {:?}", patched_client);
+    if patched_client.exists() && is_valid_zip_file(&patched_client) {
+        tracing::info!("  ✅ PATCHED client JAR gefunden: {:?}", patched_client);
+        return Ok(patched_client);
     }
 
+    // FALLBACK (ältere NeoForge-Versionen mit minecraft-client-patched Koordinate):
     // Scanne net/neoforged/minecraft-client-patched/ nach beliebiger passender Version
-    let patched_dir = libraries_dir.join("net/neoforged/minecraft-client-patched");
-    if patched_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&patched_dir) {
+    let old_patched_dir = libraries_dir.join("net/neoforged/minecraft-client-patched");
+    if old_patched_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&old_patched_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
                     let ver = entry.file_name().to_string_lossy().to_string();
                     let jar = path.join(format!("minecraft-client-patched-{}.jar", ver));
                     if jar.exists() && is_valid_zip_file(&jar) {
-                        tracing::info!("  ✅ Patched-JAR gefunden per Scan: {:?}", jar);
+                        tracing::info!("  ✅ Alter minecraft-client-patched JAR gefunden: {:?}", jar);
                         return Ok(jar);
                     }
                 }
@@ -598,49 +567,25 @@ fn find_game_jar(mc_version: &str, neoform_version: &str, neoforge_version: &str
         }
     }
 
-    // ALT: Mögliche Pfade für die SRG-JAR (mit dynamischer NeoForm-Version!)
-    let possible_paths = [
-        libraries_dir.join(format!("net/minecraft/client/{}-{}/client-{}-{}-srg.jar",
-            mc_version, neoform_version, mc_version, neoform_version)),
-        libraries_dir.join(format!("net/minecraft/client/{}-{}/client-{}-{}-slim.jar",
-            mc_version, neoform_version, mc_version, neoform_version)),
-        libraries_dir.join(format!("net/minecraft/{}/{}.jar", mc_version, mc_version)),
-    ];
-
-    tracing::info!("🔍 Suche SRG-JAR (NeoForm {})...", neoform_version);
-
-    // Durchsuche das SRG-Verzeichnis nach passenden JARs
-    let srg_dir = libraries_dir.join(format!("net/minecraft/client/{}-{}", mc_version, neoform_version));
-    if srg_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&srg_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.ends_with("-srg.jar") || name.ends_with("-slim.jar") {
-                        if is_valid_zip_file(&path) {
-                            tracing::info!("  ✅ SRG-JAR gefunden per Scan: {:?}", path);
-                            return Ok(path);
-                        }
-                    }
-                }
-            }
-        }
+    // LETZTER AUSWEG (sollte nicht passieren wenn Installer korrekt lief):
+    // Falls das Installer-Ergebnis an einem anderen Ort liegt
+    let srg_jar = libraries_dir.join(format!(
+        "net/minecraft/client/{}-{}/client-{}-{}-srg.jar",
+        mc_version, neoform_version, mc_version, neoform_version
+    ));
+    tracing::info!("  [3/3] Prüfe SRG-JAR als letzten Ausweg: {:?}", srg_jar);
+    if srg_jar.exists() && is_valid_zip_file(&srg_jar) {
+        tracing::warn!("  ⚠️  Nur SRG-JAR gefunden! NeoForge PATCHED client JAR fehlt.");
+        tracing::warn!("      Der Installer wurde möglicherweise nicht vollständig ausgeführt.");
+        tracing::warn!("      Bitte NeoForge neu installieren oder Profil zurücksetzen.");
+        // SRG-JAR NICHT zurückgeben – NeoForge würde minecraft/neoforge als [MISSING] melden!
     }
 
-    for (i, path) in possible_paths.iter().enumerate() {
-        tracing::info!("  [{}] Prüfe: {:?}", i, path);
-        if path.exists() {
-            // Nur prüfen ob es eine gültige ZIP-Datei ist (SRG-JARs haben obfuskierte Klassen-Namen!)
-            if is_valid_zip_file(path) {
-                tracing::info!("  ✅ Gültige SRG-JAR gefunden: {:?}", path);
-                return Ok(path.clone());
-            } else {
-                tracing::warn!("  ⚠️  JAR existiert aber ist keine gültige ZIP-Datei");
-            }
-        }
-    }
-
-    bail!("❌ Game-JAR nicht gefunden! Weder patched-JAR (net/neoforged/minecraft-client-patched/) noch SRG-JAR gefunden. NeoForge-Installer muss zuerst ausgeführt werden.");
+    bail!("❌ NeoForge Game-JAR nicht gefunden!\n\
+           Erwartet: {:?}\n\
+           Der NeoForge-Installer muss erst vollständig ausgeführt werden.\n\
+           Die Installer-Prozessoren erstellen den PATCHED client JAR (net.neoforged:neoforge:{}:client).",
+        patched_client, neoforge_version)
 }
 
 /// Prüft ob eine Datei eine gültige ZIP/JAR-Datei ist
@@ -693,6 +638,46 @@ pub fn build_launch_command(
     // org.lwjgl.librarypath: LWJGL 3.3.2+ bevorzugt diese Property auf Windows.
     // Ohne sie findet LWJGL lwjgl.dll nicht auch wenn java.library.path korrekt gesetzt ist.
     cmd.arg(format!("-Dorg.lwjgl.librarypath={}", natives_dir.display()));
+    // JNA-Bibliothekspfad auf Linux: damit text2speech/libflite.so im natives-Dir gefunden wird.
+    #[cfg(target_os = "linux")]
+    {
+        // Symlink für libflite.so erstellen falls nur versionierte lib vorhanden
+        let search_dirs = [
+            "/usr/lib",
+            "/usr/lib/x86_64-linux-gnu",
+            "/usr/lib64",
+            "/usr/local/lib",
+            "/lib",
+            "/lib/x86_64-linux-gnu",
+        ];
+        let unversioned_name = "libflite.so";
+        let mut flite_found = false;
+        'search: for dir in &search_dirs {
+            let dir_path = std::path::Path::new(dir);
+            if dir_path.join(unversioned_name).exists() {
+                flite_found = true;
+                break 'search;
+            }
+            if let Ok(entries) = std::fs::read_dir(dir_path) {
+                for entry in entries.flatten() {
+                    let fname = entry.file_name().to_string_lossy().to_string();
+                    if fname.starts_with("libflite.so.") {
+                        let symlink_target = natives_dir.join(unversioned_name);
+                        if !symlink_target.exists() {
+                            std::os::unix::fs::symlink(entry.path(), &symlink_target).ok();
+                            tracing::info!("Narrator-Fix: Symlink {} → {}", symlink_target.display(), entry.path().display());
+                        }
+                        flite_found = true;
+                        break 'search;
+                    }
+                }
+            }
+        }
+        if !flite_found {
+            tracing::warn!("libflite.so nicht gefunden – Narrator deaktiviert. Installiere 'flite' (pacman -S flite oder apt install libflite1).");
+        }
+        cmd.arg(format!("-Djna.library.path={}", natives_dir.display()));
+    }
 
     // KRITISCHE System Properties für NeoForge/BootstrapLauncher
     cmd.arg("-Djava.net.preferIPv6Addresses=system");
