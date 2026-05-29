@@ -130,9 +130,3 @@ bash scripts/wine-loader-test.sh --help
 - **Backend**: Rust
 - **Framework**: Tauri 2.0
 - **APIs**: Modrinth, Mojang, Microsoft/Xbox Live
-
-## Lizenz
-
-MIT License
-
----
