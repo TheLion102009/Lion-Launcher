@@ -64,11 +64,31 @@ pub async fn get_quilt_versions(minecraft_version: String) -> Result<Vec<String>
     let client = crate::api::quilt::QuiltClient::new()
         .map_err(|e| e.to_string())?;
 
-    let versions = client.get_loader_versions(&minecraft_version)
-        .await
-        .map_err(|e| e.to_string())?;
+    // Versuche Loader-Versionen für die gewünschte MC-Version zu laden.
+    // Die Methode hat bereits einen internen Fallback auf die neueste unterstützte Version.
+    match client.get_loader_versions(&minecraft_version).await {
+        Ok(versions) if !versions.is_empty() => {
+            return Ok(versions.into_iter().map(|v| v.loader.version).collect());
+        }
+        _ => {}
+    }
 
-    Ok(versions.into_iter().map(|v| v.loader.version).collect())
+    // Zweiter Fallback: Alle Loader-Versionen laden (unabhängig von MC-Version).
+    // Das stellt sicher, dass auch bei einer sehr neuen/unbekannten MC-Version
+    // immer Loader-Versionen angezeigt werden (Quilt unterstützt viele MC-Versionen rückwärtskompatibel).
+    tracing::warn!(
+        "Quilt-Fallback (global): Lade alle Loader-Versionen für MC {} – direkte Abfrage gescheitert",
+        minecraft_version
+    );
+    let all_versions = client.get_all_loader_versions()
+        .await
+        .map_err(|e| format!("Quilt Loader-Versionen konnten nicht geladen werden (auch globaler Fallback fehlgeschlagen): {}", e))?;
+
+    if all_versions.is_empty() {
+        return Err("Keine Quilt Loader-Versionen gefunden".to_string());
+    }
+
+    Ok(all_versions.into_iter().map(|v| v.version).collect())
 }
 
 #[tauri::command]

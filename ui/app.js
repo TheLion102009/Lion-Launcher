@@ -2853,7 +2853,6 @@ async function checkForModUpdates(profileId) {
         alert('Fehler beim Prüfen auf Updates: ' + error);
     }
 }
-
 async function toggleMod(profileId, filename, isCurrentlyDisabled) {
     debugLog('Toggling mod: ' + filename + ' (currently disabled: ' + isCurrentlyDisabled + ')', 'info');
 
@@ -3616,9 +3615,8 @@ async function updateEditLoaderVersions() {
         }
     } catch (error) {
         console.error('Failed to load loader versions:', error);
-        const errStr = String(error);
-        if (loader === 'quilt' && (errStr.includes('nicht unterstützt') || errStr.includes('not_found') || errStr.includes('noch nicht'))) {
-            versionSelect.innerHTML = '<option value="">Neueste (Quilt n. verfügbar)</option>';
+        if (loader === 'quilt') {
+            versionSelect.innerHTML = '<option value="">Neueste (kompatibler Loader)</option>';
             showToast('Quilt hat für diese MC-Version noch keine offizielle Unterstützung – der Launcher nutzt automatisch den kompatiblen Fallback-Loader.', 'info', 6000);
         } else {
             versionSelect.innerHTML = '<option value="">Neueste (Fehler beim Laden)</option>';
@@ -3680,7 +3678,8 @@ function openCreateProfileModal() {
     const modal = document.getElementById('create-profile-modal');
     if (modal) {
         modal.classList.add('active');
-        updateVersionSelects(); // async, fire-and-forget ist OK hier
+        // Versions laden und danach sofort Loader-Versionen für die gewählte Kombination
+        updateVersionSelects().then(() => updateCreateLoaderVersions());
     }
 }
 
@@ -3741,6 +3740,15 @@ function setupModals() {
             // Nach dem Laden der Versionen: Quilt 26.1 prüfen
             checkQuilt261Warning();
         });
+
+        // Listener auf MC-Version: Loader-Versionen neu laden wenn MC-Version wechselt
+        const mcVersionSelect = document.getElementById('profile-mc-version');
+        if (mcVersionSelect) {
+            mcVersionSelect.addEventListener('change', async () => {
+                await updateCreateLoaderVersions();
+                checkQuilt261Warning();
+            });
+        }
 
         // Listener auf Loader-Version: Quilt 26.1 Warnung
         const loaderVersionSelect = document.getElementById('profile-loader-version');
@@ -3978,9 +3986,10 @@ async function updateCreateLoaderVersions() {
         }
     } catch (error) {
         console.error('Failed to load loader versions:', error);
-        const errStr = String(error);
-        if (loader === 'quilt' && (errStr.includes('nicht unterstützt') || errStr.includes('not_found') || errStr.includes('noch nicht'))) {
-            versionSelect.innerHTML = '<option value="">Neueste (Quilt n. verfügbar)</option>';
+        if (loader === 'quilt') {
+            // Quilt unterstützt diese MC-Version noch nicht direkt – der Launcher nutzt
+            // beim Start automatisch einen kompatiblen Fallback-Loader.
+            versionSelect.innerHTML = '<option value="">Neueste (kompatibler Loader)</option>';
             showToast('Quilt hat für diese MC-Version noch keine offizielle Unterstützung – der Launcher nutzt automatisch den kompatiblen Fallback-Loader.', 'info', 6000);
         } else {
             versionSelect.innerHTML = '<option value="">Neueste (Fehler beim Laden)</option>';
