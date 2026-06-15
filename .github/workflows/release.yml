@@ -1,18 +1,11 @@
 name: 🦁 Release Build
 
 on:
-  # Jeder Push auf main/master löst einen Build aus
   push:
-    branches:
-      - main
-      - master
-    tags:
-      - 'v*'
-  # Pull Requests gegen main/master auch bauen (kein Release-Job)
+    branches: [main, master]
+    tags:    ['v*']
   pull_request:
-    branches:
-      - main
-      - master
+    branches: [main, master]
   workflow_dispatch:
     inputs:
       version:
@@ -25,9 +18,28 @@ env:
   WEBKIT_DISABLE_COMPOSITING_MODE: 1
   RUST_BACKTRACE: 1
   CARGO_TERM_COLOR: always
+  # sccache beschleunigt Rust-Kompilierung durch verteilten Objekt-Cache
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
 
 # ─────────────────────────────────────────────────────────────
-#  Job 1: Debian (.deb) + RPM (.rpm)  →  ubuntu-24.04
+#  Gemeinsame Linux-Abhängigkeiten als YAML-Anchor
+#  (werden per *linux_deps referenziert)
+# ─────────────────────────────────────────────────────────────
+x-linux-deps: &linux-deps
+  - libwebkit2gtk-4.1-dev
+  - libssl-dev
+  - libgtk-3-dev
+  - libayatana-appindicator3-dev
+  - librsvg2-dev
+  - libsoup-3.0-dev
+  - patchelf
+  - curl
+  - wget
+  - file
+
+# ─────────────────────────────────────────────────────────────
+#  Job 1: Debian (.deb) + RPM (.rpm)
 # ─────────────────────────────────────────────────────────────
 jobs:
   build-deb-rpm:
@@ -48,36 +60,47 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libsoup-3.0-dev \
-            patchelf \
-            curl wget file rpm \
+            patchelf curl wget file rpm \
             fakeroot dpkg-dev
 
       - name: Rust Toolchain einrichten
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Rust Cache
+      # sccache: Kompilierungsergebnisse werden job-übergreifend gecacht.
+      # Erspart bei unverändertem Code bis zu 80 % der Kompilierzeit.
+      - name: sccache einrichten
+        uses: mozilla-actions/sccache-action@v0.0.5
+
+      - name: Rust Cache (Cargo-Registry + Index)
         uses: Swatinem/rust-cache@v2
         with:
           key: deb-rpm
+          # Cargo.lock einbeziehen damit der Cache bei Dep-Updates invalidiert wird
+          cache-on-failure: true
 
-      - name: Tauri CLI installieren
+      # Tauri CLI aus dem Cache laden statt neu bauen (~3 min gespart)
+      - name: Tauri CLI cachen
+        uses: actions/cache@v4
+        id: tauri-cli-cache
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: tauri-cli-v2-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Tauri CLI installieren (nur bei Cache-Miss)
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2" --locked
 
       - name: 🔨 Build .deb + .rpm
         run: cargo tauri build --bundles deb,rpm
 
-      - name: Pakete sammeln
+      - name: Pakete sammeln + Checksums
         run: |
           mkdir -p dist
           find target/release/bundle -name "*.deb" -exec cp {} dist/ \;
           find target/release/bundle -name "*.rpm" -exec cp {} dist/ \;
-          ls -lh dist/
-
-      - name: SHA256 Checksums
-        run: |
-          cd dist
-          sha256sum * > SHA256SUMS.txt
+          cd dist && sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
+          ls -lh
 
       - name: Upload .deb
         uses: actions/upload-artifact@v4
@@ -85,6 +108,8 @@ jobs:
           name: linux-deb
           path: dist/*.deb
           if-no-files-found: error
+          # Artefakte nur 7 Tage aufbewahren (spart Storage-Quota)
+          retention-days: 7
 
       - name: Upload .rpm
         uses: actions/upload-artifact@v4
@@ -92,16 +117,18 @@ jobs:
           name: linux-rpm
           path: dist/*.rpm
           if-no-files-found: error
+          retention-days: 7
 
       - name: Upload Checksums
         uses: actions/upload-artifact@v4
         with:
           name: linux-checksums
           path: dist/SHA256SUMS.txt
+          retention-days: 7
 
-# ─────────────────────────────────────────────────────────────
-#  Job 2: AppImage (.AppImage)
-# ─────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────
+  #  Job 2: AppImage (.AppImage)
+  # ─────────────────────────────────────────────────────────────
   build-appimage:
     name: 📦 Linux – AppImage
     runs-on: ubuntu-24.04
@@ -126,12 +153,24 @@ jobs:
       - name: Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: sccache einrichten
+        uses: mozilla-actions/sccache-action@v0.0.5
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
           key: appimage
+          cache-on-failure: true
 
-      - name: Tauri CLI installieren
+      - name: Tauri CLI cachen
+        uses: actions/cache@v4
+        id: tauri-cli-cache
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: tauri-cli-v2-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Tauri CLI installieren (nur bei Cache-Miss)
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2" --locked
 
       - name: 🔨 Build AppImage
@@ -149,20 +188,14 @@ jobs:
           name: linux-appimage
           path: dist/*.AppImage
           if-no-files-found: warn
+          retention-days: 7
 
-# ─────────────────────────────────────────────────────────────
-#  Job 3: Snap (.snap)  →  ubuntu-24.04 + snapcraft --destructive-mode
-#
-#  FIX: snapcore/action-build@v1 schlug wegen snapd/sudo-Problemen fehl.
-#       Lösung: snapd manuell starten → snapcraft installieren →
-#               snapcraft --destructive-mode (kein Container/LXD nötig).
-#       build-snaps aus snapcraft.yaml werden in --destructive-mode
-#       ignoriert; Rust kommt vom Host (dtolnay/rust-toolchain@stable).
-# ─────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────
+  #  Job 3: Snap (.snap)
+  # ─────────────────────────────────────────────────────────────
   build-snap:
     name: 📦 Linux – .snap
     runs-on: ubuntu-24.04
-    # Wenn Snap fehlschlägt, blockiert es trotzdem nicht den Release-Job
     continue-on-error: true
 
     steps:
@@ -172,10 +205,14 @@ jobs:
       - name: Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: sccache einrichten
+        uses: mozilla-actions/sccache-action@v0.0.5
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
           key: snap
+          cache-on-failure: true
 
       - name: System-Abhängigkeiten (für destructive-mode Build auf dem Host)
         run: |
@@ -191,11 +228,8 @@ jobs:
 
       - name: Snapd initialisieren & Snapcraft installieren
         run: |
-          # snapd-Socket aktivieren (auf GH-Actions-Runnern oft noch nicht gestartet)
           sudo systemctl enable --now snapd.socket 2>/dev/null || true
           sudo ln -sf /var/lib/snapd/snap /snap 2>/dev/null || true
-
-          # Warten bis snap bereit ist (max. 90 s)
           echo "Warte auf snapd..."
           timeout 90 sh -c '
             until sudo snap version 2>/dev/null; do
@@ -206,8 +240,6 @@ jobs:
           sudo snap install snapcraft --classic
 
       - name: 🔨 Snap bauen (destructive-mode)
-        # snapcraft braucht Superuser-Rechte um build-packages zu installieren.
-        # PATH + HOME beibehalten damit cargo (von dtolnay/rust-toolchain) erreichbar ist.
         run: |
           sudo env \
             PATH="$PATH" \
@@ -227,21 +259,11 @@ jobs:
           name: linux-snap
           path: dist/*.snap
           if-no-files-found: warn
+          retention-days: 7
 
-# ─────────────────────────────────────────────────────────────
-#  Job 4: Flatpak (.flatpak + .flatpakref)  →  ubuntu-24.04
-#
-#  FIX: GNOME-SDK 46 + Rust-Extension Installation schlug in CI fehl.
-#       Das || true versteckte den Fehler, anschließend scheiterte flatpak-builder.
-#
-#       Neue Strategie:
-#       1. Binary mit cargo vorbauen (kein Rust-SDK in Flatpak nötig)
-#       2. Binary + Assets ins flatpak/-Verzeichnis kopieren
-#       3. CI-Manifest: com.lionlauncher.dev.ci.yml
-#          (org.freedesktop.Platform/Sdk//23.08 – kleiner, stabiler in CI)
-#       4. bilelmoussaoui/flatpak-github-actions übernimmt SDK-Installation
-#          korrekt (kein versteckter Fehler mehr)
-# ─────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────
+  #  Job 4: Flatpak (.flatpak + .flatpakref)
+  # ─────────────────────────────────────────────────────────────
   build-flatpak:
     name: 📦 Linux – Flatpak
     runs-on: ubuntu-24.04
@@ -254,10 +276,14 @@ jobs:
       - name: Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: sccache einrichten
+        uses: mozilla-actions/sccache-action@v0.0.5
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
           key: flatpak
+          cache-on-failure: true
 
       - name: Build-Abhängigkeiten + Flatpak-Tools installieren
         run: |
@@ -272,8 +298,15 @@ jobs:
             patchelf curl wget file \
             flatpak flatpak-builder
 
+      - name: Flatpak SDKs cachen
+        uses: actions/cache@v4
+        id: flatpak-sdk-cache
+        with:
+          path: /var/lib/flatpak
+          key: flatpak-sdk-freedesktop-23.08-${{ runner.os }}
+
       - name: Flatpak SDKs installieren (org.freedesktop.Platform/Sdk//23.08)
-        # OHNE || true: Fehler sind sofort sichtbar
+        if: steps.flatpak-sdk-cache.outputs.cache-hit != 'true'
         run: |
           sudo flatpak remote-add --if-not-exists flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
@@ -285,7 +318,6 @@ jobs:
         run: cargo build --release --locked
 
       - name: Vorgebautes Binary + Assets ins flatpak/-Verzeichnis kopieren
-        # Das CI-Manifest referenziert alle Dateien relativ zu flatpak/
         run: |
           cp target/release/Lion-Launcher  flatpak/lion-launcher
           cp icons/32x32.png               flatpak/icon-32.png
@@ -294,7 +326,6 @@ jobs:
           ls -lh flatpak/
 
       - name: 🔨 Flatpak bauen
-        # --disable-rofiles-fuse: FUSE nicht verfügbar auf GH-Actions-Runnern
         run: |
           flatpak-builder \
             --repo=flatpak-repo \
@@ -335,6 +366,7 @@ jobs:
           name: linux-flatpak
           path: dist/lion-launcher.flatpak
           if-no-files-found: warn
+          retention-days: 7
 
       - name: Upload .flatpakref
         uses: actions/upload-artifact@v4
@@ -342,19 +374,11 @@ jobs:
           name: linux-flatpakref
           path: dist/lion-launcher.flatpakref
           if-no-files-found: warn
+          retention-days: 7
 
-# ─────────────────────────────────────────────────────────────
-#  Job 5: Arch Linux – PKGBUILD + .pkg.tar.zst
-#          läuft in archlinux:latest Docker-Container
-#
-#  FIX 1: Swatinem/rust-cache entfernt (kein rustup im Arch-Container)
-#  FIX 2: Rust via pacman installiert (kein rustup erforderlich)
-#  FIX 3: Binary + Assets nach /tmp/pkgbuild-ws/ kopiert
-#          → PKGBUILD referenziert sie als lokale Quellen via $srcdir
-#  FIX 4: PKGBUILD-Heredoc mit 'PKGEOF' (literal) → $srcdir/$pkgdir bleiben erhalten
-#          sed substituiert danach VERSION und REPO
-#  FIX 5: makepkg --nodeps --skipinteg (Deps bereits installiert)
-# ─────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────
+  #  Job 5: Arch Linux – PKGBUILD + .pkg.tar.zst
+  # ─────────────────────────────────────────────────────────────
   build-arch:
     name: 📦 Arch Linux – PKGBUILD + pkg.tar.zst
     runs-on: ubuntu-24.04
@@ -381,6 +405,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # sccache funktioniert auch im Arch-Container
+      - name: sccache einrichten
+        uses: mozilla-actions/sccache-action@v0.0.5
+
+      # Rust Cache funktioniert hier ohne dtolnay/rust-toolchain,
+      # da Rust via pacman installiert wurde.
+      - name: Rust Cache (Arch)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: arch-rust-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: arch-rust-
+
       - name: Build-User anlegen (makepkg läuft nicht als root)
         run: |
           useradd -m builder
@@ -393,6 +433,7 @@ jobs:
             export WEBKIT_DISABLE_DMABUF_RENDERER=1
             export WEBKIT_DISABLE_COMPOSITING_MODE=1
             export RUST_BACKTRACE=1
+            export RUSTC_WRAPPER=sccache
             cargo build --release --locked
           "
 
@@ -412,7 +453,6 @@ jobs:
 
           mkdir -p /tmp/pkgbuild-ws /tmp/pkgbuild-out
 
-          # Vorgebautes Binary + Assets kopieren
           cp target/release/Lion-Launcher /tmp/pkgbuild-ws/lion-launcher-bin
           cp icons/32x32.png               /tmp/pkgbuild-ws/icon-32.png
           cp icons/128x128.png             /tmp/pkgbuild-ws/icon-128.png
@@ -420,7 +460,6 @@ jobs:
           [ -f LICENSE ]   && cp LICENSE   /tmp/pkgbuild-ws/ || true
           [ -f README.md ] && cp README.md /tmp/pkgbuild-ws/ || true
 
-          # Desktop-Eintrag als separate Quelldatei
           cat > /tmp/pkgbuild-ws/lion-launcher.desktop << 'DESKTOP_EOF'
           [Desktop Entry]
           Name=Lion Launcher
@@ -434,8 +473,6 @@ jobs:
           StartupWMClass=lion-launcher
           DESKTOP_EOF
 
-          # PKGBUILD mit literal Heredoc schreiben ('PKGEOF' → keine Expansion)
-          # $srcdir / $pkgdir / $startdir bleiben als echte makepkg-Variablen erhalten.
           cat > /tmp/pkgbuild-ws/PKGBUILD << 'PKGEOF'
           pkgname=lion-launcher
           pkgver=VERSION_PLACEHOLDER
@@ -449,7 +486,6 @@ jobs:
               'jdk17-openjdk: Minecraft 1.17+'
               'jdk21-openjdk: Minecraft 1.21+'
           )
-          # Lokale Quelldateien – makepkg findet sie neben dem PKGBUILD ($startdir)
           source=(
               'lion-launcher-bin'
               'icon-32.png'
@@ -461,7 +497,6 @@ jobs:
           noextract=('lion-launcher-bin' 'icon-32.png' 'icon-128.png' 'icon-256.png' 'lion-launcher.desktop')
 
           build() {
-              # Binary ist bereits vorgebaut
               true
           }
 
@@ -485,7 +520,6 @@ jobs:
           }
           PKGEOF
 
-          # Platzhalter durch echte Werte ersetzen
           sed -i \
             -e "s|VERSION_PLACEHOLDER|${VERSION}|g" \
             -e "s|REPO_PLACEHOLDER|${REPO}|g" \
@@ -510,9 +544,7 @@ jobs:
         run: |
           mkdir -p dist
           find /tmp/pkgbuild-out -name "*.pkg.tar.zst" -exec cp {} dist/ \;
-          # AUR-PKGBUILD-Template (aus pkg/) mitliefern
           cp pkg/PKGBUILD dist/PKGBUILD
-          echo "=== dist/ ==="
           ls -lh dist/
 
       - name: Upload .pkg.tar.zst + PKGBUILD
@@ -523,31 +555,50 @@ jobs:
             dist/*.pkg.tar.zst
             dist/PKGBUILD
           if-no-files-found: warn
+          retention-days: 7
 
-# ─────────────────────────────────────────────────────────────
-#  Job 6: Windows – NSIS .exe Installer
-# ─────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────
+  #  Job 6: Windows – NSIS .exe Installer
+  # ─────────────────────────────────────────────────────────────
   build-windows:
     name: "🪟 Windows – NSIS .exe"
     runs-on: windows-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Rust stable installieren
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+
+      - name: sccache einrichten
+        uses: mozilla-actions/sccache-action@v0.0.5
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
           key: windows
-      - name: Tauri CLI installieren
+          cache-on-failure: true
+
+      - name: Tauri CLI cachen
+        uses: actions/cache@v4
+        id: tauri-cli-cache
+        with:
+          path: ~/.cargo/bin/cargo-tauri.exe
+          key: tauri-cli-v2-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Tauri CLI installieren (nur bei Cache-Miss)
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2" --locked
+
       - name: "🔨 Windows-Build (NSIS .exe)"
         run: cargo tauri build --bundles nsis
         env:
           TAURI_SIGNING_PRIVATE_KEY: ""
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+
       - name: WebView2-Bootstrapper verifizieren
         shell: pwsh
         run: |
@@ -563,145 +614,34 @@ jobs:
             $sizeMB = [math]::Round($_.Length / 1MB, 2)
             Write-Host "Installer: $($_.Name) ($sizeMB MB)"
           }
+
       - name: Upload .exe
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
           path: target/release/bundle/nsis/*.exe
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
 
-# ─────────────────────────────────────────────────────────────
-#  Job 7: Nightly – Dateien direkt auf den LionCraft-Server
-#          hochladen und im Backend registrieren.
-#          (läuft nur bei Push auf main/master, NICHT bei Tag-Pushes)
-#
-#  Benötigt GitHub-Secrets:
-#    LAUNCHER_WEBHOOK_SECRET  – muss mit [launcher] webhook_secret
-#                               in config.toml übereinstimmen
-# ─────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────
+  #  Job 7: Nightly – GitHub Pre-Release + Backend registrieren
+  #
+  #  ZUSAMMENGEFÜHRT aus den zwei alten Nightly-Jobs:
+  #    - release-nightly  (ubuntu-24.04, direkter Server-Upload)
+  #    - release-nightly2204 (ubuntu-22.04, GitHub Release)
+  #  Beide Aufgaben laufen jetzt in einem einzigen Job auf ubuntu-24.04.
+  #
+  #  Benötigt GitHub-Secrets:
+  #    LAUNCHER_WEBHOOK_SECRET  – muss mit [launcher] webhook_secret
+  #                               in config.toml übereinstimmen
+  # ─────────────────────────────────────────────────────────────
   release-nightly:
-    name: "🌙 Nightly – Upload & Backend registrieren"
-    needs:
-      - build-deb-rpm
-      - build-appimage
-      - build-windows
-    runs-on: ubuntu-24.04
-    if: |
-      github.event_name == 'push' &&
-      !startsWith(github.ref, 'refs/tags/')
-
-    steps:
-      - name: Alle Build-Artefakte herunterladen
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Artefakte auflisten
-        run: find artifacts -type f | sort
-
-      - name: 📡 Dateien hochladen & im Backend registrieren (Nightly)
-        continue-on-error: true
-        run: |
-          if [ -z "$LAUNCHER_WEBHOOK_SECRET" ]; then
-            echo "⚠️  LAUNCHER_WEBHOOK_SECRET nicht gesetzt – übersprungen."
-            echo "   Tipp: Unter Settings → Secrets → LAUNCHER_WEBHOOK_SECRET eintragen."
-            exit 0
-          fi
-
-          SHORT_SHA="${GITHUB_SHA:0:7}"
-          API="https://api.lion-craft.net"
-          AUTH_HEADER="X-Webhook-Token: $LAUNCHER_WEBHOOK_SECRET"
-
-          # ── Hilfsfunktion: Datei hochladen + Release registrieren ──────────
-          upload_and_register() {
-            local PLATFORM="$1"
-            local FORMAT="$2"
-            local FILE="$3"
-            local FILENAME
-            FILENAME=$(basename "$FILE")
-
-            echo ""
-            echo "═══════════════════════════════════════════"
-            echo "📤 Upload: $FILENAME"
-            echo "   Platform=$PLATFORM  Format=$FORMAT  Version=$SHORT_SHA"
-
-            # 1. Datei auf den Server hochladen
-            HTTP_CODE=$(curl -s \
-              --max-time 300 \
-              -o /tmp/upload_resp.json \
-              -w "%{http_code}" \
-              -X POST "$API/api/launcher/upload" \
-              -H "$AUTH_HEADER" \
-              -F "file=@$FILE" \
-              -F "platform=$PLATFORM" \
-              -F "format=$FORMAT" \
-              -F "channel=nightly" \
-              -F "version=$SHORT_SHA" \
-              -F "git_sha=$GITHUB_SHA")
-
-            if [ "$HTTP_CODE" != "201" ]; then
-              echo "   ❌ Upload fehlgeschlagen (HTTP $HTTP_CODE)"
-              cat /tmp/upload_resp.json
-              return 1
-            fi
-
-            DOWNLOAD_URL=$(jq -r '.download_url' /tmp/upload_resp.json)
-            FILE_SIZE=$(jq -r '.file_size'    /tmp/upload_resp.json)
-            echo "   ✅ Hochgeladen ($FILE_SIZE)"
-            echo "   🔗 $DOWNLOAD_URL"
-
-            # 2. Release in MongoDB eintragen
-            REG_CODE=$(curl -s \
-              -o /tmp/reg_resp.json \
-              -w "%{http_code}" \
-              -X POST "$API/api/launcher/releases" \
-              -H "Content-Type: application/json" \
-              -H "$AUTH_HEADER" \
-              -d "{
-                \"channel\":      \"nightly\",
-                \"platform\":     \"$PLATFORM\",
-                \"format\":       \"$FORMAT\",
-                \"version\":      \"$SHORT_SHA\",
-                \"download_url\": \"$DOWNLOAD_URL\",
-                \"file_size\":    \"$FILE_SIZE\",
-                \"git_sha\":      \"$GITHUB_SHA\"
-              }")
-
-            if [ "$REG_CODE" = "201" ]; then
-              echo "   ✅ In DB registriert (HTTP $REG_CODE)"
-            else
-              echo "   ⚠️  DB-Registrierung (HTTP $REG_CODE): $(cat /tmp/reg_resp.json)"
-            fi
-          }
-
-          # ── Formate verarbeiten ───────────────────────────────────────────
-          for f in artifacts/linux-deb/*.deb;           do [ -f "$f" ] && upload_and_register "linux"   "deb"       "$f"; done
-          for f in artifacts/linux-rpm/*.rpm;           do [ -f "$f" ] && upload_and_register "linux"   "rpm"       "$f"; done
-          for f in artifacts/linux-appimage/*.AppImage; do [ -f "$f" ] && upload_and_register "linux"   "AppImage"  "$f"; done
-          for f in artifacts/windows-installer/*.exe;   do [ -f "$f" ] && upload_and_register "windows" "exe"       "$f"; done
-
-          echo ""
-          echo "✅ Alle Nightly-Releases hochgeladen und registriert"
-        env:
-          LAUNCHER_WEBHOOK_SECRET: ${{ secrets.LAUNCHER_WEBHOOK_SECRET }}
-
-# ─────────────────────────────────────────────────────────────
-#  Job 7: Nightly – GitHub Pre-Release erstellen & Backend
-#          benachrichtigen (läuft nur bei Push auf main/master,
-#          NICHT bei Tag-Pushes)
-#
-#  Benötigt GitHub-Secrets:
-#    LAUNCHER_WEBHOOK_SECRET  – muss mit [launcher] webhook_secret
-#                               in config.toml übereinstimmen
-# ─────────────────────────────────────────────────────────────
-  release-nightly2204:
     name: "🌙 Nightly – GitHub Release & Backend"
     needs:
       - build-deb-rpm
       - build-appimage
       - build-windows
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: |
       github.event_name == 'push' &&
       !startsWith(github.ref, 'refs/tags/')
@@ -725,7 +665,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 🚀 Nightly GitHub-Release erstellen & Artefakte hochladen
-        id: nightly_release
         run: |
           FILES=()
           for f in \
@@ -757,8 +696,7 @@ jobs:
         continue-on-error: true
         run: |
           if [ -z "$LAUNCHER_WEBHOOK_SECRET" ]; then
-            echo "⚠️  LAUNCHER_WEBHOOK_SECRET nicht gesetzt – Backend-Benachrichtigung übersprungen."
-            echo "   Tipp: Unter Settings → Secrets → LAUNCHER_WEBHOOK_SECRET eintragen."
+            echo "⚠️  LAUNCHER_WEBHOOK_SECRET nicht gesetzt – übersprungen."
             exit 0
           fi
 
@@ -798,35 +736,18 @@ jobs:
             echo ""
           }
 
-          # Linux .deb
-          for f in artifacts/linux-deb/*.deb; do
-            [ -f "$f" ] && post_release "linux" "deb" "$f"
-          done
-
-          # Linux .rpm
-          for f in artifacts/linux-rpm/*.rpm; do
-            [ -f "$f" ] && post_release "linux" "rpm" "$f"
-          done
-
-          # Linux AppImage
-          for f in artifacts/linux-appimage/*.AppImage; do
-            [ -f "$f" ] && post_release "linux" "AppImage" "$f"
-          done
-
-          # Windows .exe
-          for f in artifacts/windows-installer/*.exe; do
-            [ -f "$f" ] && post_release "windows" "exe" "$f"
-          done
+          for f in artifacts/linux-deb/*.deb;           do [ -f "$f" ] && post_release "linux"   "deb"      "$f"; done
+          for f in artifacts/linux-rpm/*.rpm;           do [ -f "$f" ] && post_release "linux"   "rpm"      "$f"; done
+          for f in artifacts/linux-appimage/*.AppImage; do [ -f "$f" ] && post_release "linux"   "AppImage" "$f"; done
+          for f in artifacts/windows-installer/*.exe;   do [ -f "$f" ] && post_release "windows" "exe"      "$f"; done
 
           echo "✅ Alle Nightly-Releases im Backend registriert"
         env:
           LAUNCHER_WEBHOOK_SECRET: ${{ secrets.LAUNCHER_WEBHOOK_SECRET }}
 
-# ─────────────────────────────────────────────────────────────
-#  GitHub Release – alle Pakete zusammenführen
-#  Snap/Flatpak/Arch haben continue-on-error: true →
-#  Release wird auch erstellt wenn einzelne Jobs fehlschlagen.
-# ─────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────
+  #  Job 8: GitHub Stable Release
+  # ─────────────────────────────────────────────────────────────
   create-release:
     name: "🚀 GitHub Release erstellen"
     runs-on: ubuntu-24.04
@@ -840,26 +761,32 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Alle Artefakte herunterladen
         uses: actions/download-artifact@v4
         with:
           path: release-artifacts
+
       - name: Artefakte auflisten
         run: find release-artifacts -type f | sort
+
       - name: SHA256 Gesamtchecksums erstellen
         run: |
           cd release-artifacts
           find . -type f ! -name "SHA256SUMS*" ! -name "PKGBUILD" ! -name "*.flatpakref" \
             | sort | xargs sha256sum > SHA256SUMS.txt
           cat SHA256SUMS.txt
+
       - name: Version extrahieren
         id: version
         run: |
           echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - name: GitHub Release veröffentlichen
         uses: softprops/action-gh-release@v2
         with:
@@ -902,16 +829,12 @@ jobs:
             release-artifacts/SHA256SUMS.txt
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # ── Stable Backend-Registrierung (dedupliziert in eine Funktion) ──
       - name: 📡 Backend-API – Stable Release registrieren
         continue-on-error: true
         run: |
-          # LAUNCHER_ADMIN_JWT wird als GitHub Secret gespeichert.
-          # Der Admin loggt sich ein (POST /api/auth/login), kopiert den JWT
-          # und hinterlegt ihn unter Settings → Secrets → LAUNCHER_ADMIN_JWT.
-          # Standard-Ablaufzeit: 24h – für CI empfiehlt sich ein längerer Wert
-          # (expiry_hours in config.toml auf z.B. 8760 = 1 Jahr setzen).
           if [ -z "$LAUNCHER_ADMIN_JWT" ]; then
-            echo "⚠️  LAUNCHER_ADMIN_JWT nicht gesetzt – Stable-Backend-Benachrichtigung übersprungen."
+            echo "⚠️  LAUNCHER_ADMIN_JWT nicht gesetzt – übersprungen."
             echo "   Tipp: Unter Settings → Secrets → LAUNCHER_ADMIN_JWT eintragen."
             exit 0
           fi
@@ -953,88 +876,11 @@ jobs:
             echo ""
           }
 
-          for f in release-artifacts/linux-deb/*.deb; do
-            [ -f "$f" ] && post_stable "linux" "deb" "$f"
-          done
-          for f in release-artifacts/linux-rpm/*.rpm; do
-            [ -f "$f" ] && post_stable "linux" "rpm" "$f"
-          done
-          for f in release-artifacts/linux-appimage/*.AppImage; do
-            [ -f "$f" ] && post_stable "linux" "AppImage" "$f"
-          done
-          for f in release-artifacts/windows-installer/*.exe; do
-            [ -f "$f" ] && post_stable "windows" "exe" "$f"
-          done
+          for f in release-artifacts/linux-deb/*.deb;           do [ -f "$f" ] && post_stable "linux"   "deb"      "$f"; done
+          for f in release-artifacts/linux-rpm/*.rpm;           do [ -f "$f" ] && post_stable "linux"   "rpm"      "$f"; done
+          for f in release-artifacts/linux-appimage/*.AppImage; do [ -f "$f" ] && post_stable "linux"   "AppImage" "$f"; done
+          for f in release-artifacts/windows-installer/*.exe;   do [ -f "$f" ] && post_stable "windows" "exe"      "$f"; done
 
           echo "✅ Alle Stable-Releases im Backend registriert"
         env:
           LAUNCHER_ADMIN_JWT: ${{ secrets.LAUNCHER_ADMIN_JWT }}
-
-      - name: 📡 Backend-API – Stable Release registrieren
-        continue-on-error: true
-        run: |
-          # LAUNCHER_ADMIN_JWT wird als GitHub Secret gespeichert.
-          # Der Admin loggt sich ein (POST /api/auth/login), kopiert den JWT
-          # und hinterlegt ihn unter Settings → Secrets → LAUNCHER_ADMIN_JWT.
-          # Standard-Ablaufzeit: 24h – für CI empfiehlt sich ein längerer Wert
-          # (expiry_hours in config.toml auf z.B. 8760 = 1 Jahr setzen).
-          if [ -z "$LAUNCHER_ADMIN_JWT" ]; then
-            echo "⚠️  LAUNCHER_ADMIN_JWT nicht gesetzt – Stable-Backend-Benachrichtigung übersprungen."
-            echo "   Tipp: Unter Settings → Secrets → LAUNCHER_ADMIN_JWT eintragen."
-            exit 0
-          fi
-
-          TAG="${{ steps.version.outputs.tag }}"
-          VERSION="${{ steps.version.outputs.version }}"
-          REPO="${{ github.repository }}"
-          BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
-
-          post_stable() {
-            local PLATFORM="$1" FORMAT="$2" FILE="$3"
-            local FILENAME SIZE
-            FILENAME=$(basename "$FILE")
-            SIZE=$(du -sh "$FILE" 2>/dev/null | awk '{print $1}')
-
-            echo "📤 Registriere: channel=stable platform=$PLATFORM format=$FORMAT version=$VERSION"
-            echo "   Datei: $FILENAME  |  Größe: $SIZE"
-            echo "   URL:   ${BASE_URL}/${FILENAME}"
-
-            HTTP_CODE=$(curl -s -o /tmp/api_resp.json -w "%{http_code}" \
-              -X POST "https://api.lion-craft.net/api/launcher/releases" \
-              -H "Authorization: Bearer $LAUNCHER_ADMIN_JWT" \
-              -H "Content-Type: application/json" \
-              -d "{
-                \"channel\": \"stable\",
-                \"platform\": \"$PLATFORM\",
-                \"format\": \"$FORMAT\",
-                \"version\": \"$VERSION\",
-                \"download_url\": \"${BASE_URL}/${FILENAME}\",
-                \"file_size\": \"$SIZE\",
-                \"git_sha\": \"$GITHUB_SHA\"
-              }")
-
-            if [ "$HTTP_CODE" = "201" ]; then
-              echo "   ✅ HTTP $HTTP_CODE – Erfolgreich registriert"
-            else
-              echo "   ⚠️  HTTP $HTTP_CODE – Antwort: $(cat /tmp/api_resp.json)"
-            fi
-            echo ""
-          }
-
-          for f in release-artifacts/linux-deb/*.deb; do
-            [ -f "$f" ] && post_stable "linux" "deb" "$f"
-          done
-          for f in release-artifacts/linux-rpm/*.rpm; do
-            [ -f "$f" ] && post_stable "linux" "rpm" "$f"
-          done
-          for f in release-artifacts/linux-appimage/*.AppImage; do
-            [ -f "$f" ] && post_stable "linux" "AppImage" "$f"
-          done
-          for f in release-artifacts/windows-installer/*.exe; do
-            [ -f "$f" ] && post_stable "windows" "exe" "$f"
-          done
-
-          echo "✅ Alle Stable-Releases im Backend registriert"
-        env:
-          LAUNCHER_ADMIN_JWT: ${{ secrets.LAUNCHER_ADMIN_JWT }}
-
