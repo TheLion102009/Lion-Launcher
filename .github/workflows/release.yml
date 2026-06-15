@@ -23,22 +23,6 @@ env:
   RUSTC_WRAPPER: "sccache"
 
 # ─────────────────────────────────────────────────────────────
-#  Gemeinsame Linux-Abhängigkeiten als YAML-Anchor
-#  (werden per *linux_deps referenziert)
-# ─────────────────────────────────────────────────────────────
-x-linux-deps: &linux-deps
-  - libwebkit2gtk-4.1-dev
-  - libssl-dev
-  - libgtk-3-dev
-  - libayatana-appindicator3-dev
-  - librsvg2-dev
-  - libsoup-3.0-dev
-  - patchelf
-  - curl
-  - wget
-  - file
-
-# ─────────────────────────────────────────────────────────────
 #  Job 1: Debian (.deb) + RPM (.rpm)
 # ─────────────────────────────────────────────────────────────
 jobs:
