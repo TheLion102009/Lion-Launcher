@@ -96,7 +96,11 @@ pub async fn update_profile(profile_id: String, updates: serde_json::Value) -> R
 }
 
 #[tauri::command]
-pub async fn launch_profile(profile_id: String, username: String) -> Result<(), String> {
+pub async fn launch_profile(
+    app_handle: tauri::AppHandle,
+    profile_id: String,
+    username: String,
+) -> Result<(), String> {
     let manager = ProfileManager::new().map_err(|e| e.to_string())?;
     let mut profiles = manager.load_profiles().await.map_err(|e| e.to_string())?;
 
@@ -180,17 +184,40 @@ pub async fn launch_profile(profile_id: String, username: String) -> Result<(), 
         access_token != "0"
     );
 
+    // ── Fortschritts-Kanal aufbauen ───────────────────────────────────────────
+    // Erstelle einen synchronen Kanal (bounded=8), den MinecraftLauncher
+    // für Fortschrittsmeldungen nutzen kann ohne AppHandle zu kennen.
+    // Ein Hintergrund-Task leitet die Meldungen per Tauri-Event ans Frontend.
+    let (progress_tx, progress_rx) = std::sync::mpsc::sync_channel::<(String, u8)>(8);
+    crate::core::minecraft::set_launch_progress_sender(progress_tx);
+
+    let app_for_progress = app_handle.clone();
+    std::thread::spawn(move || {
+        use tauri::Emitter;
+        while let Ok((status, percent)) = progress_rx.recv() {
+            tracing::debug!("Launch progress {}%: {}", percent, status);
+            app_for_progress.emit("launch-progress", serde_json::json!({
+                "status": status,
+                "percent": percent
+            })).ok();
+        }
+    });
+    // ─────────────────────────────────────────────────────────────────────────
+
     let launcher = crate::core::minecraft::MinecraftLauncher::new().map_err(|e| e.to_string())?;
-    launcher.launch(
+    let result = launcher.launch(
         &profile_to_launch,
         &account_username,
         &account_uuid,
         if access_token == "0" { None } else { Some(&access_token) }
     )
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string());
 
-    Ok(())
+    // Sender entfernen damit der Empfänger-Thread sauber beendet
+    crate::core::minecraft::clear_launch_progress_sender();
+
+    result.map(|_| ())
 }
 
 // ==================== SETTINGS SYNC FUNKTIONEN ====================

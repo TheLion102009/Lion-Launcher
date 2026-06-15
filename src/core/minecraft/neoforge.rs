@@ -399,8 +399,13 @@ async fn download_neoforge_installer(
     let installer_path = libraries_dir.join(format!("neoforge-{}-installer.jar", neoforge_version));
 
     if installer_path.exists() {
-        tracing::info!("✅ NeoForge installer already exists");
-        return Ok(installer_path);
+        if is_valid_zip_file(&installer_path) {
+            tracing::info!("✅ NeoForge installer already exists and is valid");
+            return Ok(installer_path);
+        } else {
+            tracing::warn!("⚠️  NeoForge installer is corrupted (bad ZIP magic), re-downloading...");
+            tokio::fs::remove_file(&installer_path).await.ok();
+        }
     }
 
     let url = format!(
@@ -630,6 +635,22 @@ pub fn build_launch_command(
     };
 
     let mut cmd = Command::new(&java_bin);
+
+    // Linux: Display-Umgebungsvariablen weitergeben.
+    // Tauri-Kindprozesse erben DISPLAY/WAYLAND_DISPLAY nicht immer
+    // (z.B. bei AppImage-Launch oder bestimmten Compositor-Setups).
+    #[cfg(target_os = "linux")]
+    {
+        cmd.env("DISPLAY", std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string()));
+        if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
+            cmd.env("XDG_RUNTIME_DIR", xdg);
+        }
+        // Wayland-Display weitergeben (Minecraft 1.21+ unterstützt natives Wayland)
+        if let Ok(wd) = std::env::var("WAYLAND_DISPLAY") {
+            cmd.env("WAYLAND_DISPLAY", wd);
+        }
+        cmd.env("_JAVA_AWT_WM_NONREPARENTING", "1");
+    }
 
     // Plattform-optimierte JVM-Flags (Xmx/Xms + G1GC-Tuning + OS-spezifische Flags)
     let os_name = std::env::consts::OS; // "linux", "windows", "macos"

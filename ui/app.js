@@ -1244,18 +1244,25 @@ async function launchProfile(profileId) {
     };
 
     try {
-        updateProgress('Lade Version-Info...', 10);
-        await new Promise(r => setTimeout(r, 300));
+        updateProgress('Vorbereitung...', 5);
 
-        updateProgress('Lade Minecraft herunter (Client, Libraries, Assets)...', 30);
-        await new Promise(r => setTimeout(r, 300));
-
-        updateProgress('Dies kann beim ersten Mal 1-2 Minuten dauern...', 50);
+        // Lausche auf echte Fortschrittsereignisse vom Backend
+        let unlistenProgress = null;
+        try {
+            unlistenProgress = await window.__TAURI__.event.listen('launch-progress', (event) => {
+                const { status, percent } = event.payload;
+                updateProgress(status, percent);
+            });
+        } catch (_e) {
+            // Tauri-Events nicht verfügbar (z.B. im Browser-Dev-Mode)
+        }
 
         await invoke('launch_profile', {
             profileId: profileId,
             username: currentUsername
         });
+
+        if (unlistenProgress) unlistenProgress();
 
         updateProgress('Minecraft gestartet!', 100);
         debugLog('Minecraft started successfully!', 'success');
@@ -1276,6 +1283,7 @@ async function launchProfile(profileId) {
 
 
     } catch (error) {
+        if (typeof unlistenProgress === 'function') unlistenProgress();
         debugLog('Launch failed: ' + error, 'error');
 
         // Fehler-Modal zeigen

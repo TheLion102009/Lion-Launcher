@@ -15,6 +15,45 @@ use crate::config::defaults;
 const MOJANG_MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const RESOURCES_URL: &str = "https://resources.download.minecraft.net";
 
+// ── Fortschritts-Kanal ───────────────────────────────────────────────────────
+// Ermöglicht dem Backend, den Fortschritt an das Frontend zu melden ohne
+// AppHandle durch die gesamte Aufrufkette durchreichen zu müssen.
+// `launch_profile` setzt den Sender; MinecraftLauncher schreibt optional hinein.
+//
+// Format: (status_text: String, percent: u8)
+type ProgressMsg = (String, u8);
+static LAUNCH_PROGRESS_TX: std::sync::OnceLock<
+    std::sync::Mutex<Option<std::sync::mpsc::SyncSender<ProgressMsg>>>
+> = std::sync::OnceLock::new();
+
+fn launch_progress_tx() -> &'static std::sync::Mutex<Option<std::sync::mpsc::SyncSender<ProgressMsg>>> {
+    LAUNCH_PROGRESS_TX.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// Setzt den Fortschritts-Sender (wird von `launch_profile` aufgerufen).
+pub fn set_launch_progress_sender(tx: std::sync::mpsc::SyncSender<ProgressMsg>) {
+    if let Ok(mut guard) = launch_progress_tx().lock() {
+        *guard = Some(tx);
+    }
+}
+
+/// Entfernt den Fortschritts-Sender (nach dem Launch aufräumen).
+pub fn clear_launch_progress_sender() {
+    if let Ok(mut guard) = launch_progress_tx().lock() {
+        *guard = None;
+    }
+}
+
+/// Sendet eine Fortschrittsmeldung (fire-and-forget, ignoriert Fehler).
+pub fn send_launch_progress(status: impl Into<String>, percent: u8) {
+    if let Ok(guard) = launch_progress_tx().lock() {
+        if let Some(tx) = guard.as_ref() {
+            tx.try_send((status.into(), percent)).ok();
+        }
+    }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// Thread-sichere globale Variable für extra Launch-Argumente (Quick Play).
 /// thread_local! funktioniert NICHT mit async/Tokio – nach einem .await kann der Task
 /// auf einem anderen Thread fortgesetzt werden, wo die thread_local leer ist.
@@ -348,6 +387,7 @@ impl MinecraftLauncher {
         let loader = &profile.loader.loader;
 
         tracing::info!("Preparing Minecraft {} with {:?} for {} (UUID: {})", version, loader, username, uuid);
+        send_launch_progress("Lade Version-Info...", 5);
 
         // Version-Info laden
         let version_info = self.get_version_info(version).await?;
@@ -372,6 +412,7 @@ impl MinecraftLauncher {
         let client_jar = versions_dir.join(format!("{}/{}.jar", version, version));
         if !client_jar.exists() {
             tracing::info!("Downloading client...");
+            send_launch_progress("Lade Minecraft Client-JAR...", 15);
             tokio::fs::create_dir_all(client_jar.parent().unwrap()).await?;
             self.download_manager
                 .download_with_hash(&version_info.downloads.client.url, &client_jar, Some(&version_info.downloads.client.sha1))
@@ -380,28 +421,34 @@ impl MinecraftLauncher {
 
         // Libraries (Vanilla)
         tracing::info!("Checking libraries...");
+        send_launch_progress("Lade Libraries...", 30);
         let classpath = self.download_libraries(&version_info, &libraries_dir, &natives_dir).await?;
 
         // Assets
         tracing::info!("Checking assets...");
+        send_launch_progress("Lade Assets (Sounds, Texturen)... Das kann beim ersten Mal 1-2 Min. dauern.", 50);
         self.download_assets(&version_info.assetIndex, &assets_dir).await?;
 
         // NeoForge/Forge verwendet einen speziellen Launch-Mechanismus
         if matches!(loader, crate::types::version::ModLoader::NeoForge) {
+            send_launch_progress("Installiere NeoForge...", 70);
             self.launch_neoforge_new(
                 profile, &version_info, &classpath, &libraries_dir,
                 &versions_dir, &assets_dir, &natives_dir, game_dir,
                 username, uuid, access_token
             ).await?;
+            send_launch_progress("Minecraft gestartet!", 100);
             return Ok(take_launch_warnings());
         }
 
         if matches!(loader, crate::types::version::ModLoader::Forge) {
+            send_launch_progress("Installiere Forge...", 70);
             self.launch_neoforge_or_forge(
                 profile, &version_info, &client_jar, &classpath,
                 &libraries_dir, &assets_dir, &natives_dir, game_dir,
                 username, uuid, access_token
             ).await?;
+            send_launch_progress("Minecraft gestartet!", 100);
             return Ok(take_launch_warnings());
         }
 
@@ -409,6 +456,7 @@ impl MinecraftLauncher {
         let (main_class, final_classpath) = match loader {
             crate::types::version::ModLoader::Fabric => {
                 tracing::info!("Installing Fabric loader...");
+                send_launch_progress("Installiere Fabric Loader...", 70);
                 let (fabric_classpath, fabric_main_class) = self.install_fabric(version, &libraries_dir).await?;
 
                 let mut cp_entries = split_classpath_entries(&fabric_classpath);
@@ -445,11 +493,13 @@ impl MinecraftLauncher {
         };
 
         // Standard-Launch für Fabric/Quilt/Vanilla
+        send_launch_progress("Starte Minecraft...", 90);
         self.launch_standard(
             profile, &main_class, &final_classpath, &client_jar,
             &assets_dir, &natives_dir, game_dir, &version_info,
             username, uuid, access_token
         ).await?;
+        send_launch_progress("Minecraft gestartet!", 100);
 
         Ok(take_launch_warnings())
     }
@@ -865,6 +915,10 @@ maxThreads = -1
             if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
                 cmd.env("XDG_RUNTIME_DIR", xdg);
             }
+            // Wayland-Display weitergeben (Minecraft 1.21+ kann nativ Wayland nutzen)
+            if let Ok(wd) = std::env::var("WAYLAND_DISPLAY") {
+                cmd.env("WAYLAND_DISPLAY", wd);
+            }
             // NVIDIA-Treiber für GLX explizit wählen (nicht Mesa-Fallback)
             cmd.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia");
             // NVIDIA EGL-Treiber explizit (für LWJGL EGL-Pfad)
@@ -1235,14 +1289,23 @@ maxThreads = -1
         uuid: &str,
         access_token: Option<&str>,
     ) -> Result<()> {
-        // Verwende die von Mojang angegebene Java-Version (aus version.json javaVersion.majorVersion)
-        let required_java = version_info.javaVersion.as_ref().map(|j| j.majorVersion).unwrap_or(21);
+        // Verwende die von Mojang angegebene Java-Version (aus version.json javaVersion.majorVersion).
+        // Fallback 8 (nicht 21): Alte Minecraft-Versionen (< 1.17) haben keine javaVersion im manifest,
+        // aber benötigen Java 8. Mit 21 als Fallback würde Forge ≤1.16.5 (Nashorn) crashen.
+        let required_java = version_info.javaVersion.as_ref().map(|j| j.majorVersion).unwrap_or(8);
         tracing::info!("Required Java version: {}", required_java);
         let java_path = self.ensure_java_installed(required_java, None).await?;
 
-        // Auf Windows javaw.exe nutzen (kein Konsolenfenster)
+        // Auf Windows javaw.exe nutzen (kein Konsolenfenster).
+        // Robuste Variante: nur den Dateinamen ersetzen, nicht per String-Replace
+        // (verhindert Fehler wenn der Pfad kein "java.exe" enthält, z.B. Adoptium-JDK).
         let java_bin = if cfg!(windows) {
-            java_path.replace("java.exe", "javaw.exe")
+            let p = std::path::Path::new(&java_path);
+            if p.file_name().and_then(|n| n.to_str()) == Some("java.exe") {
+                p.with_file_name("javaw.exe").display().to_string()
+            } else {
+                java_path.clone()
+            }
         } else {
             java_path.clone()
         };
@@ -1690,494 +1753,7 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         Ok(version.forge_version.clone())
     }
 
-    /// Installiert NeoForge vollständig und gibt das Ergebnis zurück
-    async fn install_neoforge_complete(&self, neoforge_version: &str, libraries_dir: &Path, _client_jar: &Path, mc_version: &str) -> Result<ForgeInstallResult> {
-        use crate::api::neoforge::NeoForgeClient;
-        use std::io::Read;
 
-        let neoforge_client = NeoForgeClient::new()?;
-        tracing::info!("Installing NeoForge {} for MC {} (complete)", neoforge_version, mc_version);
-
-        // NeoForge-Installer herunterladen
-        let installer_url = neoforge_client.get_installer_url(neoforge_version);
-        let installer_path = libraries_dir.join(format!("neoforge-{}-installer.jar", neoforge_version));
-
-        if installer_path.exists() && !Self::is_valid_zip(&installer_path) {
-            tokio::fs::remove_file(&installer_path).await.ok();
-        }
-
-        if !installer_path.exists() {
-            tracing::info!("Downloading NeoForge installer from: {}", installer_url);
-            tokio::fs::create_dir_all(installer_path.parent().unwrap()).await?;
-            self.download_manager.download_with_hash(&installer_url, &installer_path, None).await?;
-
-            if !Self::is_valid_zip(&installer_path) {
-                tokio::fs::remove_file(&installer_path).await.ok();
-                bail!("Downloaded NeoForge installer is corrupted");
-            }
-        }
-
-        // Prüfe ob die gepatchte Client-JAR bereits existiert (verschiedene mögliche Pfade)
-        let patched_client_path = libraries_dir.join(format!(
-            "net/neoforged/neoforge/{}/neoforge-{}-client.jar",
-            neoforge_version, neoforge_version
-        ));
-
-        // Alternative Pfade wo die gepatchte JAR sein könnte
-        let alt_patched_paths = [
-            libraries_dir.join(format!("net/minecraft/client/{}-{}/client-{}-{}-srg.jar", mc_version, "20240808.144430", mc_version, "20240808.144430")),
-            libraries_dir.join(format!("net/neoforged/neoforge/{}/neoforge-{}-patched.jar", neoforge_version, neoforge_version)),
-        ];
-
-        let patched_exists = patched_client_path.exists() || alt_patched_paths.iter().any(|p| p.exists());
-
-        if !patched_exists {
-            // Führe den NeoForge-Installer aus, um die Client-JAR zu patchen
-            tracing::info!("🔨 Running NeoForge installer to create SRG-mapped client JAR...");
-            tracing::info!("This may take 1-2 minutes on first launch...");
-
-            let java_path = self.ensure_java_installed(21, None).await?;
-            // Der Installer erwartet das .minecraft-ähnliche Verzeichnis (parent von libraries)
-            let launcher_dir = libraries_dir.parent().unwrap();
-
-            // Erstelle eine minimale launcher_profiles.json wenn sie nicht existiert
-            let profiles_path = launcher_dir.join("launcher_profiles.json");
-            if !profiles_path.exists() {
-                tracing::info!("Creating launcher_profiles.json for NeoForge installer");
-                let profiles_content = r#"{"profiles":{},"settings":{},"version":3}"#;
-                std::fs::write(&profiles_path, profiles_content).ok();
-            }
-
-            let mut installer_cmd = std::process::Command::new(&java_path);
-            installer_cmd.arg("-jar");
-            installer_cmd.arg(&installer_path);
-            installer_cmd.arg("--installClient");
-            installer_cmd.arg(launcher_dir);
-            installer_cmd.current_dir(launcher_dir);
-            installer_cmd.stdout(std::process::Stdio::inherit()); // Show installer output
-            installer_cmd.stderr(std::process::Stdio::inherit());
-
-            tracing::info!("Running: java -jar {} --installClient {}", installer_path.display(), launcher_dir.display());
-
-            match installer_cmd.status() {
-                Ok(status) => {
-                    if status.success() {
-                        tracing::info!("✅ NeoForge installer completed successfully");
-
-                        // Prüfe ob die SRG-JAR jetzt existiert
-                        let srg_path = libraries_dir.join(format!(
-                            "net/minecraft/client/{}-20240808.144430/client-{}-20240808.144430-srg.jar",
-                            mc_version, mc_version
-                        ));
-
-                        if srg_path.exists() {
-                            tracing::info!("✅ SRG-JAR created: {:?}", srg_path);
-                        } else {
-                            tracing::warn!("⚠️ SRG-JAR not found after installer run!");
-                            tracing::warn!("Expected: {:?}", srg_path);
-                        }
-                    } else {
-                        tracing::error!("❌ NeoForge installer failed with status: {}", status);
-                        bail!("NeoForge installer failed");
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("❌ Failed to run NeoForge installer: {}", e);
-                    bail!("Failed to run NeoForge installer: {}", e);
-                }
-            }
-        } else {
-            tracing::info!("✅ Patched client JAR already exists");
-        }
-
-        // Extrahiere version.json aus dem Installer
-        let (version_json, _jvm_args_json, jars_data) = {
-            let file = std::fs::File::open(&installer_path)?;
-            let mut archive = zip::ZipArchive::new(file)?;
-
-            let version_json = {
-                let mut entry = archive.by_name("version.json")
-                    .map_err(|_| anyhow::anyhow!("version.json not found in installer"))?;
-                let mut data = String::new();
-                entry.read_to_string(&mut data)?;
-                data
-            };
-
-            // Versuche install_profile.json zu lesen (enthält JVM args)
-            let jvm_args_json = {
-                if let Ok(mut entry) = archive.by_name("install_profile.json") {
-                    let mut data = String::new();
-                    entry.read_to_string(&mut data)?;
-                    Some(data)
-                } else {
-                    None
-                }
-            };
-
-            // Sammle JARs aus maven/
-            let mut jars_data: Vec<(PathBuf, Vec<u8>)> = Vec::new();
-            let mut jar_names: Vec<(String, PathBuf)> = Vec::new();
-
-            for i in 0..archive.len() {
-                if let Ok(entry) = archive.by_index(i) {
-                    let name = entry.name().to_string();
-                    if name.starts_with("maven/") && name.ends_with(".jar") {
-                        let rel_path = name.strip_prefix("maven/").unwrap();
-                        let dest = libraries_dir.join(rel_path);
-                        if !dest.exists() {
-                            jar_names.push((name, dest));
-                        }
-                    }
-                }
-            }
-
-            for (name, dest) in jar_names {
-                if let Ok(mut entry) = archive.by_name(&name) {
-                    let mut data = Vec::new();
-                    entry.read_to_end(&mut data)?;
-                    jars_data.push((dest, data));
-                }
-            }
-
-            (version_json, jvm_args_json, jars_data)
-        };
-
-        // Parse version.json
-        #[derive(serde::Deserialize)]
-        #[allow(non_snake_case)]
-        struct NeoForgeVersion {
-            id: Option<String>,
-            mainClass: String,
-            inheritsFrom: Option<String>,
-            libraries: Vec<NeoForgeLib>,
-            arguments: Option<NeoForgeArguments>,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct NeoForgeArguments {
-            jvm: Option<Vec<serde_json::Value>>,
-            game: Option<Vec<serde_json::Value>>,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct NeoForgeLib {
-            name: String,
-            downloads: Option<NeoForgeDownloads>,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct NeoForgeDownloads {
-            artifact: Option<NeoForgeArtifact>,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct NeoForgeArtifact {
-            url: String,
-            path: String,
-            sha1: Option<String>,
-        }
-
-        let version: NeoForgeVersion = serde_json::from_str(&version_json)?;
-        tracing::info!("NeoForge main class: {}", version.mainClass);
-        tracing::info!("NeoForge has {} libraries", version.libraries.len());
-
-        // Extrahiere JVM-Argumente aus version.json
-        let mut jvm_args = Vec::new();
-
-        if let Some(args) = &version.arguments {
-            if let Some(jvm) = &args.jvm {
-                for arg in jvm {
-                    if let Some(s) = arg.as_str() {
-                        // Ersetze Platzhalter
-                        let processed = s
-                            .replace("${library_directory}", &libraries_dir.display().to_string())
-                            .replace("${classpath_separator}", classpath_separator())
-                            .replace("${version_name}", neoforge_version);
-                        jvm_args.push(processed);
-                    }
-                }
-            }
-        }
-
-        // WENN keine JVM-Args in version.json, verwende Standard-Args
-        // Diese sind notwendig für das Java Module System
-        if jvm_args.is_empty() || !jvm_args.iter().any(|a| a.starts_with("--add-opens") || a.starts_with("-p")) {
-            tracing::info!("No JVM args in version.json, using defaults");
-            jvm_args.extend(vec![
-                "--add-opens=java.base/java.util.jar=ALL-UNNAMED".to_string(),
-                "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED".to_string(),
-            ]);
-        }
-
-        // Finde FML und NeoForm Versionen aus den Libraries
-        let mut fml_version = String::new();
-        let mut neoform_version = String::new();
-
-        for lib in &version.libraries {
-            if lib.name.contains("fmlcore") {
-                // Format: net.neoforged.fancymodloader:fmlcore:VERSION
-                if let Some(v) = lib.name.split(':').next_back() {
-                    fml_version = v.to_string();
-                }
-            }
-            if lib.name.contains("neoform") {
-                if let Some(v) = lib.name.split(':').next_back() {
-                    neoform_version = v.to_string();
-                }
-            }
-        }
-
-        // Fallback-Werte wenn nicht gefunden
-        if fml_version.is_empty() {
-            fml_version = neoforge_version.to_string();
-        }
-        if neoform_version.is_empty() {
-            neoform_version = format!("{}-{}", mc_version, "20240808.144430"); // Default NeoForm
-        }
-
-        tracing::info!("NeoForge versions: mc={}, neoforge={}, fml={}, neoform={}",
-            mc_version, neoforge_version, fml_version, neoform_version);
-
-        // KRITISCH: Suche die SRG-JAR in mehreren möglichen Pfaden
-        tracing::info!("🔍 Suche SRG-JAR für NeoForge...");
-
-        let _srg_jar_path = libraries_dir.join(format!(
-            "net/minecraft/client/{}-20240808.144430/client-{}-20240808.144430-srg.jar",
-            mc_version, mc_version
-        ));
-
-        let alternative_srg_paths = vec![
-            libraries_dir.join(format!("net/minecraft/client/{}-20240808.144430/client-{}-20240808.144430-srg.jar",
-                mc_version, mc_version)),
-            libraries_dir.join(format!("net/neoforged/neoforge/{}/client-{}-srg.jar",
-                neoforge_version, mc_version)),
-            libraries_dir.join(format!("net/neoforged/neoforge/{}/neoforge-{}-client.jar",
-                neoforge_version, neoforge_version)),
-        ];
-
-        // Debug: Liste alle Pfade
-        for (i, path) in alternative_srg_paths.iter().enumerate() {
-            if path.exists() {
-                tracing::info!("✅ Gefunden [{}]: {:?}", i, path);
-            } else {
-                tracing::info!("❌ Nicht gefunden [{}]: {:?}", i, path);
-            }
-        }
-
-        let srg_exists = alternative_srg_paths.iter().any(|p| p.exists());
-
-        if !srg_exists {
-            tracing::info!("🔨 SRG-JAR nicht gefunden! Führe NeoForge-Installer aus...");
-
-            let java_path = self.ensure_java_installed(21, None).await?;
-            let launcher_dir = libraries_dir.parent().unwrap();
-
-            // Erstelle launcher_profiles.json falls nicht vorhanden
-            let profiles_path = launcher_dir.join("launcher_profiles.json");
-            if !profiles_path.exists() {
-                tracing::info!("Erstelle launcher_profiles.json für Installer");
-                let profiles_content = r#"{"profiles":{},"settings":{},"version":3}"#;
-                tokio::fs::write(&profiles_path, profiles_content).await?;
-            }
-
-            let mut installer_cmd = std::process::Command::new(&java_path);
-            installer_cmd.arg("-jar");
-            installer_cmd.arg(&installer_path);
-            installer_cmd.arg("--installClient");
-            installer_cmd.arg(launcher_dir);
-            installer_cmd.current_dir(launcher_dir);
-            installer_cmd.stdout(std::process::Stdio::inherit());
-            installer_cmd.stderr(std::process::Stdio::inherit());
-
-            tracing::info!("Führe NeoForge-Installer aus: java -jar {} --installClient {}",
-                installer_path.display(), launcher_dir.display());
-
-            match installer_cmd.status() {
-                Ok(status) if status.success() => {
-                    tracing::info!("✅ NeoForge-Installer erfolgreich");
-
-                    // Prüfe nochmal ob SRG-JAR jetzt existiert
-                    let mut found_srg = None;
-                    for path in &alternative_srg_paths {
-                        if path.exists() {
-                            tracing::info!("✅ SRG-JAR erstellt: {:?}", path);
-                            found_srg = Some(path.clone());
-                            break;
-                        }
-                    }
-
-                    if found_srg.is_none() {
-                        tracing::error!("❌ SRG-JAR nicht gefunden nach Installer!");
-                        bail!("SRG-JAR wurde vom Installer nicht erstellt");
-                    }
-                }
-                Ok(status) => {
-                    tracing::error!("❌ NeoForge-Installer fehlgeschlagen: {}", status);
-                    bail!("NeoForge-Installer fehlgeschlagen");
-                }
-                Err(e) => {
-                    tracing::error!("❌ NeoForge-Installer konnte nicht gestartet werden: {}", e);
-                    bail!("NeoForge-Installer konnte nicht gestartet werden: {}", e);
-                }
-            }
-        } else {
-            tracing::info!("✅ SRG-JAR existiert bereits");
-        }
-
-        // Finde die tatsächlich existierende SRG-JAR
-        let srg_jar = alternative_srg_paths.iter()
-            .find(|p| p.exists())
-            .ok_or_else(|| anyhow::anyhow!("SRG-JAR nicht gefunden!"))?;
-
-        tracing::info!("✅ Verwende SRG-JAR: {:?}", srg_jar);
-
-        // KRITISCH: NeoForge-spezifische Argumente
-        // --gameJar wird im ForgeInstallResult gespeichert
-        let game_args = vec![
-            "--launchTarget".to_string(), "forgeclient".to_string(),
-            "--fml.fmlVersion".to_string(), fml_version.clone(),
-            "--fml.mcVersion".to_string(), mc_version.to_string(),
-            "--fml.neoForgeVersion".to_string(), neoforge_version.to_string(),
-            "--fml.neoFormVersion".to_string(), neoform_version.clone(),
-        ];
-
-        tracing::info!("✅ NeoForge game args: {:?}", game_args);
-
-        // Extrahiere JARs
-        for (dest, data) in jars_data {
-            tracing::info!("Extracting: {:?}", dest);
-            tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
-            tokio::fs::write(&dest, data).await?;
-        }
-
-        // Lade fehlende Libraries
-        let mut classpath = Vec::new();
-        let mut module_path = Vec::new();
-
-        for lib in &version.libraries {
-            let lib_path = if let Some(downloads) = &lib.downloads {
-                if let Some(artifact) = &downloads.artifact {
-                    let dest = libraries_dir.join(&artifact.path);
-
-                    if !dest.exists() && !artifact.url.is_empty() {
-                        tracing::info!("Downloading: {}", lib.name);
-                        tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
-                        self.download_manager.download_with_hash(&artifact.url, &dest, artifact.sha1.as_deref()).await.ok();
-                    }
-                    dest
-                } else {
-                    continue;
-                }
-            } else {
-                let maven_path = Self::maven_to_path(&lib.name);
-                let dest = libraries_dir.join(&maven_path);
-
-                if !dest.exists() {
-                    for url in &[
-                        format!("https://maven.neoforged.net/releases/{}", maven_path),
-                        format!("https://maven.minecraftforge.net/{}", maven_path),
-                        format!("https://repo1.maven.org/maven2/{}", maven_path),
-                        format!("https://libraries.minecraft.net/{}", maven_path),
-                    ] {
-                        if self.download_manager.download_with_hash(url, &dest, None).await.is_ok() {
-                            tracing::info!("Downloaded {} from {}", lib.name, url);
-                            break;
-                        }
-                    }
-                }
-                dest
-            };
-
-            if lib_path.exists() {
-                let path_str = lib_path.display().to_string();
-
-                // Bestimmte Libraries gehören in den Modulpfad (für Java Module System)
-                // Diese sind kritisch für den BootstrapLauncher
-                if lib.name.contains("bootstraplauncher") ||
-                   lib.name.contains("securejarhandler") ||
-                   lib.name.contains("jarjar") ||  // KRITISCH: JarJar für Mod-Isolation
-                   lib.name.contains("asm") {
-                    module_path.push(path_str);
-                } else {
-                    classpath.push(path_str);
-                }
-            }
-        }
-
-        // KRITISCH: NeoForge Universal JAR - enthält die NeoForge Core-Mod
-        let neoforge_universal_path = libraries_dir.join(format!("net/neoforged/neoforge/{}/neoforge-{}-universal.jar", neoforge_version, neoforge_version));
-        if !neoforge_universal_path.exists() {
-            tracing::info!("Downloading NeoForge universal JAR");
-            tokio::fs::create_dir_all(neoforge_universal_path.parent().unwrap()).await.ok();
-
-            let neoforge_universal_url = format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{}/neoforge-{}-universal.jar", neoforge_version, neoforge_version);
-            if let Err(e) = self.download_manager.download_with_hash(&neoforge_universal_url, &neoforge_universal_path, None).await {
-                tracing::error!("Failed to download NeoForge universal: {}", e);
-            } else {
-                tracing::info!("Successfully downloaded NeoForge universal JAR");
-                // Füge es zum Classpath hinzu (nicht Modulpfad)
-                classpath.push(neoforge_universal_path.display().to_string());
-            }
-        } else {
-            // Sicherstellen dass es im Classpath ist
-            if !classpath.iter().any(|p| p.contains("neoforge") && p.contains("universal")) {
-                tracing::info!("Adding existing NeoForge universal to classpath");
-                classpath.push(neoforge_universal_path.display().to_string());
-            }
-        }
-
-        // KRITISCH: NeoForge Client JAR - erstellt vom Installer, enthält gepatchte Minecraft-Klassen
-        let neoforge_client_path = libraries_dir.join(format!("net/neoforged/neoforge/{}/neoforge-{}-client.jar", neoforge_version, neoforge_version));
-        if neoforge_client_path.exists() {
-            if !classpath.iter().any(|p| p.contains("neoforge") && p.contains("client.jar")) {
-                tracing::info!("✅ Adding NeoForge client JAR to classpath: {:?}", neoforge_client_path);
-                classpath.push(neoforge_client_path.display().to_string());
-            }
-        } else {
-            tracing::warn!("⚠️ NeoForge client JAR not found: {:?}", neoforge_client_path);
-            tracing::warn!("This may cause runtime errors!");
-        }
-
-        // KRITISCH: JarJarFileSystems ist oft nicht in der version.json, aber wird benötigt!
-        // Wir müssen es manuell herunterladen, da JarJarSelector/JarJarMetadata es zur Laufzeit brauchen
-        let jarjar_filesystems_path = libraries_dir.join("net/neoforged/JarJarFileSystems/0.4.1/JarJarFileSystems-0.4.1.jar");
-        if !jarjar_filesystems_path.exists() {
-            tracing::info!("Downloading critical missing library: JarJarFileSystems");
-            tokio::fs::create_dir_all(jarjar_filesystems_path.parent().unwrap()).await.ok();
-
-            let jarjar_url = "https://maven.neoforged.net/releases/net/neoforged/JarJarFileSystems/0.4.1/JarJarFileSystems-0.4.1.jar";
-            if let Err(e) = self.download_manager.download_with_hash(jarjar_url, &jarjar_filesystems_path, None).await {
-                tracing::error!("Failed to download JarJarFileSystems: {}", e);
-            } else {
-                tracing::info!("Successfully downloaded JarJarFileSystems");
-                // Füge es zum Modulpfad hinzu
-                module_path.push(jarjar_filesystems_path.display().to_string());
-            }
-        } else {
-            // Sicherstellen dass es im Modulpfad ist wenn es existiert
-            if !module_path.iter().any(|p| p.contains("JarJarFileSystems")) {
-                tracing::info!("Adding existing JarJarFileSystems to module path");
-                module_path.push(jarjar_filesystems_path.display().to_string());
-            }
-        }
-
-        tracing::info!("✅ NeoForge complete: {} classpath, {} module path, {} jvm args, {} game args",
-            classpath.len(), module_path.len(), jvm_args.len(), game_args.len());
-
-        // Debug: Print first 5 classpath entries
-        for (i, entry) in classpath.iter().take(5).enumerate() {
-            tracing::info!("Classpath[{}]: {}", i, entry);
-        }
-
-        Ok(ForgeInstallResult {
-            main_class: version.mainClass,
-            classpath,
-            module_path,
-            jvm_args,
-            game_args,
-            srg_jar_path: Some(srg_jar.display().to_string()),
-        })
-    }
 
     /// Fabric Loader installieren und (Classpath, MainClass) zurückgeben
     async fn install_fabric(&self, mc_version: &str, libraries_dir: &Path) -> Result<(String, String)> {
@@ -2324,364 +1900,35 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         Ok((join_classpath_entries(classpath_entries), profile.main_class))
     }
 
-    /// Forge Loader installieren und (Classpath, MainClass) zurückgeben
-    async fn install_forge(&self, mc_version: &str, forge_version: &str, libraries_dir: &Path) -> Result<(String, String)> {
-        use crate::api::forge::ForgeClient;
 
-        let forge_client = ForgeClient::new()?;
 
-        tracing::info!("Installing Forge {}-{}", mc_version, forge_version);
 
-        // Forge-Installer herunterladen
-        let installer_url = forge_client.get_installer_url(mc_version, forge_version);
-        let installer_path = libraries_dir.join(format!("forge-{}-{}-installer.jar", mc_version, forge_version));
 
-        // Prüfe ob existierende Datei gültig ist
-        if installer_path.exists()
-            && !Self::is_valid_zip(&installer_path) {
-                tracing::warn!("Existing Forge installer is corrupted, re-downloading...");
-                tokio::fs::remove_file(&installer_path).await.ok();
-        }
-
-        if !installer_path.exists() {
-            tracing::info!("Downloading Forge installer from: {}", installer_url);
-            tokio::fs::create_dir_all(installer_path.parent().unwrap()).await?;
-
-            // Versuche den Download
-            if let Err(e) = self.download_manager.download_with_hash(&installer_url, &installer_path, None).await {
-                tracing::error!("Failed to download Forge installer: {}", e);
-                tracing::warn!("Forge/NeoForge support is currently limited. Please try Fabric or Quilt for best results.");
-                bail!("Forge installer not available. Try Fabric instead, which has better mod compatibility.");
-            }
-
-            // Validiere das heruntergeladene JAR
-            if !Self::is_valid_zip(&installer_path) {
-                tokio::fs::remove_file(&installer_path).await.ok();
-                bail!("Downloaded Forge installer is corrupted. Please try again or use a different version.");
-            }
-        }
-
-        // Extrahiere Libraries direkt aus dem Installer JAR (gleiche Methode wie NeoForge)
-        let (classpath_entries, main_class) = self.extract_forge_libraries(&installer_path, libraries_dir, mc_version).await?;
-
-        if !classpath_entries.is_empty() {
-            tracing::info!("Forge installed successfully with {} libraries", classpath_entries.len());
-            return Ok((join_classpath_entries(classpath_entries), main_class));
-        }
-
-        // Fallback: Versuche den Installer
-        let installer = crate::core::minecraft::installer::ForgeInstaller::new()?;
-        match installer.install_forge(&installer_path, libraries_dir, mc_version).await {
-            Ok(installation) => {
-                tracing::info!("Forge installed successfully via installer");
-                return Ok((installation.classpath, installation.main_class));
-            }
-            Err(e) => {
-                tracing::warn!("Full installer support failed: {}, using simplified mode", e);
-            }
-        }
-
-        // Fallback: Vereinfachte Version
-        tracing::warn!("Using simplified Forge installation - may not work for all versions");
-
-        // Forge Main-Class (Standard für moderne Versionen)
-        let main_class = if mc_version >= "1.13" {
-            "cpw.mods.modlauncher.Launcher".to_string()
-        } else {
-            "net.minecraft.launchwrapper.Launch".to_string()
-        };
-
-        tracing::info!("Using Forge main class: {}", main_class);
-
-        // Gebe nur den Installer-Pfad zurück - Minecraft wird versuchen, ihn selbst zu verwenden
-        Ok((installer_path.display().to_string(), main_class))
-    }
-
-    /// Extrahiert Forge Libraries aus dem Installer
-    async fn extract_forge_libraries(&self, installer_jar: &Path, libraries_dir: &Path, _mc_version: &str) -> Result<(Vec<String>, String)> {
-        use std::io::Read;
-
-        // Alle ZIP-Operationen synchron ausführen und Daten sammeln
-        let (version_json, jars_data) = {
-            let file = std::fs::File::open(installer_jar)?;
-            let mut archive = zip::ZipArchive::new(file)?;
-
-            // Versuche zuerst version.json zu lesen
-            let version_json = {
-                let result = archive.by_name("version.json");
-                if let Ok(mut entry) = result {
-                    let mut data = String::new();
-                    entry.read_to_string(&mut data)?;
-                    Some(data)
-                } else {
-                    None
-                }
-            };
-
-            // Sammle alle JAR-Daten aus dem maven/ Verzeichnis
-            let mut jars_data: Vec<(std::path::PathBuf, Vec<u8>)> = Vec::new();
-
-            // Erst alle Namen sammeln
-            let mut jar_names: Vec<(String, std::path::PathBuf)> = Vec::new();
-            for i in 0..archive.len() {
-                if let Ok(entry) = archive.by_index(i) {
-                    let name = entry.name().to_string();
-                    if name.starts_with("maven/") && name.ends_with(".jar") {
-                        let rel_path = name.strip_prefix("maven/").unwrap();
-                        let dest = libraries_dir.join(rel_path);
-                        if !dest.exists() {
-                            jar_names.push((name, dest));
-                        }
-                    }
-                }
-            }
-
-            // Dann die Daten extrahieren
-            for (name, dest) in jar_names {
-                if let Ok(mut entry) = archive.by_name(&name) {
-                    let mut data = Vec::new();
-                    entry.read_to_end(&mut data)?;
-                    jars_data.push((dest, data));
-                }
-            }
-
-            (version_json, jars_data)
-        };
-
-        let version_json = match version_json {
-            Some(v) => v,
-            None => {
-                tracing::warn!("version.json not found in Forge installer");
-                return Ok((Vec::new(), String::new()));
-            }
-        };
-
-        #[derive(serde::Deserialize)]
-        #[allow(non_snake_case)]
-        struct ForgeVersion {
-            mainClass: String,
-            libraries: Vec<ForgeLib>,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct ForgeLib {
-            name: String,
-            downloads: Option<ForgeDownloads>,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct ForgeDownloads {
-            artifact: Option<ForgeArtifact>,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct ForgeArtifact {
-            url: String,
-            path: String,
-            sha1: Option<String>,
-        }
-
-        let version: ForgeVersion = serde_json::from_str(&version_json)?;
-        tracing::info!("Forge main class: {}", version.mainClass);
-        tracing::info!("Forge has {} libraries", version.libraries.len());
-
-        let mut classpath_entries = Vec::new();
-
-        // Schreibe die extrahierten JARs (jetzt asynchron sicher)
-        for (dest, data) in jars_data {
-            tracing::info!("Extracting: {:?}", dest);
-            tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
-            tokio::fs::write(&dest, data).await?;
-            classpath_entries.push(dest.display().to_string());
-        }
-
-        // Downloade fehlende Libraries
-        for lib in &version.libraries {
-            if let Some(downloads) = &lib.downloads {
-                if let Some(artifact) = &downloads.artifact {
-                    let dest = libraries_dir.join(&artifact.path);
-
-                    if !dest.exists() && !artifact.url.is_empty() {
-                        tracing::info!("Downloading Forge library: {}", lib.name);
-                        tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
-
-                        if let Err(e) = self.download_manager.download_with_hash(
-                            &artifact.url,
-                            &dest,
-                            artifact.sha1.as_deref()
-                        ).await {
-                            tracing::warn!("Failed to download {}: {}", lib.name, e);
-                            continue;
-                        }
-                    }
-
-                    if dest.exists() {
-                        classpath_entries.push(dest.display().to_string());
-                    }
-                }
-            } else {
-                // Versuche Standard-Maven-Pfad
-                let lib_path = Self::maven_to_path(&lib.name);
-                let dest = libraries_dir.join(&lib_path);
-
-                if !dest.exists() {
-                    let maven_urls = vec![
-                        format!("https://maven.minecraftforge.net/{}", lib_path),
-                        format!("https://repo1.maven.org/maven2/{}", lib_path),
-                        format!("https://libraries.minecraft.net/{}", lib_path),
-                    ];
-
-                    for url in maven_urls {
-                        if self.download_manager.download_with_hash(&url, &dest, None).await.is_ok() {
-                            tracing::info!("Downloaded {} from {}", lib.name, url);
-                            break;
-                        }
-                    }
-                }
-
-                if dest.exists() {
-                    classpath_entries.push(dest.display().to_string());
-                }
-            }
-        }
-
-        Ok((classpath_entries, version.mainClass))
-    }
-
-    /// NeoForge Loader installieren und (Classpath, MainClass) zurückgeben
-    async fn install_neoforge(&self, neoforge_version: &str, libraries_dir: &Path) -> Result<(String, String)> {
-        use crate::api::neoforge::NeoForgeClient;
-
-        let neoforge_client = NeoForgeClient::new()?;
-
-        tracing::info!("Installing NeoForge {}", neoforge_version);
-
-        // WARNUNG: NeoForge 1.21+ hat architektonische Änderungen die nicht mit unserem Launcher kompatibel sind
-        tracing::warn!("=== NeoForge Compatibility Warning ===");
-        tracing::warn!("NeoForge for Minecraft 1.21+ uses BootstrapLauncher which requires Java Module System");
-        tracing::warn!("This is not fully compatible with custom launchers.");
-        tracing::warn!("Recommended alternatives: Fabric or Quilt");
-        tracing::warn!("For Minecraft 1.20.x and earlier, NeoForge should work fine.");
-        tracing::warn!("=====================================");
-
-        // NeoForge-Installer herunterladen
-        let installer_url = neoforge_client.get_installer_url(neoforge_version);
-        let installer_path = libraries_dir.join(format!("neoforge-{}-installer.jar", neoforge_version));
-
-        // Prüfe ob existierende Datei gültig ist
-        if installer_path.exists()
-            && !Self::is_valid_zip(&installer_path) {
-                tracing::warn!("Existing NeoForge installer is corrupted, re-downloading...");
-                tokio::fs::remove_file(&installer_path).await.ok();
-        }
-
-        if !installer_path.exists() {
-            tracing::info!("Downloading NeoForge installer from: {}", installer_url);
-            tokio::fs::create_dir_all(installer_path.parent().unwrap()).await?;
-
-            // Versuche den Download
-            if let Err(e) = self.download_manager.download_with_hash(&installer_url, &installer_path, None).await {
-                tracing::error!("Failed to download NeoForge installer: {}", e);
-                tracing::warn!("NeoForge version {} may not be available yet", neoforge_version);
-                bail!("NeoForge installer not available. This version might not exist or the server is unreachable. Try Fabric or Quilt instead.");
-            }
-
-            // Validiere das heruntergeladene JAR
-            if !Self::is_valid_zip(&installer_path) {
-                tokio::fs::remove_file(&installer_path).await.ok();
-                bail!("Downloaded NeoForge installer is corrupted. Please try again or use a different version.");
-            }
-        }
-
-        // NEUER ANSATZ: Führe den Installer tatsächlich aus
-        tracing::info!("Running NeoForge installer to create proper client profile...");
-        let install_result = self.run_neoforge_installer(&installer_path, libraries_dir).await;
-
-        if let Ok((classpath, main_class)) = install_result {
-            tracing::info!("NeoForge installer completed successfully");
-            return Ok((classpath, main_class));
-        } else {
-            tracing::warn!("Installer execution failed, falling back to manual extraction");
-        }
-
-        // Fallback: Extrahiere Libraries direkt aus dem Installer JAR
-        let (classpath_entries, main_class) = self.extract_neoforge_libraries(&installer_path, libraries_dir).await?;
-
-        tracing::info!("NeoForge library extraction complete: {} entries", classpath_entries.len());
-
-        if classpath_entries.is_empty() {
-            tracing::error!("No NeoForge libraries were extracted! This will likely cause startup failures.");
-            bail!("Failed to extract NeoForge libraries from installer. The installer may be incompatible or corrupted.");
-        }
-
-        if !classpath_entries.is_empty() {
-            tracing::info!("NeoForge installed successfully with {} libraries", classpath_entries.len());
-            // Debug: Log erste paar Einträge
-            for (i, entry) in classpath_entries.iter().take(5).enumerate() {
-                tracing::debug!("  Library {}: {}", i+1, entry);
-            }
-            return Ok((join_classpath_entries(classpath_entries), main_class));
-        }
-
-        // Letzte Fallback-Option
-        let installer = crate::core::minecraft::installer::ForgeInstaller::new()?;
-        match installer.install_forge(&installer_path, libraries_dir, "neoforge").await {
-            Ok(installation) => {
-                tracing::info!("NeoForge installed successfully via installer");
-                return Ok((installation.classpath, installation.main_class));
-            }
-            Err(e) => {
-                tracing::warn!("Full installer support failed: {}, using simplified mode", e);
-            }
-        }
-
-        // Absolute Fallback
-        tracing::error!("All NeoForge installation methods failed!");
-        bail!("NeoForge installation failed. This version may not be supported. Try Fabric or Quilt instead.");
-    }
-
-    /// Führt den NeoForge-Installer aus um ein ordnungsgemäßes Client-Profil zu erstellen
-    async fn run_neoforge_installer(&self, _installer_jar: &Path, _libraries_dir: &Path) -> Result<(String, String)> {
-        // NeoForge 1.21+ Installer hat das gleiche BootstrapLauncher-Problem
-        // Wir können den Installer nicht direkt ausführen
-        tracing::warn!("NeoForge 1.21+ installer cannot be executed directly due to BootstrapLauncher issues");
-        tracing::warn!("This is a known limitation - NeoForge 1.21+ is not fully supported. Use Fabric or Quilt instead.");
-
-        bail!("NeoForge installer execution not supported for 1.21+. Falling back to library extraction.");
-    }
-
-    /// Prüft ob eine Datei ein gültiges ZIP-Archiv ist
+    /// Prüft ob eine Datei ein gültiges ZIP/JAR-Archiv ist.
+    ///
+    /// Schneller Magic-Bytes-Check (PK\x03\x04 oder PK\x05\x06 für leere ZIPs):
+    /// Liest nur die ersten 4 Bytes – kein vollständiges Lesen des Archivs.
+    /// Das ist ausreichend um abgebrochene Downloads zu erkennen.
+    /// Kaputte Deflate-Streams innerhalb eines scheinbar gültigen ZIPs werden
+    /// erst beim tatsächlichen Entpacken erkannt – aber das ist akzeptabel, da
+    /// ein Download entweder vollständig oder gar nicht ankam.
     fn is_valid_zip(path: &Path) -> bool {
+        use std::io::Read;
         match std::fs::File::open(path) {
-            Ok(file) => {
-                match zip::ZipArchive::new(file) {
-                    Ok(mut archive) => {
-                        // Vollstaendige Lesbarkeit pruefen, um "corrupt deflate stream" frueh zu erkennen.
-                        for i in 0..archive.len() {
-                            let mut entry = match archive.by_index(i) {
-                                Ok(e) => e,
-                                Err(e) => {
-                                    tracing::warn!("Invalid ZIP entry {:?} at {}: {}", path, i, e);
-                                    return false;
-                                }
-                            };
-
-                            if entry.name().ends_with('/') {
-                                continue;
-                            }
-
-                            if std::io::copy(&mut entry, &mut std::io::sink()).is_err() {
-                                tracing::warn!("Unreadable ZIP payload in {:?} at index {}", path, i);
-                                return false;
-                            }
-                        }
-                        true
-                    }
-                    Err(e) => {
-                        tracing::warn!("Invalid ZIP file {:?}: {}", path, e);
-                        false
-                    }
+            Ok(mut f) => {
+                let mut magic = [0u8; 4];
+                if f.read_exact(&mut magic).is_err() {
+                    tracing::warn!("ZIP magic read failed: {:?}", path);
+                    return false;
                 }
+                // ZIP Local File Header: PK\x03\x04
+                // ZIP End-of-Central-Directory (leere ZIPs): PK\x05\x06
+                let ok = magic == [0x50, 0x4B, 0x03, 0x04]
+                    || magic == [0x50, 0x4B, 0x05, 0x06];
+                if !ok {
+                    tracing::warn!("Not a ZIP (bad magic {:02X?}): {:?}", magic, path);
+                }
+                ok
             }
             Err(e) => {
                 tracing::warn!("Cannot open file {:?}: {}", path, e);
@@ -3084,6 +2331,25 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
             v >= required_major && max_major.map_or(true, |max| v <= max)
         };
 
+        // Auf Windows: prüft ob javaw.exe im gleichen bin/-Verzeichnis wie java.exe vorhanden ist.
+        // Einige minimale JDKs liefern nur java.exe ohne javaw.exe – solche Installationen
+        // können wir nicht für den Spielstart verwenden (Tauri nutzt javaw.exe für kein CMD-Fenster).
+        let javaw_ok = |java_path: &str| -> bool {
+            #[cfg(windows)]
+            {
+                let p = std::path::Path::new(java_path);
+                if p.file_name().and_then(|n| n.to_str()) == Some("java.exe") {
+                    let javaw = p.with_file_name("javaw.exe");
+                    if !javaw.exists() {
+                        tracing::warn!("javaw.exe fehlt neben java.exe: {:?} – überspringe diese Installation", javaw);
+                        return false;
+                    }
+                }
+            }
+            let _ = java_path;
+            true
+        };
+
         let label = if let Some(max) = max_major {
             format!("Java {}-{}", required_major, max)
         } else {
@@ -3097,7 +2363,7 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
             let p = PathBuf::from(&home).join("bin").join(java_bin_name);
             if p.exists() {
                 let v = Self::java_major_version(&p.display().to_string()).await;
-                if version_ok(v) {
+                if version_ok(v) && javaw_ok(&p.display().to_string()) {
                     tracing::info!("Using JAVA_HOME Java {}: {}", v, p.display());
                     return Ok(p.display().to_string());
                 }
@@ -3114,7 +2380,7 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         let java_bin = java_dir.join("bin").join(java_bin_name);
         if java_bin.exists() {
             let installed = Self::java_major_version(&java_bin.display().to_string()).await;
-            if version_ok(installed) {
+            if version_ok(installed) && javaw_ok(&java_bin.display().to_string()) {
                 tracing::info!("Using managed Java {}: {}", installed, java_bin.display());
                 return Ok(java_bin.display().to_string());
             }
@@ -3127,7 +2393,7 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                         let candidate = entry.path().join("bin").join(java_bin_name);
                         if candidate.exists() {
                             let v = Self::java_major_version(&candidate.display().to_string()).await;
-                            if version_ok(v) {
+                            if version_ok(v) && javaw_ok(&candidate.display().to_string()) {
                                 tracing::info!("Using managed Java {}: {}", v, candidate.display());
                                 return Ok(candidate.display().to_string());
                             }
@@ -3140,7 +2406,7 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         let legacy_java_bin = java_base_dir.join("bin").join(java_bin_name);
         if legacy_java_bin.exists() {
             let v = Self::java_major_version(&legacy_java_bin.display().to_string()).await;
-            if version_ok(v) {
+            if version_ok(v) && javaw_ok(&legacy_java_bin.display().to_string()) {
                 tracing::info!("Using legacy managed Java {}: {}", v, legacy_java_bin.display());
                 return Ok(legacy_java_bin.display().to_string());
             }
@@ -3228,7 +2494,7 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         for p in system_paths {
             if Path::new(p).exists() {
                 let v = Self::java_major_version(p).await;
-                if version_ok(v) {
+                if version_ok(v) && javaw_ok(p) {
                     tracing::info!("Using system Java {}: {}", v, p);
                     return Ok(p.to_string());
                 }
@@ -3255,7 +2521,7 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                                 let candidate = entry.path().join("bin").join("java.exe");
                                 if candidate.exists() {
                                     let v = Self::java_major_version(&candidate.display().to_string()).await;
-                                    if version_ok(v) {
+                                    if version_ok(v) && javaw_ok(&candidate.display().to_string()) {
                                         tracing::info!("Using Windows system Java {}: {}", v, candidate.display());
                                         return Ok(candidate.display().to_string());
                                     }
@@ -3271,7 +2537,7 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         let path_bin = if cfg!(windows) { "java.exe" } else { "java" };
         if tokio::process::Command::new(path_bin).arg("-version").output().await.is_ok() {
             let v = Self::java_major_version(path_bin).await;
-            if version_ok(v) {
+            if version_ok(v) && javaw_ok(path_bin) {
                 return Ok(path_bin.to_string());
             }
         }
