@@ -603,6 +603,7 @@ pub fn build_launch_command(
     installation: &NeoForgeInstallation,
     java_path: &str,
     memory_mb: u32,
+    java_version: u32,
     game_dir: &Path,
     assets_dir: &Path,
     natives_dir: &Path,
@@ -630,9 +631,11 @@ pub fn build_launch_command(
 
     let mut cmd = Command::new(&java_bin);
 
-    // JVM-Optionen
-    cmd.arg(format!("-Xmx{}M", memory_mb));
-    cmd.arg(format!("-Xms{}M", memory_mb / 2));
+    // Plattform-optimierte JVM-Flags (Xmx/Xms + G1GC-Tuning + OS-spezifische Flags)
+    let os_name = std::env::consts::OS; // "linux", "windows", "macos"
+    for flag in super::get_jvm_flags(os_name, java_version, memory_mb) {
+        cmd.arg(flag);
+    }
     // java.library.path: Standard-JVM-Pfad für native Bibliotheken (alle Versionen)
     cmd.arg(format!("-Djava.library.path={}", natives_dir.display()));
     // org.lwjgl.librarypath: LWJGL 3.3.2+ bevorzugt diese Property auf Windows.

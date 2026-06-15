@@ -246,6 +246,55 @@ fn classpath_separator() -> &'static str {
     if cfg!(windows) { ";" } else { ":" }
 }
 
+/// Erzeugt plattform-optimierte JVM Performance-Flags basierend auf OS und Java-Version.
+///
+/// Folgt dem Ansatz von Prism/Modrinth Launcher mit plattform-konditionalen Flags:
+/// - G1GC mit Tuning-Flags für alle Plattformen (wie Prism)
+/// - `-XX:+AlwaysPreTouch` nur auf Linux/macOS (auf Windows unnötig, erhöht Startzeit)
+/// - `-XX:HeapDumpPath=...` nur auf Windows (Mojang-Konvention)
+/// - `-XX:+UseStringDeduplication` ab Java 17 für bessere Speichernutzung
+///
+/// # Parameter
+/// - `os`: Betriebssystem ("linux", "windows", "macos") via `std::env::consts::OS`
+/// - `java_version`: Java-Major-Version (8, 17, 21, …)
+/// - `memory_mb`: Heap-Größe in Megabyte
+pub(super) fn get_jvm_flags(os: &str, java_version: u32, memory_mb: u32) -> Vec<String> {
+    let mut flags = vec![
+        format!("-Xmx{}M", memory_mb),
+        format!("-Xms{}M", memory_mb / 2),
+        "-XX:+UnlockExperimentalVMOptions".to_string(),
+        "-XX:+UseG1GC".to_string(),
+        "-XX:G1NewSizePercent=20".to_string(),
+        "-XX:G1ReservePercent=20".to_string(),
+        "-XX:MaxGCPauseMillis=50".to_string(),
+        "-XX:G1HeapRegionSize=32M".to_string(),
+        "-Dfile.encoding=UTF-8".to_string(),
+    ];
+
+    // AlwaysPreTouch: Reserviert physischen RAM beim Start → weniger GC-Jitter im Spiel.
+    // Auf Windows unnötig (Windows Page-File-Management ist anders) und erhöht die Startzeit.
+    if os != "windows" {
+        flags.push("-XX:+AlwaysPreTouch".to_string());
+    }
+
+    // Windows-spezifisch: Heap-Dump-Pfad der Mojang-Launcher-Konvention.
+    // Verhindert Crash-Dump-Dateien im aktuellen Arbeitsverzeichnis.
+    if os == "windows" {
+        flags.push(
+            "-XX:HeapDumpPath=MojangTricksIntelDriversForPerformance_javaw.exe_minecraft.exe.heapdump"
+                .to_string(),
+        );
+    }
+
+    // String-Deduplizierung ab Java 17: spart Heap-Speicher durch G1-interne Dedup-Threads.
+    // Nur sinnvoll ab Java 17 (stabil) und bei ausreichend RAM.
+    if java_version >= 17 && memory_mb >= 2048 {
+        flags.push("-XX:+UseStringDeduplication".to_string());
+    }
+
+    flags
+}
+
 fn split_classpath_entries(classpath: &str) -> Vec<String> {
     std::env::split_paths(std::ffi::OsStr::new(classpath))
         .map(|p| p.to_string_lossy().to_string())
@@ -464,6 +513,7 @@ impl MinecraftLauncher {
             &installation,
             &java_path,
             memory_mb,
+            required_java,
             game_dir,
             assets_dir,
             natives_dir,
@@ -841,9 +891,11 @@ maxThreads = -1
         }
         // ────────────────────────────────────────────────────────────────────────
 
-        // === BASIS JVM-ARGUMENTE ===
-        cmd.arg(format!("-Xmx{}M", memory_mb));
-        cmd.arg(format!("-Xms{}M", memory_mb / 2));
+        // === BASIS JVM-ARGUMENTE (plattform-optimiert) ===
+        let os_name = std::env::consts::OS; // "linux", "windows", "macos"
+        for flag in get_jvm_flags(os_name, required_java, memory_mb) {
+            cmd.arg(flag);
+        }
         // Beide Properties setzen: LWJGL im Forge SECURE-BOOTSTRAP ModuleLayer
         // ignoriert java.library.path und liest stattdessen org.lwjgl.librarypath
         cmd.arg(format!("-Djava.library.path={}", natives_dir.display()));
@@ -1224,8 +1276,11 @@ maxThreads = -1
         }
         // ────────────────────────────────────────────────────────────────────────
 
-        cmd.arg(format!("-Xmx{}M", memory_mb));
-        cmd.arg(format!("-Xms{}M", memory_mb / 2));
+        // Plattform-optimierte JVM-Flags (Xmx/Xms + G1GC-Tuning + OS-spezifische Flags)
+        let os_name = std::env::consts::OS; // "linux", "windows", "macos"
+        for flag in get_jvm_flags(os_name, required_java, memory_mb) {
+            cmd.arg(flag);
+        }
         // java.library.path: Standard-JVM-Pfad für native Bibliotheken (alle Versionen)
         cmd.arg(format!("-Djava.library.path={}", natives_dir.display()));
         // org.lwjgl.librarypath: LWJGL 3.3.2+ bevorzugt diese Property gegenüber java.library.path.
@@ -1235,7 +1290,6 @@ maxThreads = -1
         // JNA-Bibliothekspfad: damit text2speech/libflite.so im natives-Dir gefunden wird.
         #[cfg(target_os = "linux")]
         cmd.arg(format!("-Djna.library.path={}", natives_dir.display()));
-        cmd.arg("-XX:+UseG1GC");
         cmd.arg("-Dminecraft.launcher.brand=lion-launcher");
         cmd.arg("-Dminecraft.launcher.version=1.0");
 
