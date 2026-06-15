@@ -47,10 +47,6 @@ jobs:
       - name: Rust Toolchain einrichten
         uses: dtolnay/rust-toolchain@stable
 
-      # sccache: Kompilierungsergebnisse werden job-übergreifend gecacht.
-      # Erspart bei unverändertem Code bis zu 80 % der Kompilierzeit.
-      - name: sccache einrichten
-        uses: mozilla-actions/sccache-action@v0.0.5
 
       - name: Rust Cache (Cargo-Registry + Index)
         uses: Swatinem/rust-cache@v2
@@ -72,9 +68,6 @@ jobs:
         run: cargo install tauri-cli --version "^2" --locked
 
       - name: 🔨 Build .deb + .rpm
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: "sccache"
         run: cargo tauri build --bundles deb,rpm
 
       - name: Pakete sammeln + Checksums
@@ -137,8 +130,6 @@ jobs:
       - name: Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: sccache einrichten
-        uses: mozilla-actions/sccache-action@v0.0.5
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -158,9 +149,6 @@ jobs:
         run: cargo install tauri-cli --version "^2" --locked
 
       - name: 🔨 Build AppImage
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: "sccache"
         run: cargo tauri build --bundles appimage
 
       - name: AppImage sammeln
@@ -192,8 +180,6 @@ jobs:
       - name: Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: sccache einrichten
-        uses: mozilla-actions/sccache-action@v0.0.5
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -263,8 +249,6 @@ jobs:
       - name: Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: sccache einrichten
-        uses: mozilla-actions/sccache-action@v0.0.5
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -302,9 +286,6 @@ jobs:
             org.freedesktop.Sdk//23.08
 
       - name: 🔨 Release-Binary bauen (vor Flatpak-Packaging)
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: "sccache"
         run: cargo build --release --locked
 
       - name: Vorgebautes Binary + Assets ins flatpak/-Verzeichnis kopieren
@@ -395,9 +376,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # sccache funktioniert auch im Arch-Container
-      - name: sccache einrichten
-        uses: mozilla-actions/sccache-action@v0.0.5
 
       # Rust Cache funktioniert hier ohne dtolnay/rust-toolchain,
       # da Rust via pacman installiert wurde.
@@ -423,8 +401,6 @@ jobs:
             export WEBKIT_DISABLE_DMABUF_RENDERER=1
             export WEBKIT_DISABLE_COMPOSITING_MODE=1
             export RUST_BACKTRACE=1
-            export SCCACHE_GHA_ENABLED=true
-            export RUSTC_WRAPPER=sccache
             cargo build --release --locked
           "
 
@@ -564,8 +540,6 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: sccache einrichten
-        uses: mozilla-actions/sccache-action@v0.0.5
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -586,8 +560,6 @@ jobs:
 
       - name: "🔨 Windows-Build (NSIS .exe)"
         env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: "sccache"
           TAURI_SIGNING_PRIVATE_KEY: ""
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: cargo tauri build --bundles nsis
