@@ -128,6 +128,8 @@ let currentModSearchQuery = '';
 let currentModPage = 0;
 const MODS_PER_PAGE = 20;
 let currentContentType = 'mods';
+let serverProfiles = [];
+let currentServerProfile = null;
 
 // Berechne effektives Limit: Bei "Hide Installed" mehr laden, um Seite zu füllen
 function getEffectiveLimit() {
@@ -262,6 +264,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         await loadMinecraftVersions();
 
         setupSearch();
+        window.addEventListener('resize', () => {
+            if (currentProfile) updateProfileScrollableBoxes();
+        });
 
         // Lade Environment-Icons
         loadEnvironmentIcons();
@@ -471,6 +476,10 @@ function switchPage(page) {
         // Daher sollte er NICHT den Content laden - das macht switchContentType bereits!
         // Wir laden nur den installedModIds Cache.
         loadInstalledModIds();
+    }
+
+    if (page === 'servers-hub') {
+        loadServerHub();
     }
 }
 
@@ -1466,8 +1475,10 @@ function showProfileDetails(profileId) {
             </div>
             
             <!-- Content Area (unter dem Strich) -->
-            <div id="main-category-content">
-                ${renderMainCategoryContent('content', profile)}
+            <div id="main-category-shell" style="background: var(--bg-medium); border: 1px solid var(--bg-light); border-radius: 12px; padding: 12px; margin-bottom: 16px; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);">
+                <div id="main-category-content">
+                    ${renderMainCategoryContent('content', profile)}
+                </div>
             </div>
         </div>
     `;
@@ -1476,6 +1487,7 @@ function showProfileDetails(profileId) {
     setTimeout(() => {
         loadInstalledMods(profile.id);
         startModsWatcher(profile.id);
+        updateProfileScrollableBoxes();
         // Play/Stop-Button-State korrekt setzen
         updateAllPlayStopButtons(profile.id);
     }, 50);
@@ -1544,6 +1556,7 @@ function switchMainCategory(categoryName) {
                 stopLiveLog();
                 stopModsWatcher();
             }
+            updateProfileScrollableBoxes();
         }, 200);
     }
 }
@@ -1641,6 +1654,7 @@ function switchContentSubTab(subtabName) {
         } else if (subtabName === 'servers') {
             loadServers(currentProfile.id);
         }
+        updateProfileScrollableBoxes();
     }
 }
 
@@ -1705,8 +1719,8 @@ function renderLogsContent(profile) {
             </select>
         </div>
 
-        <div id="logs-container" style="background: #0d0d0d; border-radius: 8px; padding: 10px;
-                height: 490px; max-height: 490px; margin-bottom: 16px;
+        <div id="logs-container" class="profile-scroll-box" style="background: #0d0d0d; border-radius: 8px; padding: 10px;
+                height: 420px; max-height: 420px; margin-bottom: 12px;
                 overflow-y: auto; overflow-x: hidden; font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
                 font-size: 11px; line-height: 1.4; color: #e0e0e0; user-select: text; border: 1px solid var(--bg-light);">
             <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
@@ -1749,6 +1763,7 @@ function switchProfileTab(tabName) {
         } else if (tabName === 'shaderpacks') {
             loadInstalledShaderPacks(currentProfile.id);
         }
+        updateProfileScrollableBoxes();
     }
 }
 
@@ -1803,7 +1818,7 @@ function renderProfileTabContent(tabName, profile) {
                     </button>
                 </div>
                 
-                <div id="profile-mods-list" style="display: grid; gap: 8px; max-height: 460px; overflow-y: auto; padding-right: 5px;">
+                <div id="profile-mods-list" class="profile-scroll-box" style="display: grid; gap: 8px; height: 420px; max-height: 420px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
                     <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                         <div class="spinner" style="margin: 0 auto 15px;"></div>
                         <p>${t('loading_mods')}</p>
@@ -1827,7 +1842,7 @@ function renderProfileTabContent(tabName, profile) {
                     </div>
                 </div>
                 
-                <div id="profile-resourcepacks-list" style="display: grid; gap: 8px; max-height: 500px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
+                <div id="profile-resourcepacks-list" class="profile-scroll-box" style="display: grid; gap: 8px; height: 420px; max-height: 420px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
                     <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                         <div class="spinner" style="margin: 0 auto 15px;"></div>
                         <p>Lade Resource Packs...</p>
@@ -1850,7 +1865,7 @@ function renderProfileTabContent(tabName, profile) {
                     </div>
                 </div>
                 
-                <div id="profile-shaderpacks-list" style="display: grid; gap: 8px; max-height: 500px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
+                <div id="profile-shaderpacks-list" class="profile-scroll-box" style="display: grid; gap: 8px; height: 420px; max-height: 420px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
                     <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                         <div class="spinner" style="margin: 0 auto 15px;"></div>
                         <p>Lade Shader Packs...</p>
@@ -1873,7 +1888,7 @@ function renderProfileTabContent(tabName, profile) {
                     </div>
                 </div>
                 
-                <div id="profile-worlds-list" style="display: grid; gap: 8px; max-height: 500px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
+                <div id="profile-worlds-list" class="profile-scroll-box" style="display: grid; gap: 8px; align-content: start; grid-auto-rows: min-content; height: 420px; max-height: 420px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
                     <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                         <div class="spinner" style="margin: 0 auto 15px;"></div>
                         <p>Lade Welten...</p>
@@ -1899,7 +1914,7 @@ function renderProfileTabContent(tabName, profile) {
                     </div>
                 </div>
                 
-                <div id="profile-servers-list" style="display: grid; gap: 8px; max-height: 500px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
+                <div id="profile-servers-list" class="profile-scroll-box" style="display: grid; gap: 8px; height: 420px; max-height: 420px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
                     <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                         <div class="spinner" style="margin: 0 auto 15px;"></div>
                         <p>Lade Server...</p>
@@ -1988,10 +2003,10 @@ function renderProfileTabContent(tabName, profile) {
                 </div>
 
                 <!-- Log Content -->
-                <div id="log-content"
+                <div id="log-content" class="profile-scroll-box"
                      style="background: #0d0d0d; border: 1px solid var(--bg-light); border-radius: 6px;
                             padding: 12px; font-family: 'Courier New', monospace; font-size: 11px;
-                            height: 480px; max-height: 480px; margin-bottom: 16px;
+                            height: 420px; max-height: 420px; margin-bottom: 12px;
                             overflow-y: auto; overflow-x: hidden; color: #ccc; word-break: break-all;">
                     <div style="color: var(--gold); text-align: center; padding: 40px;">⏳ Lade Logs…</div>
                 </div>
@@ -2003,6 +2018,18 @@ function renderProfileTabContent(tabName, profile) {
 }
 
 // Helper functions for profile details
+function updateProfileScrollableBoxes() {
+    const boxes = document.querySelectorAll('.profile-scroll-box');
+    if (!boxes.length) return;
+
+    boxes.forEach(box => {
+        const rect = box.getBoundingClientRect();
+        const available = Math.floor(window.innerHeight - rect.top - 42);
+        const targetHeight = Math.max(220, Math.min(available, 560));
+        box.style.height = `${targetHeight}px`;
+        box.style.maxHeight = `${targetHeight}px`;
+    });
+}
 
 // Öffnet den Haupt-Ordner des Profils
 async function openProfileFolder(profileId) {
@@ -2465,6 +2492,9 @@ function clearLogs() {
 let selectedMods = new Set();
 let modsWatcherInterval = null;
 let lastModsHash = '';
+let modUpdateCandidates = [];
+let selectedModUpdates = new Set();
+let currentModUpdateProfileId = null;
 
 // Startet Auto-Refresh für Mods-Ordner
 function startModsWatcher(profileId) {
@@ -2535,6 +2565,7 @@ async function loadInstalledMods(profileId) {
                 </div>
             `;
             document.getElementById('bulk-actions-bar').style.display = 'none';
+            updateProfileScrollableBoxes();
             return;
         }
 
@@ -2544,6 +2575,8 @@ async function loadInstalledMods(profileId) {
         document.getElementById('bulk-actions-bar').style.display = 'flex';
 
         renderInstalledModsList(mods, profileId);
+
+        updateProfileScrollableBoxes();
 
         // Versuche Icons von Modrinth zu laden (asynchron)
         loadModIcons(mods);
@@ -2560,6 +2593,7 @@ async function loadInstalledMods(profileId) {
                 </button>
             </div>
         `;
+        updateProfileScrollableBoxes();
     }
 }
 
@@ -2823,42 +2857,201 @@ async function checkForModUpdates(profileId) {
             return;
         }
 
-        // Zeige Updates
+        const updatable = updates.filter(u => u.can_update && u.update_version_id);
+        const incompatible = updates.filter(u => !u.can_update);
+
+        if (updatable.length === 0 && incompatible.length === 0) {
+            alert('Keine verwertbaren Update-Informationen gefunden.');
+            return;
+        }
+
+        modUpdateCandidates = updatable;
+        selectedModUpdates = new Set(updatable.map(u => u.filename));
+        currentModUpdateProfileId = profileId;
+
+        // Zeige Updates mit Vorauswahl
         const updateModalHTML = `
             <div id="updates-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;" onclick="if(event.target === this) this.remove()">
-                <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 10px; padding: 25px; max-width: 500px; max-height: 80vh; overflow-y: auto;" onclick="event.stopPropagation()">
-                    <h3 style="color: var(--gold); margin: 0 0 20px 0;">↻ ${updates.length} Update(s) verfügbar</h3>
+                <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 10px; padding: 25px; width: min(760px, 94vw); max-height: 80vh; overflow-y: auto;" onclick="event.stopPropagation()">
+                    <h3 style="color: var(--gold); margin: 0 0 16px 0;">↻ Mod-Updates</h3>
+                    <p style="color: var(--text-secondary); font-size: 12px; margin: 0 0 16px 0;">
+                        ${updatable.length} updatbar${incompatible.length > 0 ? ` · ${incompatible.length} nicht kompatibel mit deinem Profil` : ''}
+                    </p>
+                    ${updatable.length > 0 ? `
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                        <label style="display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 12px; cursor: pointer;">
+                            <input id="select-all-update-mods" type="checkbox" checked onchange="toggleSelectAllModUpdates()" style="width: 16px; height: 16px; cursor: pointer; accent-color: var(--gold);">
+                            Alle updatbaren auswählen
+                        </label>
+                        <div style="flex: 1;"></div>
+                        <span id="updates-selected-count" style="color: var(--gold); font-size: 12px;">0 ausgewählt</span>
+                    </div>
+                    ` : ''}
                     <div style="display: grid; gap: 10px;">
-                        ${updates.map(u => `
+                        ${updatable.map(u => `
                             <div style="background: var(--bg-light); border-radius: 8px; padding: 12px; display: flex; align-items: center; gap: 12px;">
+                                <input type="checkbox"
+                                       class="update-mod-checkbox"
+                                       data-filename="${escapeAttr(u.filename)}"
+                                       checked
+                                       onchange="toggleModUpdateSelection(this.dataset.filename)"
+                                       style="width: 17px; height: 17px; cursor: pointer; accent-color: var(--gold); flex-shrink: 0;">
                                 <div style="width: 40px; height: 40px; background: var(--bg-dark); border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
-                                    ${u.icon_url ? `<img src="${u.icon_url}" style="width: 100%; height: 100%; object-fit: cover;">` : '<span style="font-size: 18px;"><i class="bi bi-box"></i></span>'}
+                                    ${u.icon_url ? `<img src="${escapeAttr(u.icon_url)}" style="width: 100%; height: 100%; object-fit: cover;">` : '<span style="font-size: 18px;"><i class="bi bi-box"></i></span>'}
                                 </div>
                                 <div style="flex: 1;">
-                                    <p style="margin: 0; color: var(--text-primary); font-size: 13px;">${u.filename}</p>
+                                    <p style="margin: 0; color: var(--text-primary); font-size: 13px;">${escapeHtml(u.mod_name || u.filename)}</p>
+                                    <p style="margin: 2px 0 0 0; color: var(--text-secondary); font-size: 11px;">${escapeHtml(u.filename)}</p>
                                     <p style="margin: 3px 0 0 0; font-size: 11px;">
-                                        <span style="color: var(--text-secondary);">${u.current_version || '?'}</span>
-                                        <span style="color: var(--gold);"> → ${u.latest_version || '?'}</span>
+                                        <span style="color: var(--text-secondary);">${escapeHtml(u.current_version || '?')}</span>
+                                        <span style="color: var(--gold);"> → ${escapeHtml(u.latest_version || '?')}</span>
                                     </p>
                                 </div>
                             </div>
                         `).join('')}
                     </div>
-                    <p style="color: var(--text-secondary); font-size: 11px; margin: 15px 0 0 0; text-align: center;">
-                        Lösche die alten Mods und installiere die neuen über den Mod Browser
-                    </p>
-                    <button class="btn" onclick="document.getElementById('updates-modal').remove()" style="width: 100%; margin-top: 15px; padding: 10px;">
-                        Verstanden
-                    </button>
+                    ${incompatible.length > 0 ? `
+                    <h4 style="margin: 16px 0 8px 0; color: #ffb74d; font-size: 13px;">Nicht kompatible neuere Versionen</h4>
+                    <div style="display: grid; gap: 8px;">
+                        ${incompatible.map(u => `
+                            <div style="background: rgba(255, 183, 77, 0.1); border: 1px solid rgba(255, 183, 77, 0.35); border-radius: 8px; padding: 10px; display: flex; align-items: start; gap: 10px;">
+                                <div style="font-size: 15px; color: #ffb74d; margin-top: 1px;"><i class="bi bi-exclamation-triangle-fill"></i></div>
+                                <div style="flex: 1;">
+                                    <p style="margin: 0; color: var(--text-primary); font-size: 13px;">${escapeHtml(u.mod_name || u.filename)}</p>
+                                    <p style="margin: 2px 0 0 0; color: var(--text-secondary); font-size: 11px;">${escapeHtml(u.filename)}</p>
+                                    <p style="margin: 4px 0 0 0; color: var(--text-secondary); font-size: 11px;">
+                                        Neueste Version <span style="color: #ffb74d;">${escapeHtml(u.newest_version || u.latest_version || '?')}</span>
+                                        ist für MC ${escapeHtml((u.newest_game_versions && u.newest_game_versions.length > 0) ? u.newest_game_versions.join(', ') : 'unbekannt')}
+                                        (${escapeHtml(profile.minecraft_version)} aktiv)
+                                    </p>
+                                    ${u.latest_compatible_version ? `<p style="margin: 2px 0 0 0; color: var(--text-secondary); font-size: 10px;">Kompatibel für dein Profil: ${escapeHtml(u.latest_compatible_version)}</p>` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>` : ''}
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px;">
+                        <button id="update-selected-btn" class="btn" onclick="applySelectedModUpdates()" style="padding: 10px;" ${updatable.length === 0 ? 'disabled' : ''}>
+                            Ausgewählte updaten
+                        </button>
+                        <button class="btn btn-secondary" onclick="document.getElementById('updates-modal').remove()" style="padding: 10px;">
+                            Schließen
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
         document.body.insertAdjacentHTML('beforeend', updateModalHTML);
+        refreshModUpdateSelectionUi();
 
     } catch (error) {
         document.getElementById('update-check-modal')?.remove();
         debugLog('Failed to check updates: ' + error, 'error');
         alert('Fehler beim Prüfen auf Updates: ' + error);
+    }
+}
+
+function toggleModUpdateSelection(filename) {
+    if (selectedModUpdates.has(filename)) {
+        selectedModUpdates.delete(filename);
+    } else {
+        selectedModUpdates.add(filename);
+    }
+    refreshModUpdateSelectionUi();
+}
+
+function toggleSelectAllModUpdates() {
+    const selectAll = document.getElementById('select-all-update-mods');
+    const checkboxes = document.querySelectorAll('.update-mod-checkbox');
+    if (!selectAll) return;
+
+    if (selectAll.checked) {
+        checkboxes.forEach(cb => {
+            cb.checked = true;
+            selectedModUpdates.add(cb.dataset.filename);
+        });
+    } else {
+        checkboxes.forEach(cb => {
+            cb.checked = false;
+            selectedModUpdates.delete(cb.dataset.filename);
+        });
+    }
+
+    refreshModUpdateSelectionUi();
+}
+
+function refreshModUpdateSelectionUi() {
+    const selectedCount = document.getElementById('updates-selected-count');
+    const updateBtn = document.getElementById('update-selected-btn');
+    const selectAll = document.getElementById('select-all-update-mods');
+    const total = modUpdateCandidates.length;
+    const selected = selectedModUpdates.size;
+
+    if (selectedCount) selectedCount.textContent = `${selected} ausgewählt`;
+
+    if (updateBtn) {
+        updateBtn.disabled = selected === 0;
+        updateBtn.textContent = selected > 0
+            ? `Ausgewählte updaten (${selected})`
+            : 'Ausgewählte updaten';
+    }
+
+    if (selectAll) {
+        selectAll.checked = total > 0 && selected === total;
+        selectAll.indeterminate = selected > 0 && selected < total;
+    }
+}
+
+async function applySelectedModUpdates() {
+    if (!currentModUpdateProfileId) return;
+    if (selectedModUpdates.size === 0) {
+        showToast('Bitte wähle zuerst Mods aus', 'warning', 2500);
+        return;
+    }
+
+    const selectedUpdates = modUpdateCandidates.filter(u =>
+        selectedModUpdates.has(u.filename) && u.update_version_id
+    );
+    if (selectedUpdates.length === 0) {
+        showToast('Keine gültigen Updates ausgewählt', 'warning', 2500);
+        return;
+    }
+
+    const updateBtn = document.getElementById('update-selected-btn');
+    if (updateBtn) {
+        updateBtn.disabled = true;
+        updateBtn.textContent = 'Aktualisiere...';
+    }
+
+    let successCount = 0;
+    const failed = [];
+
+    for (const update of selectedUpdates) {
+        try {
+            await invoke('install_mod', {
+                profileId: currentModUpdateProfileId,
+                modId: update.mod_id,
+                versionId: update.update_version_id,
+                source: 'modrinth'
+            });
+            successCount++;
+        } catch (e) {
+            failed.push(`${update.mod_name || update.filename}: ${e}`);
+        }
+    }
+
+    await loadInstalledModIds();
+    loadInstalledMods(currentModUpdateProfileId);
+
+    document.getElementById('updates-modal')?.remove();
+    selectedModUpdates.clear();
+    modUpdateCandidates = [];
+    currentModUpdateProfileId = null;
+
+    if (failed.length === 0) {
+        showToast(`${successCount} Mod(s) aktualisiert`, 'success', 3000);
+    } else {
+        showToast(`${successCount} aktualisiert, ${failed.length} fehlgeschlagen`, 'warning', 4000);
+        alert(`Einige Updates konnten nicht installiert werden:\n\n${failed.join('\n')}`);
     }
 }
 async function toggleMod(profileId, filename, isCurrentlyDisabled) {
@@ -3455,6 +3648,441 @@ async function launchServer(profileId, serverIp) {
     } catch (error) {
         debugLog('Failed to launch server: ' + error, 'error');
         showToast('Fehler beim Verbinden: ' + error, 'error', 5000);
+    }
+}
+
+// ==================== LOCAL SERVER HUB ====================
+
+async function loadServerHub() {
+    const root = document.getElementById('servers-hub-content');
+    if (!root) return;
+
+    root.innerHTML = '<div class="loading">Loading local servers...</div>';
+
+    try {
+        serverProfiles = await invoke('get_server_profiles');
+        if (!serverProfiles || serverProfiles.length === 0) {
+            root.innerHTML = `
+                <div class="server-grid">
+                    <div class="server-card server-card-create" onclick="openCreateServerProfileModal()">
+                        <div style="text-align:center;">
+                            <div style="font-size: 42px; margin-bottom: 8px;">+</div>
+                            <div>Create your first local server</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+
+        const cards = serverProfiles.map(server => {
+            const mode = server.mode === 'plugins' ? 'Plugins' : 'Modded';
+            return `
+                <div class="server-card" onclick="openServerProfileDetails('${server.id}')">
+                    <div style="display:flex; justify-content:space-between; gap:10px; margin-bottom:8px;">
+                        <h3 style="margin:0; color: var(--gold);">${escapeHtml(server.name)}</h3>
+                        <span style="font-size:12px; color: var(--text-secondary);">${mode}</span>
+                    </div>
+                    <div style="color:var(--text-secondary); font-size:14px; margin-bottom:10px;">
+                        ${escapeHtml(server.software)} • MC ${escapeHtml(server.minecraft_version)}
+                    </div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <span style="background:var(--bg-dark); padding:4px 8px; border-radius:999px; font-size:12px;">${escapeHtml(server.software_version || 'latest')}</span>
+                        <span style="background:var(--bg-dark); padding:4px 8px; border-radius:999px; font-size:12px;">ID ${escapeHtml(server.id.slice(0, 8))}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        root.innerHTML = `
+            <div style="display:flex; justify-content:flex-end; margin-bottom:15px;">
+                <button class="btn" onclick="openCreateServerProfileModal()"><i class="bi bi-plus-circle"></i> New Server</button>
+            </div>
+            <div class="server-grid">
+                ${cards}
+                <div class="server-card server-card-create" onclick="openCreateServerProfileModal()">
+                    <div style="text-align:center;">
+                        <div style="font-size: 36px; margin-bottom: 8px;">+</div>
+                        <div>Create another server</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        root.innerHTML = `<div style="color:#f44336;">Failed to load servers: ${escapeHtml(String(error))}</div>`;
+    }
+}
+
+async function openCreateServerProfileModal() {
+    const existing = document.getElementById('create-server-profile-modal');
+    if (existing) existing.remove();
+
+    let versions = [];
+    try {
+        versions = await invoke('get_minecraft_versions');
+    } catch (_e) {
+        versions = [];
+    }
+    const releaseVersions = versions
+        .filter(v => String(v.version_type || '').toLowerCase() === 'release')
+        .slice(0, 40)
+        .map(v => `<option value="${escapeAttr(v.id)}">${escapeHtml(v.id)}</option>`)
+        .join('');
+
+    const modal = document.createElement('div');
+    modal.id = 'create-server-profile-modal';
+    modal.className = 'modal active';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 520px;">
+            <div class="modal-header"><i class="bi bi-hdd-network"></i> Create Local Server</div>
+            <div class="form-group">
+                <label>Server Name</label>
+                <input type="text" id="new-server-name" placeholder="My SMP Server">
+            </div>
+            <div class="form-group">
+                <label>Mode</label>
+                <select id="new-server-mode">
+                    <option value="plugins">Plugins</option>
+                    <option value="modded">Modded</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Software</label>
+                <select id="new-server-software">
+                    <option value="paper">Paper</option>
+                    <option value="bukkit">Bukkit</option>
+                    <option value="spigot">Spigot</option>
+                    <option value="purpur">Purpur</option>
+                    <option value="fabric">Fabric</option>
+                    <option value="forge">Forge</option>
+                    <option value="neoforge">NeoForge</option>
+                    <option value="quilt">Quilt</option>
+                    <option value="vanilla">Vanilla</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Minecraft Version</label>
+                <select id="new-server-mc-version">${releaseVersions || '<option value="1.21.1">1.21.1</option>'}</select>
+            </div>
+            <div class="form-group">
+                <label>Software Version / Build</label>
+                <input type="text" id="new-server-software-version" placeholder="latest" value="latest">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeCreateServerProfileModal()">Cancel</button>
+                <button class="btn" onclick="submitCreateServerProfile()">Create</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+}
+
+function closeCreateServerProfileModal() {
+    const modal = document.getElementById('create-server-profile-modal');
+    if (modal) modal.remove();
+}
+
+async function submitCreateServerProfile() {
+    const name = document.getElementById('new-server-name')?.value.trim() || '';
+    const mode = document.getElementById('new-server-mode')?.value || 'plugins';
+    const software = document.getElementById('new-server-software')?.value || 'paper';
+    const minecraftVersion = document.getElementById('new-server-mc-version')?.value || '';
+    const softwareVersion = document.getElementById('new-server-software-version')?.value.trim() || 'latest';
+
+    if (!name) {
+        showToast('Please enter a server name', 'error', 2500);
+        return;
+    }
+    if (!minecraftVersion) {
+        showToast('Please select a Minecraft version', 'error', 2500);
+        return;
+    }
+
+    try {
+        await invoke('create_server_profile', {
+            name,
+            mode,
+            software,
+            minecraftVersion,
+            softwareVersion,
+        });
+        closeCreateServerProfileModal();
+        await loadServerHub();
+        showToast('Server profile created', 'success', 2000);
+    } catch (error) {
+        showToast('Failed to create server: ' + error, 'error', 4500);
+    }
+}
+
+function openServerProfileDetails(serverId) {
+    const root = document.getElementById('servers-hub-content');
+    if (!root) return;
+    const server = serverProfiles.find(s => s.id === serverId);
+    if (!server) return;
+    currentServerProfile = server;
+
+    root.innerHTML = `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:15px;">
+            <div>
+                <h2 style="color:var(--gold); margin:0;">${escapeHtml(server.name)}</h2>
+                <p style="margin:6px 0 0; color:var(--text-secondary);">${escapeHtml(server.software)} • ${escapeHtml(server.mode)} • MC ${escapeHtml(server.minecraft_version)}</p>
+            </div>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary" onclick="loadServerHub()">← Back</button>
+                <button class="btn btn-secondary" onclick="deleteServerProfile('${server.id}')"><i class="bi bi-trash"></i></button>
+            </div>
+        </div>
+
+        <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+            <button class="btn btn-secondary server-detail-tab active" data-server-tab="content" onclick="switchServerDetailTab('content','${server.id}')">Content</button>
+            <button class="btn btn-secondary server-detail-tab" data-server-tab="console" onclick="switchServerDetailTab('console','${server.id}')">Console</button>
+            <button class="btn btn-secondary server-detail-tab" data-server-tab="settings" onclick="switchServerDetailTab('settings','${server.id}')">Settings</button>
+            <button class="btn btn-secondary server-detail-tab" data-server-tab="files" onclick="switchServerDetailTab('files','${server.id}')">Files</button>
+        </div>
+        <div id="server-detail-content"></div>
+    `;
+
+    switchServerDetailTab('content', server.id);
+}
+
+function switchServerDetailTab(tab, serverId) {
+    document.querySelectorAll('.server-detail-tab').forEach(btn => {
+        if (btn.dataset.serverTab === tab) {
+            btn.classList.add('active');
+            btn.style.borderColor = 'var(--gold)';
+            btn.style.color = 'var(--gold)';
+        } else {
+            btn.classList.remove('active');
+            btn.style.borderColor = '';
+            btn.style.color = '';
+        }
+    });
+
+    const shell = document.getElementById('server-detail-content');
+    if (!shell) return;
+
+    if (tab === 'content') {
+        const contentType = currentServerProfile?.mode === 'plugins' ? 'plugins' : 'mods';
+        shell.innerHTML = `
+            <div style="display:flex; gap:8px; margin-bottom:12px;">
+                <button class="btn btn-secondary" onclick="openServerFolder('${serverId}', '${contentType}')"><i class="bi bi-folder"></i> Open ${contentType}</button>
+                <button class="btn btn-secondary" onclick="triggerServerContentUpload()"><i class="bi bi-upload"></i> Add .jar</button>
+                <input id="server-content-upload" type="file" accept=".jar" style="display:none;" onchange="uploadServerContentFile('${serverId}','${contentType}', this)">
+            </div>
+            <div id="server-content-list" class="profile-scroll-box" style="background:var(--bg-medium); border-radius:10px; padding:10px;"></div>
+        `;
+        loadServerContent(serverId, contentType);
+        return;
+    }
+
+    if (tab === 'console') {
+        shell.innerHTML = `
+            <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+                <button class="btn btn-secondary" onclick="loadServerConsole('${serverId}')"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+            </div>
+            <pre id="server-console-output" class="profile-scroll-box" style="background:#0c0c0c; border:1px solid var(--bg-light); border-radius:10px; padding:12px; font-size:12px; line-height:1.45; white-space:pre-wrap;"></pre>
+        `;
+        loadServerConsole(serverId);
+        return;
+    }
+
+    if (tab === 'settings') {
+        shell.innerHTML = `<div id="server-settings-content" style="background:var(--bg-medium); border-radius:10px; padding:12px;">Loading settings...</div>`;
+        loadServerSettings(serverId);
+        return;
+    }
+
+    shell.innerHTML = `
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-secondary" onclick="openServerFolder('${serverId}', null)"><i class="bi bi-folder2-open"></i> Server Root</button>
+            <button class="btn btn-secondary" onclick="openServerFolder('${serverId}', 'world')"><i class="bi bi-globe"></i> World</button>
+            <button class="btn btn-secondary" onclick="openServerFolder('${serverId}', 'logs')"><i class="bi bi-file-text"></i> Logs</button>
+            <button class="btn btn-secondary" onclick="openServerFolder('${serverId}', 'plugins')"><i class="bi bi-plug"></i> Plugins</button>
+            <button class="btn btn-secondary" onclick="openServerFolder('${serverId}', 'mods')"><i class="bi bi-puzzle"></i> Mods</button>
+        </div>
+    `;
+}
+
+function triggerServerContentUpload() {
+    const el = document.getElementById('server-content-upload');
+    if (el) el.click();
+}
+
+async function uploadServerContentFile(serverId, contentType, input) {
+    const file = input.files?.[0];
+    if (!file) return;
+    const base64 = await fileToBase64(file);
+
+    try {
+        await invoke('import_server_content_file', {
+            serverId,
+            contentType,
+            fileName: file.name,
+            fileBase64: base64,
+        });
+        showToast(`${file.name} added`, 'success', 2500);
+        await loadServerContent(serverId, contentType);
+    } catch (error) {
+        showToast('Upload failed: ' + error, 'error', 4000);
+    } finally {
+        input.value = '';
+    }
+}
+
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const result = String(reader.result || '');
+            const base64 = result.includes(',') ? result.split(',')[1] : result;
+            resolve(base64);
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+    });
+}
+
+async function loadServerContent(serverId, contentType) {
+    const list = document.getElementById('server-content-list');
+    if (!list) return;
+    list.innerHTML = '<div class="loading">Loading content...</div>';
+
+    try {
+        const files = await invoke('get_server_content', { serverId, contentType });
+        if (!files.length) {
+            list.innerHTML = `<div style="color:var(--text-secondary); padding:20px;">No ${contentType} installed yet.</div>`;
+            return;
+        }
+
+        list.innerHTML = files.map(file => {
+            const escapedJsFile = String(file).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            return `
+            <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; padding:8px 10px; background:var(--bg-light); border-radius:8px; margin-bottom:8px;">
+                <span style="overflow:hidden; text-overflow:ellipsis;">${escapeHtml(file)}</span>
+                <button class="btn btn-secondary" style="padding:6px 10px; color:#f44336;" onclick="removeServerContentFile('${serverId}','${contentType}','${escapedJsFile}')">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+        `;
+        }).join('');
+    } catch (error) {
+        list.innerHTML = `<div style="color:#f44336;">Failed to load content: ${escapeHtml(String(error))}</div>`;
+    }
+}
+
+async function removeServerContentFile(serverId, contentType, fileName) {
+    if (!confirm(`Remove ${fileName}?`)) return;
+    try {
+        await invoke('remove_server_content_file', { serverId, contentType, fileName });
+        await loadServerContent(serverId, contentType);
+    } catch (error) {
+        showToast('Failed to remove file: ' + error, 'error', 3500);
+    }
+}
+
+async function loadServerConsole(serverId) {
+    const el = document.getElementById('server-console-output');
+    if (!el) return;
+    try {
+        const output = await invoke('get_server_console_output', { serverId });
+        el.textContent = output || '';
+    } catch (error) {
+        el.textContent = 'Failed to read console output: ' + error;
+    }
+}
+
+async function loadServerSettings(serverId) {
+    const shell = document.getElementById('server-settings-content');
+    if (!shell) return;
+
+    try {
+        const response = await invoke('get_server_properties', { serverId });
+        if (!response.exists) {
+            shell.innerHTML = `
+                <div style="padding:8px; color:var(--text-secondary);">
+                    server.properties wurde für diesen Server noch nicht generiert oder existiert nicht.
+                </div>
+            `;
+            return;
+        }
+
+        const values = response.values || {};
+        const bool = (key, def = 'false') => (values[key] ?? def) === 'true' ? 'checked' : '';
+
+        shell.innerHTML = `
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:14px;">
+                <label>Online Mode <input id="srv-online-mode" type="checkbox" ${bool('online-mode', 'true')}></label>
+                <label>PvP <input id="srv-pvp" type="checkbox" ${bool('pvp', 'true')}></label>
+                <label>Allow Flight <input id="srv-allow-flight" type="checkbox" ${bool('allow-flight', 'false')}></label>
+                <label>View Distance <input id="srv-view-distance" type="range" min="2" max="32" value="${escapeAttr(values['view-distance'] || '10')}"></label>
+                <label>Max Players <input id="srv-max-players" type="number" min="1" max="1000" value="${escapeAttr(values['max-players'] || '20')}"></label>
+                <label>Difficulty
+                    <select id="srv-difficulty">
+                        <option value="peaceful" ${(values.difficulty || 'easy') === 'peaceful' ? 'selected' : ''}>Peaceful</option>
+                        <option value="easy" ${(values.difficulty || 'easy') === 'easy' ? 'selected' : ''}>Easy</option>
+                        <option value="normal" ${(values.difficulty || 'easy') === 'normal' ? 'selected' : ''}>Normal</option>
+                        <option value="hard" ${(values.difficulty || 'easy') === 'hard' ? 'selected' : ''}>Hard</option>
+                    </select>
+                </label>
+                <label>Gamemode
+                    <select id="srv-gamemode">
+                        <option value="survival" ${(values.gamemode || 'survival') === 'survival' ? 'selected' : ''}>Survival</option>
+                        <option value="creative" ${(values.gamemode || 'survival') === 'creative' ? 'selected' : ''}>Creative</option>
+                        <option value="adventure" ${(values.gamemode || 'survival') === 'adventure' ? 'selected' : ''}>Adventure</option>
+                        <option value="spectator" ${(values.gamemode || 'survival') === 'spectator' ? 'selected' : ''}>Spectator</option>
+                    </select>
+                </label>
+                <label style="grid-column:1 / -1;">MOTD <input id="srv-motd" type="text" value="${escapeAttr(values.motd || 'A Lion Server')}"></label>
+                <label style="grid-column:1 / -1;">Seed <input id="srv-seed" type="text" value="${escapeAttr(values['level-seed'] || '')}"></label>
+            </div>
+            <div style="margin-top:14px; display:flex; justify-content:flex-end;">
+                <button class="btn" onclick="saveServerSettings('${serverId}')">Save server.properties</button>
+            </div>
+        `;
+    } catch (error) {
+        shell.innerHTML = `<div style="color:#f44336;">Failed to load settings: ${escapeHtml(String(error))}</div>`;
+    }
+}
+
+async function saveServerSettings(serverId) {
+    const values = {
+        'online-mode': document.getElementById('srv-online-mode')?.checked ? 'true' : 'false',
+        pvp: document.getElementById('srv-pvp')?.checked ? 'true' : 'false',
+        'allow-flight': document.getElementById('srv-allow-flight')?.checked ? 'true' : 'false',
+        'view-distance': document.getElementById('srv-view-distance')?.value || '10',
+        'max-players': document.getElementById('srv-max-players')?.value || '20',
+        difficulty: document.getElementById('srv-difficulty')?.value || 'easy',
+        gamemode: document.getElementById('srv-gamemode')?.value || 'survival',
+        motd: document.getElementById('srv-motd')?.value || 'A Lion Server',
+        'level-seed': document.getElementById('srv-seed')?.value || '',
+    };
+
+    try {
+        await invoke('save_server_properties', { serverId, values });
+        showToast('server.properties saved', 'success', 2200);
+    } catch (error) {
+        showToast('Failed to save settings: ' + error, 'error', 4500);
+    }
+}
+
+async function openServerFolder(serverId, subfolder = null) {
+    try {
+        await invoke('open_server_folder', { serverId, subfolder });
+    } catch (error) {
+        showToast('Failed to open folder: ' + error, 'error', 3500);
+    }
+}
+
+async function deleteServerProfile(serverId) {
+    if (!confirm('Delete this local server profile and all its files?')) return;
+    try {
+        await invoke('delete_server_profile', { serverId });
+        currentServerProfile = null;
+        await loadServerHub();
+        showToast('Server deleted', 'success', 2000);
+    } catch (error) {
+        showToast('Failed to delete server: ' + error, 'error', 3500);
     }
 }
 
@@ -7235,4 +7863,3 @@ function backFromModDetails() {
 function backToModBrowser() {
     backFromModDetails();
 }
-

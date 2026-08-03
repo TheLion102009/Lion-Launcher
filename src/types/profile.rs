@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
+use crate::types::version::{LoaderVersion, ModLoader};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use crate::types::version::{ModLoader, LoaderVersion};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {
@@ -101,7 +101,8 @@ impl ProfileList {
     }
 
     pub fn get_active_profile(&self) -> Option<&Profile> {
-        self.active_profile.as_ref()
+        self.active_profile
+            .as_ref()
             .and_then(|id| self.get_profile(id))
     }
 }

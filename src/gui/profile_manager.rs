@@ -1,8 +1,8 @@
 use crate::core::profiles::ProfileManager;
 use crate::types::profile::{Profile, ProfileList};
 use crate::types::version::ModLoader;
-use std::time::SystemTime;
 use std::collections::HashMap;
+use std::time::SystemTime;
 
 #[tauri::command]
 pub async fn get_profiles() -> Result<ProfileList, String> {
@@ -29,21 +29,31 @@ pub async fn create_profile(
     };
 
     let profile = Profile::new(name, minecraft_version, mod_loader, loader_version);
-    manager.create_profile(profile).await.map_err(|e| e.to_string())
+    manager
+        .create_profile(profile)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn delete_profile(profile_id: String) -> Result<ProfileList, String> {
     let manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    manager.delete_profile(&profile_id).await.map_err(|e| e.to_string())
+    manager
+        .delete_profile(&profile_id)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn update_profile(profile_id: String, updates: serde_json::Value) -> Result<ProfileList, String> {
+pub async fn update_profile(
+    profile_id: String,
+    updates: serde_json::Value,
+) -> Result<ProfileList, String> {
     let manager = ProfileManager::new().map_err(|e| e.to_string())?;
     let mut profiles = manager.load_profiles().await.map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile_mut(&profile_id)
+    let profile = profiles
+        .get_profile_mut(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     // Update fields from JSON
@@ -77,7 +87,8 @@ pub async fn update_profile(profile_id: String, updates: serde_json::Value) -> R
     }
 
     if let Some(java_args) = updates.get("java_args").and_then(|v| v.as_array()) {
-        let args: Vec<String> = java_args.iter()
+        let args: Vec<String> = java_args
+            .iter()
             .filter_map(|a| a.as_str())
             .map(|s| s.to_string())
             .collect();
@@ -91,7 +102,10 @@ pub async fn update_profile(profile_id: String, updates: serde_json::Value) -> R
         }
     }
 
-    manager.save_profiles(&profiles).await.map_err(|e| e.to_string())?;
+    manager
+        .save_profiles(&profiles)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(profiles)
 }
 
@@ -105,7 +119,8 @@ pub async fn launch_profile(
     let mut profiles = manager.load_profiles().await.map_err(|e| e.to_string())?;
 
     // Clone profile for launching
-    let profile_to_launch = profiles.get_profile(&profile_id)
+    let profile_to_launch = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?
         .clone();
 
@@ -120,7 +135,9 @@ pub async fn launch_profile(
             let profile_options = profile_to_launch.game_dir.join("options.txt");
 
             // Stelle sicher, dass das Profil-Verzeichnis existiert
-            tokio::fs::create_dir_all(&profile_to_launch.game_dir).await.ok();
+            tokio::fs::create_dir_all(&profile_to_launch.game_dir)
+                .await
+                .ok();
 
             // Merge mit existierenden Profil-Settings (behält version etc.)
             let final_content = if profile_options.exists() {
@@ -133,7 +150,9 @@ pub async fn launch_profile(
                 combined.clone()
             };
 
-            tokio::fs::write(&profile_options, &final_content).await.ok();
+            tokio::fs::write(&profile_options, &final_content)
+                .await
+                .ok();
             tracing::info!("Synced combined settings to profile before launch");
 
             // Speichere auch in shared_options.txt für Referenz
@@ -164,7 +183,10 @@ pub async fn launch_profile(
     if let Some(profile) = profiles.get_profile_mut(&profile_id) {
         profile.update_last_played();
     }
-    manager.save_profiles(&profiles).await.map_err(|e| e.to_string())?;
+    manager
+        .save_profiles(&profiles)
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Hole Account-Daten (UUID, Username, Token) vom aktiven Account
     // WICHTIG: Verwende refreshed Funktion um abgelaufene Tokens automatisch zu erneuern!
@@ -196,23 +218,33 @@ pub async fn launch_profile(
         use tauri::Emitter;
         while let Ok((status, percent)) = progress_rx.recv() {
             tracing::debug!("Launch progress {}%: {}", percent, status);
-            app_for_progress.emit("launch-progress", serde_json::json!({
-                "status": status,
-                "percent": percent
-            })).ok();
+            app_for_progress
+                .emit(
+                    "launch-progress",
+                    serde_json::json!({
+                        "status": status,
+                        "percent": percent
+                    }),
+                )
+                .ok();
         }
     });
     // ─────────────────────────────────────────────────────────────────────────
 
     let launcher = crate::core::minecraft::MinecraftLauncher::new().map_err(|e| e.to_string())?;
-    let result = launcher.launch(
-        &profile_to_launch,
-        &account_username,
-        &account_uuid,
-        if access_token == "0" { None } else { Some(&access_token) }
-    )
-    .await
-    .map_err(|e| e.to_string());
+    let result = launcher
+        .launch(
+            &profile_to_launch,
+            &account_username,
+            &account_uuid,
+            if access_token == "0" {
+                None
+            } else {
+                Some(&access_token)
+            },
+        )
+        .await
+        .map_err(|e| e.to_string());
 
     // Sender entfernen damit der Empfänger-Thread sauber beendet
     crate::core::minecraft::clear_launch_progress_sender();
@@ -221,7 +253,6 @@ pub async fn launch_profile(
 }
 
 // ==================== SETTINGS SYNC FUNKTIONEN ====================
-
 
 /// Sammelt alle options.txt von allen Profilen mit Sync und merged sie.
 /// Die neueste Änderung hat Vorrang.
@@ -318,10 +349,7 @@ fn merge_for_profile(existing: &str, combined: &str) -> String {
     }
 
     // Erstelle String
-    let mut lines: Vec<String> = values
-        .iter()
-        .map(|(k, v)| format!("{}:{}", k, v))
-        .collect();
+    let mut lines: Vec<String> = values.iter().map(|(k, v)| format!("{}:{}", k, v)).collect();
     lines.sort();
     lines.join("\n")
 }
@@ -431,7 +459,10 @@ async fn sync_resourcepacks(profiles: &[Profile], target_game_dir: &std::path::P
 
         // Überspringe wenn bereits vorhanden und gleich oder neuer
         if target_path.exists() {
-            if let (Ok(source_meta), Ok(target_meta)) = (std::fs::metadata(&source_path), std::fs::metadata(&target_path)) {
+            if let (Ok(source_meta), Ok(target_meta)) = (
+                std::fs::metadata(&source_path),
+                std::fs::metadata(&target_path),
+            ) {
                 let source_time = source_meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
                 let target_time = target_meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
                 if target_time >= source_time {
@@ -479,4 +510,3 @@ async fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std
 
     Ok(())
 }
-

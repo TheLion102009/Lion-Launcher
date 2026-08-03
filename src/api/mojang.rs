@@ -1,11 +1,12 @@
 #![allow(dead_code)]
 
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use crate::api::client::ApiClient;
 use crate::types::version::{MinecraftVersion, VersionType};
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
-const VERSION_MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+const VERSION_MANIFEST_URL: &str =
+    "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 
 pub struct MojangClient {
     client: ApiClient,
@@ -21,18 +22,22 @@ impl MojangClient {
     pub async fn get_version_manifest(&self) -> Result<Vec<MinecraftVersion>> {
         let manifest: VersionManifest = self.client.get_json(VERSION_MANIFEST_URL).await?;
 
-        let versions = manifest.versions.into_iter().map(|v| MinecraftVersion {
-            id: v.id,
-            version_type: match v.version_type.as_str() {
-                "release" => VersionType::Release,
-                "snapshot" => VersionType::Snapshot,
-                "old_beta" => VersionType::OldBeta,
-                "old_alpha" => VersionType::OldAlpha,
-                _ => VersionType::Release,
-            },
-            release_time: v.release_time,
-            url: Some(v.url),
-        }).collect();
+        let versions = manifest
+            .versions
+            .into_iter()
+            .map(|v| MinecraftVersion {
+                id: v.id,
+                version_type: match v.version_type.as_str() {
+                    "release" => VersionType::Release,
+                    "snapshot" => VersionType::Snapshot,
+                    "old_beta" => VersionType::OldBeta,
+                    "old_alpha" => VersionType::OldAlpha,
+                    _ => VersionType::Release,
+                },
+                release_time: v.release_time,
+                url: Some(v.url),
+            })
+            .collect();
 
         Ok(versions)
     }

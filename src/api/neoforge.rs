@@ -1,11 +1,12 @@
 #![allow(dead_code)]
 
-use anyhow::{Result, bail};
-use serde::Deserialize;
 use crate::api::client::ApiClient;
+use anyhow::{bail, Result};
+use serde::Deserialize;
 
 const NEOFORGE_MAVEN_URL: &str = "https://maven.neoforged.net/releases";
-const NEOFORGE_API_URL: &str = "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge";
+const NEOFORGE_API_URL: &str =
+    "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge";
 
 pub struct NeoForgeClient {
     client: ApiClient,
@@ -19,24 +20,41 @@ impl NeoForgeClient {
     }
 
     /// Lädt alle verfügbaren NeoForge-Versionen für eine Minecraft-Version
-    pub async fn get_loader_versions(&self, minecraft_version: &str) -> Result<Vec<NeoForgeVersion>> {
-        tracing::info!("🔍 Loading NeoForge versions for Minecraft {}...", minecraft_version);
+    pub async fn get_loader_versions(
+        &self,
+        minecraft_version: &str,
+    ) -> Result<Vec<NeoForgeVersion>> {
+        tracing::info!(
+            "🔍 Loading NeoForge versions for Minecraft {}...",
+            minecraft_version
+        );
 
         let all_versions = self.get_all_versions_from_maven().await?;
-        tracing::debug!("Found {} total NeoForge versions from Maven", all_versions.len());
+        tracing::debug!(
+            "Found {} total NeoForge versions from Maven",
+            all_versions.len()
+        );
 
         // Verwende die gleiche Filterlogik wie in core/minecraft/neoforge.rs
         let matching = Self::filter_matching_versions(&all_versions, minecraft_version);
 
-        tracing::info!("✅ Found {} NeoForge versions for Minecraft {}", matching.len(), minecraft_version);
+        tracing::info!(
+            "✅ Found {} NeoForge versions for Minecraft {}",
+            matching.len(),
+            minecraft_version
+        );
 
         if matching.is_empty() {
-            bail!("Keine NeoForge-Versionen für Minecraft {} gefunden", minecraft_version);
+            bail!(
+                "Keine NeoForge-Versionen für Minecraft {} gefunden",
+                minecraft_version
+            );
         }
 
         // Konvertiere zu NeoForgeVersion Strukturen
-        let mut versions: Vec<NeoForgeVersion> = matching.into_iter().map(|version_str| {
-            NeoForgeVersion {
+        let mut versions: Vec<NeoForgeVersion> = matching
+            .into_iter()
+            .map(|version_str| NeoForgeVersion {
                 version: version_str.clone(),
                 mc_version: minecraft_version.to_string(),
                 is_beta: version_str.contains("beta") || version_str.contains("alpha"),
@@ -44,8 +62,8 @@ impl NeoForgeClient {
                     "{}/net/neoforged/neoforge/{}/neoforge-{}-installer.jar",
                     NEOFORGE_MAVEN_URL, version_str, version_str
                 ),
-            }
-        }).collect();
+            })
+            .collect();
 
         // Sortiere nach Version (neueste zuerst)
         versions.sort_by(|a, b| Self::compare_neoforge_versions(&b.version, &a.version));
@@ -99,7 +117,8 @@ impl NeoForgeClient {
 
     /// Lädt alle verfügbaren NeoForge-Versionen direkt von der Maven-Metadata
     async fn get_all_versions_from_maven(&self) -> Result<Vec<String>> {
-        let maven_metadata_url = "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml";
+        let maven_metadata_url =
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml";
 
         let response = reqwest::get(maven_metadata_url).await?;
         let xml = response.text().await?;
@@ -137,13 +156,13 @@ impl NeoForgeClient {
         for i in 0..a_parts.len().max(b_parts.len()) {
             let a_part = a_parts.get(i).copied().unwrap_or(0);
             let b_part = b_parts.get(i).copied().unwrap_or(0);
-            
+
             match a_part.cmp(&b_part) {
                 std::cmp::Ordering::Equal => continue,
                 other => return other,
             }
         }
-        
+
         std::cmp::Ordering::Equal
     }
 
@@ -193,13 +212,13 @@ impl NeoForgeClient {
         for i in 0..a_parts.len().max(b_parts.len()) {
             let a_part = a_parts.get(i).copied().unwrap_or(0);
             let b_part = b_parts.get(i).copied().unwrap_or(0);
-            
+
             match a_part.cmp(&b_part) {
                 std::cmp::Ordering::Equal => continue,
                 other => return other,
             }
         }
-        
+
         std::cmp::Ordering::Equal
     }
 
@@ -224,7 +243,6 @@ pub struct NeoForgeVersion {
     pub is_beta: bool,
     pub installer_url: String,
 }
-
 
 #[derive(Debug, Deserialize)]
 struct NeoForgeApiResponse {

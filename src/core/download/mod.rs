@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
+use futures_util::StreamExt;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
-use futures_util::StreamExt;
 
 #[derive(Clone)]
 pub struct DownloadManager {
@@ -34,14 +34,22 @@ impl DownloadManager {
 
         // Prüfe HTTP-Status
         if !response.status().is_success() {
-            anyhow::bail!("HTTP error {}: {} for URL: {}", response.status().as_u16(), response.status().canonical_reason().unwrap_or("Unknown"), url);
+            anyhow::bail!(
+                "HTTP error {}: {} for URL: {}",
+                response.status().as_u16(),
+                response.status().canonical_reason().unwrap_or("Unknown"),
+                url
+            );
         }
 
         // Prüfe ob es eine HTML-Fehlerseite ist (statt einer Binärdatei)
         if let Some(content_type) = response.headers().get("content-type") {
             let ct = content_type.to_str().unwrap_or("");
             if ct.contains("text/html") && (url.ends_with(".jar") || url.ends_with(".zip")) {
-                anyhow::bail!("Expected binary file but got HTML (likely a 404 page) for URL: {}", url);
+                anyhow::bail!(
+                    "Expected binary file but got HTML (likely a 404 page) for URL: {}",
+                    url
+                );
             }
         }
 
@@ -125,7 +133,7 @@ impl DownloadManager {
 
             // Hash-Verifizierung (nur wenn erwartet)
             if let Some(expected) = expected_sha1 {
-                use sha1::{Sha1, Digest};
+                use sha1::{Digest, Sha1};
                 let content = tokio::fs::read(dest).await?;
                 let hash = Sha1::digest(&content);
                 let hash_str = hex::encode(hash);
@@ -158,10 +166,7 @@ impl DownloadManager {
         anyhow::bail!("Hash verification failed after retries for {}", url)
     }
 
-    pub async fn download_many(
-        &self,
-        downloads: Vec<(String, std::path::PathBuf)>,
-    ) -> Result<()> {
+    pub async fn download_many(&self, downloads: Vec<(String, std::path::PathBuf)>) -> Result<()> {
         use futures_util::stream::{self, StreamExt};
 
         stream::iter(downloads)

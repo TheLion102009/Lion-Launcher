@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
-use std::path::Path;
 use std::fs::File;
+use std::path::Path;
 
 pub fn extract_zip(zip_path: &Path, destination: &Path) -> Result<()> {
     let file = File::open(zip_path)?;
@@ -31,8 +31,8 @@ pub fn compress_directory(source: &Path, output: &Path) -> Result<()> {
     let mut zip = zip::ZipWriter::new(file);
 
     let options = {
-        let opts = zip::write::FileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
+        let opts =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         #[cfg(unix)]
         let opts = opts.unix_permissions(0o755);
         opts

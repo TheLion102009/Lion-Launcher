@@ -1,3 +1,4 @@
+use crate::core::download::DownloadManager;
 /// Forge-Installer und Launch-Support
 ///
 /// Implementiert den korrekten Forge-Installationsprozess:
@@ -6,10 +7,9 @@
 /// 3. Alle benötigten Libraries herunterladen
 /// 4. Prozessoren ausführen (jarsplitter → installertools → binarypatcher)
 /// 5. Korrekten --gameJar Pfad zurückgeben
-use anyhow::{Result, bail};
-use std::path::{Path, PathBuf};
+use anyhow::{bail, Result};
 use std::io::Read;
-use crate::core::download::DownloadManager;
+use std::path::{Path, PathBuf};
 
 #[derive(serde::Deserialize, Debug, Clone)]
 struct Processor {
@@ -67,9 +67,10 @@ impl ForgeInstaller {
 
         // Installer-Pfad
         let installer_dir = libraries_dir.join("forge-installer").join(mc_version);
-        let installer_path = installer_dir.join(
-            format!("forge-{}-{}-installer.jar", mc_version, forge_version)
-        );
+        let installer_path = installer_dir.join(format!(
+            "forge-{}-{}-installer.jar",
+            mc_version, forge_version
+        ));
         let forge_client = ForgeClient::new()?;
         let installer_url = forge_client.get_installer_url(mc_version, forge_version);
 
@@ -83,7 +84,9 @@ impl ForgeInstaller {
         if !installer_path.exists() {
             tracing::info!("Lade Forge Installer: {}", installer_url);
             tokio::fs::create_dir_all(&installer_dir).await?;
-            self.download_manager.download_with_hash(&installer_url, &installer_path, None).await?;
+            self.download_manager
+                .download_with_hash(&installer_url, &installer_path, None)
+                .await?;
             if !Self::is_valid_zip(&installer_path) {
                 tokio::fs::remove_file(&installer_path).await.ok();
                 bail!("Heruntergeladener Forge Installer ist kein gültiges ZIP/JAR");
@@ -97,9 +100,9 @@ impl ForgeInstaller {
         tokio::fs::create_dir_all(&installer_data_dir).await?;
 
         // ── Installer-Inhalte lesen ──────────────────────────────────────────────
-        let (version_json_str, install_profile_str) = Self::read_installer_contents(
-            &installer_path, &installer_data_dir, libraries_dir
-        ).await?;
+        let (version_json_str, install_profile_str) =
+            Self::read_installer_contents(&installer_path, &installer_data_dir, libraries_dir)
+                .await?;
 
         // ── version.json parsen ──────────────────────────────────────────────────
         #[derive(serde::Deserialize)]
@@ -139,7 +142,11 @@ impl ForgeInstaller {
             .map_err(|e| anyhow::anyhow!("Fehler beim Parsen von version.json: {}", e))?;
 
         let is_bootstrap = version_json.main_class.contains("ForgeBootstrap");
-        tracing::info!("Main class: {} (bootstrap={})", version_json.main_class, is_bootstrap);
+        tracing::info!(
+            "Main class: {} (bootstrap={})",
+            version_json.main_class,
+            is_bootstrap
+        );
 
         // ── install_profile.json parsen ──────────────────────────────────────────
         #[derive(serde::Deserialize)]
@@ -149,9 +156,12 @@ impl ForgeInstaller {
             processors: Option<Vec<Processor>>,
             data: Option<std::collections::HashMap<String, SidedData>>,
         }
-        let install_profile: InstallProfile = serde_json::from_str(&install_profile_str)
-            .unwrap_or(InstallProfile {
-                version: None, libraries: None, processors: None, data: None
+        let install_profile: InstallProfile =
+            serde_json::from_str(&install_profile_str).unwrap_or(InstallProfile {
+                version: None,
+                libraries: None,
+                processors: None,
+                data: None,
             });
 
         // Forge-Version aus install_profile.version extrahieren
@@ -159,7 +169,9 @@ impl ForgeInstaller {
         //   "1.20.1-forge-47.3.0"  → enthält "-forge-" → split liefert "47.3.0"
         //   "1.20.3-forge49.0.2"   → enthält "-forge" ohne Trennstrich → split liefert "forge49.0.2"
         //   "1.20.3-49.0.2"        → kein "forge" → split('-') liefert "49.0.2"
-        let forge_version_resolved = install_profile.version.as_deref()
+        let forge_version_resolved = install_profile
+            .version
+            .as_deref()
             .and_then(|v| {
                 tracing::debug!("install_profile.version = {:?}", v);
                 if v.contains("-forge-") {
@@ -188,35 +200,45 @@ impl ForgeInstaller {
 
         // MCP-Version aus version.json libraries extrahieren
         // Format: "de.oceanlabs.mcp:mcp_config:1.21.7-20250630.104312" → "20250630.104312"
-        let mcp_version_from_libs = version_json.libraries.iter()
-            .find_map(|lib| {
-                if lib.name.contains("mcp_config") || lib.name.contains("mcpConfig") {
-                    let parts: Vec<&str> = lib.name.split(':').collect();
-                    if let Some(ver) = parts.get(2) {
-                        if let Some(mcp) = ver.split_once('-').map(|x| x.1) {
-                            return Some(mcp.to_string());
-                        }
-                        if ver.contains('.') && ver.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
-                            return Some(ver.to_string());
-                        }
+        let mcp_version_from_libs = version_json.libraries.iter().find_map(|lib| {
+            if lib.name.contains("mcp_config") || lib.name.contains("mcpConfig") {
+                let parts: Vec<&str> = lib.name.split(':').collect();
+                if let Some(ver) = parts.get(2) {
+                    if let Some(mcp) = ver.split_once('-').map(|x| x.1) {
+                        return Some(mcp.to_string());
+                    }
+                    if ver.contains('.')
+                        && ver
+                            .chars()
+                            .next()
+                            .map(|c| c.is_ascii_digit())
+                            .unwrap_or(false)
+                    {
+                        return Some(ver.to_string());
                     }
                 }
-                None
-            });
+            }
+            None
+        });
 
         // MCP-Version auch aus install_profile.data extrahieren (zuverlässiger)
         // Format: data["MCP_VERSION"] = { client: "'20250630.104312'", ... }
-        let mcp_version_from_data = install_profile.data.as_ref()
+        let mcp_version_from_data = install_profile
+            .data
+            .as_ref()
             .and_then(|d| d.get("MCP_VERSION"))
             .map(|v| v.client.trim().trim_matches('\'').to_string())
             .filter(|s| !s.is_empty());
 
         // MCP-Version aus version.json game args extrahieren (zusätzliche Quelle)
         // Suche nach "--fml.mcpVersion" gefolgt vom Wert in arguments.game
-        let mcp_version_from_game_args: Option<String> = version_json.arguments.as_ref()
+        let mcp_version_from_game_args: Option<String> = version_json
+            .arguments
+            .as_ref()
             .and_then(|args| args.game.as_ref())
             .and_then(|game| {
-                let strs: Vec<String> = game.iter()
+                let strs: Vec<String> = game
+                    .iter()
                     .filter_map(|v| v.as_str().map(|s| s.to_string()))
                     .collect();
                 strs.windows(2)
@@ -237,18 +259,26 @@ impl ForgeInstaller {
                     "1.20.4" => "20240104.091131",
                     "1.20.5" => "20240429.145121",
                     "1.20.6" => "20240429.145121",
-                    "1.21"   => "20240613.152323",
+                    "1.21" => "20240613.152323",
                     "1.21.1" => "20240725.100730",
                     "1.21.2" => "20241029.085956",
                     "1.21.3" => "20241029.085956",
                     "1.21.4" => "20241203.161809",
                     _ => "20240808.144430",
                 };
-                tracing::warn!("MCP Version nicht aus Installer extrahierbar, nutze Fallback {} für MC {}", fallback, mc_version);
+                tracing::warn!(
+                    "MCP Version nicht aus Installer extrahierbar, nutze Fallback {} für MC {}",
+                    fallback,
+                    mc_version
+                );
                 fallback.to_string()
             });
 
-        tracing::info!("forge_version={}, mcp_version={}", forge_version_resolved, mcp_version);
+        tracing::info!(
+            "forge_version={}, mcp_version={}",
+            forge_version_resolved,
+            mcp_version
+        );
 
         // ── Installer-Libraries herunterladen ────────────────────────────────────
         if let Some(libs) = &install_profile.libraries {
@@ -263,10 +293,17 @@ impl ForgeInstaller {
                     (String::new(), Self::maven_to_path(&lib.name), None)
                 };
                 let dest = libraries_dir.join(&path);
-                if dest.exists() { continue; }
+                if dest.exists() {
+                    continue;
+                }
                 tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
                 if !url.is_empty() {
-                    if self.download_manager.download_with_hash(&url, &dest, sha1.as_deref()).await.is_err() {
+                    if self
+                        .download_manager
+                        .download_with_hash(&url, &dest, sha1.as_deref())
+                        .await
+                        .is_err()
+                    {
                         Self::download_from_maven_repos(&self.download_manager, &path, &dest).await;
                     }
                 } else {
@@ -279,14 +316,17 @@ impl ForgeInstaller {
         if let Some(procs) = &install_profile.processors {
             for proc in procs {
                 let sides = proc.sides.as_deref().unwrap_or(&[]);
-                if !sides.is_empty() && !sides.contains(&"client".to_string()) { continue; }
+                if !sides.is_empty() && !sides.contains(&"client".to_string()) {
+                    continue;
+                }
                 let jar_path = libraries_dir.join(Self::maven_to_path(&proc.jar));
                 if !jar_path.exists() {
                     Self::download_from_maven_repos(
                         &self.download_manager,
                         &Self::maven_to_path(&proc.jar),
-                        &jar_path
-                    ).await;
+                        &jar_path,
+                    )
+                    .await;
                 }
                 for dep in &proc.classpath {
                     let dep_path = libraries_dir.join(Self::maven_to_path(dep));
@@ -294,8 +334,9 @@ impl ForgeInstaller {
                         Self::download_from_maven_repos(
                             &self.download_manager,
                             &Self::maven_to_path(dep),
-                            &dep_path
-                        ).await;
+                            &dep_path,
+                        )
+                        .await;
                     }
                 }
             }
@@ -328,12 +369,19 @@ impl ForgeInstaller {
 
             let dest = libraries_dir.join(&path);
             let dest_str = dest.display().to_string();
-            if !seen_paths.insert(dest_str.clone()) { continue; }
+            if !seen_paths.insert(dest_str.clone()) {
+                continue;
+            }
 
             if !dest.exists() {
                 tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
                 if !url.is_empty() {
-                    if self.download_manager.download_with_hash(&url, &dest, sha1.as_deref()).await.is_err() {
+                    if self
+                        .download_manager
+                        .download_with_hash(&url, &dest, sha1.as_deref())
+                        .await
+                        .is_err()
+                    {
                         Self::download_from_maven_repos(&self.download_manager, &path, &dest).await;
                     }
                 } else {
@@ -346,8 +394,10 @@ impl ForgeInstaller {
                 continue;
             }
 
-            let is_native = path.contains("natives-linux") || path.contains("natives-windows")
-                || path.contains("natives-osx") || path.contains("natives-macos");
+            let is_native = path.contains("natives-linux")
+                || path.contains("natives-windows")
+                || path.contains("natives-osx")
+                || path.contains("natives-macos");
 
             if is_native {
                 native_jars.push(dest_str);
@@ -358,18 +408,26 @@ impl ForgeInstaller {
             }
         }
 
-        tracing::info!("Libraries: {} bootstrap-cp, {} data, {} natives",
-            bootstrap_classpath.len(), classpath.len(), native_jars.len());
+        tracing::info!(
+            "Libraries: {} bootstrap-cp, {} data, {} natives",
+            bootstrap_classpath.len(),
+            classpath.len(),
+            native_jars.len()
+        );
 
         // ── JVM/Game-Args extrahieren ────────────────────────────────────────────
         let mut jvm_args = Vec::new();
         let mut game_args = Vec::new();
         if let Some(args) = &version_json.arguments {
             if let Some(jvm) = &args.jvm {
-                for a in jvm { jvm_args.extend(Self::extract_arg_strings(a)); }
+                for a in jvm {
+                    jvm_args.extend(Self::extract_arg_strings(a));
+                }
             }
             if let Some(game) = &args.game {
-                for a in game { game_args.extend(Self::extract_arg_strings(a)); }
+                for a in game {
+                    game_args.extend(Self::extract_arg_strings(a));
+                }
             }
         }
 
@@ -389,9 +447,13 @@ impl ForgeInstaller {
             forge_version,
             &mcp_version,
             java_path,
-        ).await?;
+        )
+        .await?;
 
-        tracing::info!("--gameJar: {:?}", patched_client_jar.file_name().unwrap_or_default());
+        tracing::info!(
+            "--gameJar: {:?}",
+            patched_client_jar.file_name().unwrap_or_default()
+        );
 
         // Sicherstellen dass die patched_client_jar im bootstrap_classpath ist.
         // Bei Forge 1.21.7+ hat die forge-client.jar eine leere URL in version.json,
@@ -400,7 +462,10 @@ impl ForgeInstaller {
         // der vom bootstrap_classpath befüllt wird — also muss forge-client.jar dort sein!
         let patched_str = patched_client_jar.display().to_string();
         if !bootstrap_classpath.contains(&patched_str) {
-            tracing::info!("patched_client_jar zu bootstrap_classpath hinzugefügt: {:?}", patched_client_jar.file_name().unwrap_or_default());
+            tracing::info!(
+                "patched_client_jar zu bootstrap_classpath hinzugefügt: {:?}",
+                patched_client_jar.file_name().unwrap_or_default()
+            );
             bootstrap_classpath.insert(0, patched_str);
         }
 
@@ -443,8 +508,9 @@ impl ForgeInstaller {
         };
 
         let install_profile = {
-            let mut entry = archive.by_name("install_profile.json")
-                .map_err(|_| anyhow::anyhow!("install_profile.json nicht im Forge Installer gefunden"))?;
+            let mut entry = archive.by_name("install_profile.json").map_err(|_| {
+                anyhow::anyhow!("install_profile.json nicht im Forge Installer gefunden")
+            })?;
             let mut s = String::new();
             entry.read_to_string(&mut s)?;
             s
@@ -457,7 +523,9 @@ impl ForgeInstaller {
             None => {
                 tracing::info!("Legacy Forge Installer erkannt (kein version.json)");
                 let profile_value: serde_json::Value = serde_json::from_str(&install_profile)
-                    .map_err(|e| anyhow::anyhow!("Legacy install_profile.json parse error: {}", e))?;
+                    .map_err(|e| {
+                        anyhow::anyhow!("Legacy install_profile.json parse error: {}", e)
+                    })?;
                 if let Some(version_info) = profile_value.get("versionInfo") {
                     serde_json::to_string(version_info)
                         .map_err(|e| anyhow::anyhow!("versionInfo serialization error: {}", e))?
@@ -473,9 +541,12 @@ impl ForgeInstaller {
         for i in 0..archive.len() {
             if let Ok(mut entry) = archive.by_index(i) {
                 let name = entry.name().to_string();
-                if name.ends_with('/') { continue; }
+                if name.ends_with('/') {
+                    continue;
+                }
 
-                if name.starts_with("maven/") && (name.ends_with(".jar") || name.ends_with(".lzma")) {
+                if name.starts_with("maven/") && (name.ends_with(".jar") || name.ends_with(".lzma"))
+                {
                     if let Some(rel) = name.strip_prefix("maven/") {
                         let dest = libraries_dir.join(rel);
                         if !dest.exists() {
@@ -538,18 +609,25 @@ impl ForgeInstaller {
         let resolve_single = |val: &str| -> String {
             let v = val.trim();
             if v.starts_with('[') && v.ends_with(']') {
-                libraries_dir.join(Self::maven_to_path(&v[1..v.len()-1])).display().to_string()
+                libraries_dir
+                    .join(Self::maven_to_path(&v[1..v.len() - 1]))
+                    .display()
+                    .to_string()
             } else if v.starts_with('\'') && v.ends_with('\'') {
-                v[1..v.len()-1].to_string()
+                v[1..v.len() - 1].to_string()
             } else if v.starts_with('/') {
-                installer_data_dir.join(v.trim_start_matches('/')).display().to_string()
+                installer_data_dir
+                    .join(v.trim_start_matches('/'))
+                    .display()
+                    .to_string()
             } else {
                 v.to_string()
             }
         };
 
         // ── Basisdaten aufbauen ──────────────────────────────────────────────────
-        let mut resolved_data: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut resolved_data: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
 
         // Alle data-Einträge auflösen (client-Seite)
         for (k, v) in data {
@@ -557,11 +635,26 @@ impl ForgeInstaller {
         }
 
         // Basis-Variablen
-        resolved_data.insert("MINECRAFT_JAR".to_string(), client_jar.display().to_string());
-        resolved_data.insert("INSTALLER".to_string(), installer_path.display().to_string());
-        resolved_data.insert("ROOT".to_string(),
-            libraries_dir.parent().unwrap_or(libraries_dir).display().to_string());
-        resolved_data.insert("LIBRARIES_DIR".to_string(), libraries_dir.display().to_string());
+        resolved_data.insert(
+            "MINECRAFT_JAR".to_string(),
+            client_jar.display().to_string(),
+        );
+        resolved_data.insert(
+            "INSTALLER".to_string(),
+            installer_path.display().to_string(),
+        );
+        resolved_data.insert(
+            "ROOT".to_string(),
+            libraries_dir
+                .parent()
+                .unwrap_or(libraries_dir)
+                .display()
+                .to_string(),
+        );
+        resolved_data.insert(
+            "LIBRARIES_DIR".to_string(),
+            libraries_dir.display().to_string(),
+        );
         resolved_data.insert("SIDE".to_string(), "client".to_string());
         resolved_data.insert("MC_VERSION".to_string(), mc_version.to_string());
         resolved_data.insert("FORGE_VERSION".to_string(), forge_version.to_string());
@@ -569,19 +662,31 @@ impl ForgeInstaller {
         // MCP_VERSION: aus data (bereits aufgelöst) übernehmen, oder aus Parameter setzen.
         // Wichtig: data enthält MCP_VERSION bereits mit resolve_single() aufgelöst (Quotes entfernt).
         // Der Parameter mcp_version kommt aus install_forge_complete und ist dort korrekt extrahiert.
-        if !resolved_data.contains_key("MCP_VERSION") || resolved_data.get("MCP_VERSION").map(|s| s.is_empty()).unwrap_or(true) {
+        if !resolved_data.contains_key("MCP_VERSION")
+            || resolved_data
+                .get("MCP_VERSION")
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
+        {
             tracing::info!("MCP_VERSION aus Parameter: {}", mcp_version);
             resolved_data.insert("MCP_VERSION".to_string(), mcp_version.to_string());
         } else {
-            tracing::info!("MCP_VERSION aus install_profile.data: {}", resolved_data["MCP_VERSION"]);
+            tracing::info!(
+                "MCP_VERSION aus install_profile.data: {}",
+                resolved_data["MCP_VERSION"]
+            );
         }
 
         // Ob BINPATCH vorhanden ist (Forge < ~1.21.6)
         let has_binpatch = data.contains_key("BINPATCH");
-        tracing::info!("BINPATCH vorhanden: {} (Forge 1.21.6+ hat keins mehr)", has_binpatch);
+        tracing::info!(
+            "BINPATCH vorhanden: {} (Forge 1.21.6+ hat keins mehr)",
+            has_binpatch
+        );
 
         // PATCHED-Zielpfad bestimmen
-        let patched_path = data.get("PATCHED")
+        let patched_path = data
+            .get("PATCHED")
             .map(|v| PathBuf::from(resolve_single(&v.client)))
             .unwrap_or_else(|| {
                 // Fallback: bekannter Pfad für gemappte Forge-Client-JAR
@@ -593,16 +698,24 @@ impl ForgeInstaller {
 
         // Wenn PATCHED bereits existiert und Minecraft-Klassen enthält → sofort zurückgeben
         if patched_path.exists()
-            && patched_path.metadata().map(|m| m.len() > 0).unwrap_or(false)
+            && patched_path
+                .metadata()
+                .map(|m| m.len() > 0)
+                .unwrap_or(false)
             && Self::jar_contains_minecraft_class(&patched_path)
         {
-            tracing::info!("✅ Gepatchte JAR bereits vorhanden: {:?}", patched_path.file_name().unwrap_or_default());
+            tracing::info!(
+                "✅ Gepatchte JAR bereits vorhanden: {:?}",
+                patched_path.file_name().unwrap_or_default()
+            );
             return Ok(patched_path);
         }
 
         // Korrupte patched_path entfernen
         if patched_path.exists() {
-            tracing::warn!("patched_path existiert aber enthält keine MC-Klassen → wird neu erzeugt");
+            tracing::warn!(
+                "patched_path existiert aber enthält keine MC-Klassen → wird neu erzeugt"
+            );
             std::fs::remove_file(&patched_path).ok();
         }
 
@@ -623,25 +736,35 @@ impl ForgeInstaller {
             }
 
             // Argumente auflösen: Zuerst {PLATZHALTER} ersetzen, dann [maven] auflösen
-            let mut resolved_args: Vec<String> = proc.args.iter().map(|arg| {
-                // Schritt 1: {PLACEHOLDER} → Wert aus resolved_data
-                let mut r = arg.clone();
-                for (k, v) in &resolved_data {
-                    r = r.replace(&format!("{{{}}}", k), v);
-                }
-                // Schritt 2: [maven:coords] → Dateipfad
-                if r.starts_with('[') && r.ends_with(']') {
-                    r = libraries_dir.join(Self::maven_to_path(&r[1..r.len()-1])).display().to_string();
-                }
-                // Schritt 3: /data/file → installer_data_dir/file
-                if r.starts_with('/') && !r.starts_with("//") && !std::path::Path::new(&r).exists() {
-                    let candidate = installer_data_dir.join(r.trim_start_matches('/'));
-                    if candidate.exists() {
-                        r = candidate.display().to_string();
+            let mut resolved_args: Vec<String> = proc
+                .args
+                .iter()
+                .map(|arg| {
+                    // Schritt 1: {PLACEHOLDER} → Wert aus resolved_data
+                    let mut r = arg.clone();
+                    for (k, v) in &resolved_data {
+                        r = r.replace(&format!("{{{}}}", k), v);
                     }
-                }
-                r
-            }).collect();
+                    // Schritt 2: [maven:coords] → Dateipfad
+                    if r.starts_with('[') && r.ends_with(']') {
+                        r = libraries_dir
+                            .join(Self::maven_to_path(&r[1..r.len() - 1]))
+                            .display()
+                            .to_string();
+                    }
+                    // Schritt 3: /data/file → installer_data_dir/file
+                    if r.starts_with('/')
+                        && !r.starts_with("//")
+                        && !std::path::Path::new(&r).exists()
+                    {
+                        let candidate = installer_data_dir.join(r.trim_start_matches('/'));
+                        if candidate.exists() {
+                            r = candidate.display().to_string();
+                        }
+                    }
+                    r
+                })
+                .collect();
 
             // binarypatcher ohne BINPATCH → überspringen, MC_OFF direkt nach PATCHED kopieren
             if proc.jar.contains("binarypatcher") && !has_binpatch {
@@ -657,7 +780,10 @@ impl ForgeInstaller {
                             tokio::fs::create_dir_all(p).await?;
                         }
                         tokio::fs::copy(&src, &dst).await?;
-                        tracing::info!("MC_OFF → PATCHED kopiert: {:?}", dst.file_name().unwrap_or_default());
+                        tracing::info!(
+                            "MC_OFF → PATCHED kopiert: {:?}",
+                            dst.file_name().unwrap_or_default()
+                        );
                     }
                 }
                 continue;
@@ -668,9 +794,11 @@ impl ForgeInstaller {
             while i < resolved_args.len() {
                 if resolved_args[i].contains('{') && resolved_args[i].contains('}') {
                     tracing::debug!("Entferne ungelösten Platzhalter: {}", resolved_args[i]);
-                    if i > 0 && resolved_args[i-1].starts_with("--") {
+                    if i > 0 && resolved_args[i - 1].starts_with("--") {
                         resolved_args.remove(i);
-                        if i > 0 { resolved_args.remove(i - 1); }
+                        if i > 0 {
+                            resolved_args.remove(i - 1);
+                        }
                         i = i.saturating_sub(1);
                     } else {
                         resolved_args.remove(i);
@@ -681,13 +809,17 @@ impl ForgeInstaller {
             }
 
             // Output-Datei prüfen → überspringen wenn bereits vorhanden
-            let output_path = resolved_args.windows(2)
+            let output_path = resolved_args
+                .windows(2)
                 .find(|w| w[0] == "--output")
                 .map(|w| PathBuf::from(&w[1]));
 
             if let Some(ref out) = output_path {
                 if out.exists() && out.metadata().map(|m| m.len() > 0).unwrap_or(false) {
-                    tracing::info!("Output bereits vorhanden, überspringe: {:?}", out.file_name().unwrap_or_default());
+                    tracing::info!(
+                        "Output bereits vorhanden, überspringe: {:?}",
+                        out.file_name().unwrap_or_default()
+                    );
                     continue;
                 }
                 if let Some(p) = out.parent() {
@@ -701,8 +833,9 @@ impl ForgeInstaller {
                 Self::download_from_maven_repos(
                     download_manager,
                     &Self::maven_to_path(&proc.jar),
-                    &proc_jar
-                ).await;
+                    &proc_jar,
+                )
+                .await;
                 if !proc_jar.exists() {
                     tracing::warn!("Prozessor-JAR fehlt, überspringe: {:?}", proc_jar);
                     continue;
@@ -710,8 +843,9 @@ impl ForgeInstaller {
             }
 
             // Main-Class aus Manifest lesen
-            let main_class = Self::read_manifest_main_class(&proc_jar)
-                .unwrap_or_else(|| "net.minecraftforge.installertools.InstallerToolsMain".to_string());
+            let main_class = Self::read_manifest_main_class(&proc_jar).unwrap_or_else(|| {
+                "net.minecraftforge.installertools.InstallerToolsMain".to_string()
+            });
 
             // Prozessor-Classpath aufbauen
             let mut proc_cp = vec![proc_jar.display().to_string()];
@@ -721,8 +855,9 @@ impl ForgeInstaller {
                     Self::download_from_maven_repos(
                         download_manager,
                         &Self::maven_to_path(dep),
-                        &dep_path
-                    ).await;
+                        &dep_path,
+                    )
+                    .await;
                 }
                 if dep_path.exists() {
                     proc_cp.push(dep_path.display().to_string());
@@ -734,10 +869,12 @@ impl ForgeInstaller {
 
             let cp_sep = if cfg!(windows) { ";" } else { ":" };
             let out = tokio::process::Command::new(&java)
-                .arg("-cp").arg(proc_cp.join(cp_sep))
+                .arg("-cp")
+                .arg(proc_cp.join(cp_sep))
                 .arg(&main_class)
                 .args(&resolved_args)
-                .output().await;
+                .output()
+                .await;
 
             match out {
                 Ok(o) => {
@@ -758,15 +895,21 @@ impl ForgeInstaller {
                         // Wenn ein Output erzeugt wurde, prüfen ob er existiert
                         if let Some(ref out_path) = output_path {
                             if out_path.exists() {
-                                tracing::info!("   Output erzeugt: {:?} ({} bytes)",
+                                tracing::info!(
+                                    "   Output erzeugt: {:?} ({} bytes)",
                                     out_path.file_name().unwrap_or_default(),
-                                    out_path.metadata().map(|m| m.len()).unwrap_or(0));
+                                    out_path.metadata().map(|m| m.len()).unwrap_or(0)
+                                );
                             } else {
                                 tracing::warn!("   ⚠️ Output wurde NICHT erzeugt: {:?}", out_path);
                             }
                         }
                     } else {
-                        tracing::error!("❌ Prozessor FEHLGESCHLAGEN (Exit {}): {}", o.status, proc.jar);
+                        tracing::error!(
+                            "❌ Prozessor FEHLGESCHLAGEN (Exit {}): {}",
+                            o.status,
+                            proc.jar
+                        );
                     }
                 }
                 Err(e) => tracing::error!("Prozessor konnte nicht gestartet werden: {}", e),
@@ -782,7 +925,10 @@ impl ForgeInstaller {
 
         // 1. PATCHED
         if patched_path.exists() && Self::jar_contains_minecraft_class(&patched_path) {
-            tracing::info!("✅ Verwende PATCHED JAR: {:?}", patched_path.file_name().unwrap_or_default());
+            tracing::info!(
+                "✅ Verwende PATCHED JAR: {:?}",
+                patched_path.file_name().unwrap_or_default()
+            );
             return Ok(patched_path);
         }
 
@@ -790,7 +936,10 @@ impl ForgeInstaller {
         if let Some(mc_off_str) = resolved_data.get("MC_OFF") {
             let mc_off = PathBuf::from(mc_off_str);
             if mc_off.exists() && Self::jar_contains_minecraft_class(&mc_off) {
-                tracing::info!("✅ Verwende MC_OFF als --gameJar: {:?}", mc_off.file_name().unwrap_or_default());
+                tracing::info!(
+                    "✅ Verwende MC_OFF als --gameJar: {:?}",
+                    mc_off.file_name().unwrap_or_default()
+                );
                 // Für zukünftige Starts nach PATCHED kopieren
                 if !patched_path.exists() {
                     if let Some(parent) = patched_path.parent() {
@@ -804,13 +953,25 @@ impl ForgeInstaller {
 
         // 3. Suche nach client-{ver}-official.jar in libraries/net/minecraft/
         let official_candidates = [
-            libraries_dir.join(format!("net/minecraft/client/{}/client-{}-official.jar", mc_version, mc_version)),
-            libraries_dir.join(format!("net/minecraft/client/{}-{}/client-{}-{}-srg.jar", mc_version, mcp_version, mc_version, mcp_version)),
-            libraries_dir.join(format!("net/minecraft/client/{}-{}/client-{}-{}-srg.jar", mc_version, "20240808.144430", mc_version, "20240808.144430")),
+            libraries_dir.join(format!(
+                "net/minecraft/client/{}/client-{}-official.jar",
+                mc_version, mc_version
+            )),
+            libraries_dir.join(format!(
+                "net/minecraft/client/{}-{}/client-{}-{}-srg.jar",
+                mc_version, mcp_version, mc_version, mcp_version
+            )),
+            libraries_dir.join(format!(
+                "net/minecraft/client/{}-{}/client-{}-{}-srg.jar",
+                mc_version, "20240808.144430", mc_version, "20240808.144430"
+            )),
         ];
         for candidate in &official_candidates {
             if candidate.exists() && Self::jar_contains_minecraft_class(candidate) {
-                tracing::info!("✅ Verwende gefundene Client-JAR: {:?}", candidate.file_name().unwrap_or_default());
+                tracing::info!(
+                    "✅ Verwende gefundene Client-JAR: {:?}",
+                    candidate.file_name().unwrap_or_default()
+                );
                 return Ok(candidate.clone());
             }
         }
@@ -829,7 +990,11 @@ impl ForgeInstaller {
                         let matches_version = dir_name == mc_version
                             || dir_name.starts_with(&format!("{}-", mc_version));
                         if !matches_version {
-                            tracing::debug!("Überspringe Verzeichnis für andere MC-Version: {} (suche: {})", dir_name, mc_version);
+                            tracing::debug!(
+                                "Überspringe Verzeichnis für andere MC-Version: {} (suche: {})",
+                                dir_name,
+                                mc_version
+                            );
                             continue;
                         }
                         if let Ok(inner) = std::fs::read_dir(&p) {
@@ -840,7 +1005,10 @@ impl ForgeInstaller {
                                     && !fp.to_string_lossy().contains("javadoc")
                                     && Self::jar_contains_minecraft_class(&fp)
                                 {
-                                    tracing::info!("✅ Gefundene MC-Client-JAR: {:?}", fp.file_name().unwrap_or_default());
+                                    tracing::info!(
+                                        "✅ Gefundene MC-Client-JAR: {:?}",
+                                        fp.file_name().unwrap_or_default()
+                                    );
                                     return Ok(fp);
                                 }
                             }
@@ -856,13 +1024,19 @@ impl ForgeInstaller {
             mc_version, forge_version, mc_version, forge_version
         ));
         if forge_client_jar.exists() && Self::jar_contains_minecraft_class(&forge_client_jar) {
-            tracing::info!("✅ Verwende Forge-Client-JAR: {:?}", forge_client_jar.file_name().unwrap_or_default());
+            tracing::info!(
+                "✅ Verwende Forge-Client-JAR: {:?}",
+                forge_client_jar.file_name().unwrap_or_default()
+            );
             return Ok(forge_client_jar);
         }
 
         // 5. Vanilla client_jar als letzter Fallback
         if client_jar.exists() && Self::jar_contains_minecraft_class(client_jar) {
-            tracing::info!("⚠️  Verwende Vanilla client.jar als Fallback: {:?}", client_jar.file_name().unwrap_or_default());
+            tracing::info!(
+                "⚠️  Verwende Vanilla client.jar als Fallback: {:?}",
+                client_jar.file_name().unwrap_or_default()
+            );
             return Ok(client_jar.to_path_buf());
         }
 
@@ -889,9 +1063,15 @@ impl ForgeInstaller {
         let version = parts[2];
         if parts.len() >= 4 {
             // Mit Classifier: artifact-version-classifier.ext
-            format!("{}/{}/{}/{}-{}-{}.{}", group, artifact, version, artifact, version, parts[3], ext)
+            format!(
+                "{}/{}/{}/{}-{}-{}.{}",
+                group, artifact, version, artifact, version, parts[3], ext
+            )
         } else {
-            format!("{}/{}/{}/{}-{}.{}", group, artifact, version, artifact, version, ext)
+            format!(
+                "{}/{}/{}/{}-{}.{}",
+                group, artifact, version, artifact, version, ext
+            )
         }
     }
 
@@ -907,7 +1087,9 @@ impl ForgeInstaller {
                 if let Some(s) = value.as_str() {
                     vec![s.to_string()]
                 } else if let Some(arr) = value.as_array() {
-                    arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
                 } else {
                     vec![]
                 }
@@ -925,18 +1107,21 @@ impl ForgeInstaller {
         let mut entry = archive.by_name("META-INF/MANIFEST.MF").ok()?;
         let mut content = String::new();
         entry.read_to_string(&mut content).ok()?;
-        content.lines()
+        content
+            .lines()
             .find(|l| l.starts_with("Main-Class:"))
             .map(|l| l["Main-Class:".len()..].trim().to_string())
     }
 
     pub fn jar_contains_minecraft_class(jar_path: &Path) -> bool {
-        if !jar_path.exists() { return false; }
+        if !jar_path.exists() {
+            return false;
+        }
         match std::fs::File::open(jar_path) {
             Ok(file) => match zip::ZipArchive::new(file) {
-                Ok(archive) => archive.file_names().any(|n| {
-                    n.starts_with("net/minecraft/") && n.ends_with(".class")
-                }),
+                Ok(archive) => archive
+                    .file_names()
+                    .any(|n| n.starts_with("net/minecraft/") && n.ends_with(".class")),
                 Err(_) => false,
             },
             Err(_) => false,
@@ -985,32 +1170,54 @@ impl ForgeInstaller {
         for repo in &repos {
             let url = format!("{}/{}", repo, maven_path);
             if dm.download_with_hash(&url, dest, None).await.is_ok()
-                && dest.exists() && std::fs::metadata(dest).map(|m| m.len() > 0).unwrap_or(false) {
-                    tracing::debug!("Heruntergeladen von {}: {}", repo, maven_path);
-                    return;
-                }
+                && dest.exists()
+                && std::fs::metadata(dest)
+                    .map(|m| m.len() > 0)
+                    .unwrap_or(false)
+            {
+                tracing::debug!("Heruntergeladen von {}: {}", repo, maven_path);
+                return;
+            }
         }
         tracing::warn!("Konnte {} von keinem Maven-Repo herunterladen", maven_path);
     }
 
-    pub async fn cleanup_old_forge_versions(mc_version: &str, forge_version: &str, libraries_dir: &Path) {
+    pub async fn cleanup_old_forge_versions(
+        mc_version: &str,
+        forge_version: &str,
+        libraries_dir: &Path,
+    ) {
         let target_suffix = format!("{}-{}", mc_version, forge_version);
         let forge_dirs = [
-            "forge", "fmlcore", "fmlloader", "fmlearlydisplay",
-            "javafmllanguage", "lowcodelanguage", "mclanguage", "forge-transformers",
+            "forge",
+            "fmlcore",
+            "fmlloader",
+            "fmlearlydisplay",
+            "javafmllanguage",
+            "lowcodelanguage",
+            "mclanguage",
+            "forge-transformers",
         ];
         let forge_base = libraries_dir.join("net").join("minecraftforge");
         for dir_name in &forge_dirs {
             let dir = forge_base.join(dir_name);
-            if !dir.exists() { continue; }
+            if !dir.exists() {
+                continue;
+            }
             if let Ok(entries) = std::fs::read_dir(&dir) {
                 for entry in entries.flatten() {
                     let vd = entry.path();
-                    if !vd.is_dir() { continue; }
-                    let vname = vd.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+                    if !vd.is_dir() {
+                        continue;
+                    }
+                    let vname = vd
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string();
                     // Exakter MC-Versionsprefix-Check: "1.21.1-" darf NICHT "1.21.11-" matchen!
-                    let is_same_mc = vname == target_suffix
-                        || vname.starts_with(&format!("{}-", mc_version));
+                    let is_same_mc =
+                        vname == target_suffix || vname.starts_with(&format!("{}-", mc_version));
                     if is_same_mc && vname != target_suffix {
                         tracing::info!("Entferne alte Forge-Version: {:?}", vd);
                         tokio::fs::remove_dir_all(&vd).await.ok();
@@ -1030,8 +1237,14 @@ impl ForgeInstaller {
                         let fname = fp.file_name().and_then(|n| n.to_str()).unwrap_or("");
                         if fname.contains("-client") {
                             let size = fp.metadata().map(|m| m.len()).unwrap_or(0);
-                            if size == 0 || (size < 1_000_000 && !Self::jar_contains_minecraft_class(&fp)) {
-                                tracing::warn!("Entferne ungültige/leere client JAR: {:?} ({} bytes)", fp.file_name().unwrap_or_default(), size);
+                            if size == 0
+                                || (size < 1_000_000 && !Self::jar_contains_minecraft_class(&fp))
+                            {
+                                tracing::warn!(
+                                    "Entferne ungültige/leere client JAR: {:?} ({} bytes)",
+                                    fp.file_name().unwrap_or_default(),
+                                    size
+                                );
                                 std::fs::remove_file(&fp).ok();
                             }
                         }
@@ -1046,7 +1259,11 @@ impl ForgeInstaller {
             if let Ok(entries) = std::fs::read_dir(&data_base) {
                 for entry in entries.flatten() {
                     let p = entry.path();
-                    let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+                    let fname = p
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string();
                     // Exakter Versionsprefix: "1.21.1-..." darf nicht für "1.21.11" gelöscht werden
                     let is_same_mc_data = fname.starts_with(&format!("{}-", mc_version))
                         || fname == format!("{}-{}", mc_version, "");
@@ -1076,7 +1293,8 @@ impl ForgeInstaller {
                 "net/minecraft/client/{mc}/client-{mc}.jar",
                 mc = mc_version
             ));
-            let patched_exists = (patched_jar.exists() && Self::jar_contains_minecraft_class(&patched_jar))
+            let patched_exists = (patched_jar.exists()
+                && Self::jar_contains_minecraft_class(&patched_jar))
                 || (patched_mc_jar.exists() && Self::jar_contains_minecraft_class(&patched_mc_jar));
 
             if old_format_file.exists() && !new_format_file.exists() && !patched_exists {
@@ -1090,7 +1308,8 @@ impl ForgeInstaller {
         use crate::api::forge::ForgeClient;
         let client = ForgeClient::new()?;
         let versions = client.get_loader_versions(mc_version).await?;
-        versions.first()
+        versions
+            .first()
             .map(|v| v.forge_version.clone())
             .ok_or_else(|| anyhow::anyhow!("Keine Forge-Version für MC {} gefunden", mc_version))
     }
@@ -1101,10 +1320,14 @@ pub fn find_java_binary() -> String {
 
     if let Ok(home) = std::env::var("JAVA_HOME") {
         let p = PathBuf::from(&home).join("bin").join(java_bin_name);
-        if p.exists() { return p.display().to_string(); }
+        if p.exists() {
+            return p.display().to_string();
+        }
     }
     // Launcher-managed Java – direkt
-    let managed = crate::config::defaults::java_dir().join("bin").join(java_bin_name);
+    let managed = crate::config::defaults::java_dir()
+        .join("bin")
+        .join(java_bin_name);
     if managed.exists() {
         return managed.display().to_string();
     }
@@ -1113,14 +1336,18 @@ pub fn find_java_binary() -> String {
     let java_dir = crate::config::defaults::java_dir();
     for preferred in &["java-21", "java-17", "java-11", "java-8"] {
         let p = java_dir.join(preferred).join("bin").join(java_bin_name);
-        if p.exists() { return p.display().to_string(); }
+        if p.exists() {
+            return p.display().to_string();
+        }
     }
     // Fallback: beliebiges gefundenes Java im java_dir
     if let Ok(entries) = std::fs::read_dir(&java_dir) {
         for entry in entries.flatten() {
             if entry.path().is_dir() {
                 let p = entry.path().join("bin").join(java_bin_name);
-                if p.exists() { return p.display().to_string(); }
+                if p.exists() {
+                    return p.display().to_string();
+                }
             }
         }
     }
@@ -1142,7 +1369,9 @@ pub fn find_java_binary() -> String {
             "/usr/lib/jvm/java-1.8.0-openjdk/bin/java",
             "/usr/bin/java",
         ] {
-            if Path::new(p).exists() { return p.to_string(); }
+            if Path::new(p).exists() {
+                return p.to_string();
+            }
         }
     }
 
@@ -1161,7 +1390,9 @@ pub fn find_java_binary() -> String {
             "C:\\Program Files\\Java\\jre1.8.0_411\\bin\\java.exe",
             "C:\\Program Files\\Java\\jdk1.8.0_411\\bin\\java.exe",
         ] {
-            if Path::new(p).exists() { return p.to_string(); }
+            if Path::new(p).exists() {
+                return p.to_string();
+            }
         }
     }
 
@@ -1182,9 +1413,11 @@ pub fn resolve_arg_placeholders(
     user_type: &str,
     username: &str,
 ) -> String {
-    arg
-        .replace("${library_directory}", &libraries_dir.display().to_string())
-        .replace("${classpath_separator}", if cfg!(windows) { ";" } else { ":" })
+    arg.replace("${library_directory}", &libraries_dir.display().to_string())
+        .replace(
+            "${classpath_separator}",
+            if cfg!(windows) { ";" } else { ":" },
+        )
         .replace("${version_name}", mc_version)
         .replace("${launcher_name}", "lion-launcher")
         .replace("${launcher_version}", env!("CARGO_PKG_VERSION"))

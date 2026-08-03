@@ -18,6 +18,9 @@
             <div class="nav-item active" data-page="profiles" data-i18n-title="nav_profiles" title="Profiles">
                 <i class="bi bi-house"></i>
             </div>
+            <div class="nav-item" data-page="servers-hub" title="Servers">
+                <i class="bi bi-hdd-network"></i>
+            </div>
             <div class="nav-item" data-page="mods" data-i18n-title="nav_content_browser" title="Content Browser">
                 <i class="bi bi-grid"></i>
             </div>
@@ -51,6 +54,18 @@
                 <div class="content">
                     <div class="profiles-grid" id="profiles-grid">
                         <div class="loading" data-i18n="loading_profiles">Loading profiles...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Local Servers Page -->
+            <div id="page-servers-hub" class="page hidden">
+                <div class="header">
+                    <h1>Servers</h1>
+                </div>
+                <div class="content">
+                    <div id="servers-hub-content">
+                        <div class="loading">Loading servers...</div>
                     </div>
                 </div>
             </div>

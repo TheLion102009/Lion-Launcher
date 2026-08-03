@@ -1,17 +1,21 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use serde::Deserialize;
 
 // NeoForge Installation und Launch-Logik
 // Basierend auf PandoraLauncher und PrismLauncher Best Practices
 
 /// Ermittelt die neueste NeoForge-Version für eine Minecraft-Version dynamisch von der API
 async fn get_latest_neoforge_version(mc_version: &str) -> Result<String> {
-    tracing::info!("🔍 Searching for NeoForge versions for Minecraft {}...", mc_version);
+    tracing::info!(
+        "🔍 Searching for NeoForge versions for Minecraft {}...",
+        mc_version
+    );
 
     // Verwende die NeoForge Maven-Metadata API
-    let maven_metadata_url = "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml";
+    let maven_metadata_url =
+        "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml";
 
     let response = match reqwest::get(maven_metadata_url).await {
         Ok(r) => r,
@@ -54,13 +58,20 @@ async fn get_latest_neoforge_version(mc_version: &str) -> Result<String> {
         sorted.sort_by(|a, b| compare_versions(a, b));
 
         let latest = sorted.last().unwrap().clone();
-        tracing::info!("✅ Found NeoForge {} for Minecraft {} (from {} candidates)",
-            latest, mc_version, matching_versions.len());
+        tracing::info!(
+            "✅ Found NeoForge {} for Minecraft {} (from {} candidates)",
+            latest,
+            mc_version,
+            matching_versions.len()
+        );
         return Ok(latest);
     }
 
     // Fallback wenn nichts gefunden
-    tracing::warn!("⚠️  No matching NeoForge version found for MC {}", mc_version);
+    tracing::warn!(
+        "⚠️  No matching NeoForge version found for MC {}",
+        mc_version
+    );
     get_fallback_version(mc_version)
 }
 
@@ -109,10 +120,12 @@ fn filter_matching_versions(all_versions: &[String], mc_version: &str) -> Vec<St
 
 /// Vergleicht zwei Versionsnummern
 fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
-    let a_parts: Vec<u32> = a.split('.')
+    let a_parts: Vec<u32> = a
+        .split('.')
         .filter_map(|s| s.split('-').next()?.parse().ok())
         .collect();
-    let b_parts: Vec<u32> = b.split('.')
+    let b_parts: Vec<u32> = b
+        .split('.')
         .filter_map(|s| s.split('-').next()?.parse().ok())
         .collect();
 
@@ -148,7 +161,11 @@ fn get_fallback_version(mc_version: &str) -> Result<String> {
         "21.1.219"
     };
 
-    tracing::info!("📋 Using fallback NeoForge {} for Minecraft {}", fallback, mc_version);
+    tracing::info!(
+        "📋 Using fallback NeoForge {} for Minecraft {}",
+        fallback,
+        mc_version
+    );
     Ok(fallback.to_string())
 }
 
@@ -215,14 +232,25 @@ pub async fn install_neoforge(
         neoforge_version.to_string()
     };
 
-    tracing::info!("🔨 Installing NeoForge {} for Minecraft {}", actual_version, mc_version);
+    tracing::info!(
+        "🔨 Installing NeoForge {} for Minecraft {}",
+        actual_version,
+        mc_version
+    );
 
     // 1. Lade den NeoForge-Installer
     let installer_path = download_neoforge_installer(&actual_version, libraries_dir).await?;
 
     // 2. Führe den Installer aus um die PATCHED-Client-JAR zu erstellen
     let launcher_dir = libraries_dir.parent().unwrap();
-    run_neoforge_installer(&installer_path, launcher_dir, java_path, mc_version, &actual_version).await?;
+    run_neoforge_installer(
+        &installer_path,
+        launcher_dir,
+        java_path,
+        mc_version,
+        &actual_version,
+    )
+    .await?;
 
     // 3. Extrahiere die version.json aus dem Installer
     let version_json = extract_version_json(&installer_path)?;
@@ -235,7 +263,8 @@ pub async fn install_neoforge(
     tracing::info!("✅ Detected NeoForm version: {}", neoform_version);
 
     // 4. Finde die Game-JAR (SRG-JAR oder patched-JAR je nach NeoForge-Version)
-    let minecraft_jar = find_game_jar(mc_version, &neoform_version, &actual_version, libraries_dir)?;
+    let minecraft_jar =
+        find_game_jar(mc_version, &neoform_version, &actual_version, libraries_dir)?;
     tracing::info!("✅ Found game JAR: {:?}", minecraft_jar);
 
     // 5. Baue Classpath und JVM-Args
@@ -248,7 +277,10 @@ pub async fn install_neoforge(
     tracing::info!("⚠️  SRG-JAR wird NUR über --gameJar geladen, NICHT im Classpath!");
 
     // Lade NeoForge Libraries
-    tracing::info!("📦 Processing {} NeoForge libraries...", version.libraries.len());
+    tracing::info!(
+        "📦 Processing {} NeoForge libraries...",
+        version.libraries.len()
+    );
     for lib in &version.libraries {
         // Konvertiere Maven-Koordinate zu Pfad
         // Format: group.id:artifact:version -> group/id/artifact/version/artifact-version.jar
@@ -262,8 +294,10 @@ pub async fn install_neoforge(
         let artifact = parts[1];
         let lib_version = parts[2];
 
-        let lib_path = libraries_dir.join(format!("{}/{}/{}/{}-{}.jar",
-            group, artifact, lib_version, artifact, lib_version));
+        let lib_path = libraries_dir.join(format!(
+            "{}/{}/{}/{}-{}.jar",
+            group, artifact, lib_version, artifact, lib_version
+        ));
 
         // Lade Library herunter wenn sie fehlt
         if !lib_path.exists() {
@@ -271,7 +305,9 @@ pub async fn install_neoforge(
                 if let Some(artifact_info) = &downloads.artifact {
                     tracing::info!("📥 Downloading: {}", lib.name);
 
-                    tokio::fs::create_dir_all(lib_path.parent().unwrap()).await.ok();
+                    tokio::fs::create_dir_all(lib_path.parent().unwrap())
+                        .await
+                        .ok();
 
                     let response = reqwest::get(&artifact_info.url).await?;
                     let bytes = response.bytes().await?;
@@ -286,29 +322,34 @@ pub async fn install_neoforge(
         let path_str = lib_path.display().to_string();
 
         // Bestimmte Libraries gehören in den Module Path
-        if lib.name.contains("bootstraplauncher") ||
-           lib.name.contains("securejarhandler") ||
-           lib.name.contains("JarJar") ||
-           lib.name.contains("asm") {
+        if lib.name.contains("bootstraplauncher")
+            || lib.name.contains("securejarhandler")
+            || lib.name.contains("JarJar")
+            || lib.name.contains("asm")
+        {
             module_path.push(path_str);
         } else {
             classpath.push(path_str);
         }
     }
 
-    tracing::info!("✅ Libraries loaded: {} classpath, {} module path", classpath.len(), module_path.len());
+    tracing::info!(
+        "✅ Libraries loaded: {} classpath, {} module path",
+        classpath.len(),
+        module_path.len()
+    );
 
     tracing::info!("📦 Adding Vanilla libraries (LWJGL, etc.)...");
 
     let blacklist = [
-        "asm",                    // ASM ist in NeoForge mit neuerer Version
-        "bootstraplauncher",      // Bereits im Module Path
-        "securejarhandler",       // Bereits im Module Path
-        "JarJar",                 // Bereits im Module Path
-        "eventbus",               // Teil von NeoForge
-        "coremods",               // Teil von NeoForge
-        "modlauncher",            // Bereits geladen
-        "neoforge",               // Natürlich!
+        "asm",               // ASM ist in NeoForge mit neuerer Version
+        "bootstraplauncher", // Bereits im Module Path
+        "securejarhandler",  // Bereits im Module Path
+        "JarJar",            // Bereits im Module Path
+        "eventbus",          // Teil von NeoForge
+        "coremods",          // Teil von NeoForge
+        "modlauncher",       // Bereits geladen
+        "neoforge",          // Natürlich!
     ];
 
     for vanilla_lib in std::env::split_paths(std::ffi::OsStr::new(vanilla_classpath))
@@ -324,9 +365,9 @@ pub async fn install_neoforge(
         }
 
         // Prüfe ob die Library in der Blacklist ist
-        let is_blacklisted = blacklist.iter().any(|&blocked| {
-            vanilla_lib.to_lowercase().contains(blocked)
-        });
+        let is_blacklisted = blacklist
+            .iter()
+            .any(|&blocked| vanilla_lib.to_lowercase().contains(blocked));
 
         if is_blacklisted {
             tracing::debug!("⚠️  Skipping blacklisted library: {}", vanilla_lib);
@@ -335,7 +376,10 @@ pub async fn install_neoforge(
 
         classpath.push(vanilla_lib.to_string());
     }
-    tracing::info!("✅ Total libraries: {} entries (after filtering)", classpath.len());
+    tracing::info!(
+        "✅ Total libraries: {} entries (after filtering)",
+        classpath.len()
+    );
 
     // 6. Parse JVM-Argumente aus der version.json
     let mut jvm_args = Vec::new();
@@ -345,7 +389,10 @@ pub async fn install_neoforge(
                 if let Some(s) = arg.as_str() {
                     let processed = s
                         .replace("${library_directory}", &libraries_dir.display().to_string())
-                        .replace("${classpath_separator}", if cfg!(windows) { ";" } else { ":" })
+                        .replace(
+                            "${classpath_separator}",
+                            if cfg!(windows) { ";" } else { ":" },
+                        )
                         .replace("${version_name}", &actual_version);
                     jvm_args.push(processed);
                 }
@@ -403,7 +450,9 @@ async fn download_neoforge_installer(
             tracing::info!("✅ NeoForge installer already exists and is valid");
             return Ok(installer_path);
         } else {
-            tracing::warn!("⚠️  NeoForge installer is corrupted (bad ZIP magic), re-downloading...");
+            tracing::warn!(
+                "⚠️  NeoForge installer is corrupted (bad ZIP magic), re-downloading..."
+            );
             tokio::fs::remove_file(&installer_path).await.ok();
         }
     }
@@ -443,11 +492,17 @@ async fn run_neoforge_installer(
     ));
     tracing::info!("🔍 Prüfe patched client JAR: {:?}", patched_client_jar);
     if patched_client_jar.exists() && is_valid_zip_file(&patched_client_jar) {
-        tracing::info!("✅ Patched client JAR für NeoForge {} existiert bereits, Installer wird übersprungen", neoforge_version);
+        tracing::info!(
+            "✅ Patched client JAR für NeoForge {} existiert bereits, Installer wird übersprungen",
+            neoforge_version
+        );
         return Ok(());
     }
 
-    tracing::info!("⚠️  Patched client JAR für NeoForge {} fehlt, Installer wird ausgeführt...", neoforge_version);
+    tracing::info!(
+        "⚠️  Patched client JAR für NeoForge {} fehlt, Installer wird ausgeführt...",
+        neoforge_version
+    );
 
     // Erstelle launcher_profiles.json falls nicht vorhanden
     let profiles_path = launcher_dir.join("launcher_profiles.json");
@@ -508,11 +563,10 @@ fn extract_neoform_version(version: &NeoForgeVersion) -> Result<String> {
 
 /// Extrahiert die FML-Version aus der NeoForge version.json
 fn extract_fml_version(version: &NeoForgeVersion) -> String {
-    extract_game_arg_value(version, "--fml.fmlVersion")
-        .unwrap_or_else(|| {
-            tracing::warn!("--fml.fmlVersion not found in version.json, using fallback 4.0.42");
-            "4.0.42".to_string()
-        })
+    extract_game_arg_value(version, "--fml.fmlVersion").unwrap_or_else(|| {
+        tracing::warn!("--fml.fmlVersion not found in version.json, using fallback 4.0.42");
+        "4.0.42".to_string()
+    })
 }
 
 /// Allgemeine Hilfsfunktion: Sucht den Wert nach einem bestimmten Schlüssel in arguments.game
@@ -536,8 +590,18 @@ fn extract_game_arg_value(version: &NeoForgeVersion, key: &str) -> Option<String
 }
 
 /// Findet die Game-JAR: der durch den Installer erstellte PATCHED Client JAR
-fn find_game_jar(mc_version: &str, neoform_version: &str, neoforge_version: &str, libraries_dir: &Path) -> Result<PathBuf> {
-    tracing::info!("🔍 Suche NeoForge Game-JAR (NeoForge {}, MC {}, NeoForm {})...", neoforge_version, mc_version, neoform_version);
+fn find_game_jar(
+    mc_version: &str,
+    neoform_version: &str,
+    neoforge_version: &str,
+    libraries_dir: &Path,
+) -> Result<PathBuf> {
+    tracing::info!(
+        "🔍 Suche NeoForge Game-JAR (NeoForge {}, MC {}, NeoForm {})...",
+        neoforge_version,
+        mc_version,
+        neoform_version
+    );
 
     // PRIMÄR (NeoForge 21.x / 1.21.x): Der PATCHED Client JAR der durch Installer-Prozessoren erstellt wird.
     // Koordinate: [net.neoforged:neoforge:{version}:client]
@@ -564,7 +628,10 @@ fn find_game_jar(mc_version: &str, neoform_version: &str, neoforge_version: &str
                     let ver = entry.file_name().to_string_lossy().to_string();
                     let jar = path.join(format!("minecraft-client-patched-{}.jar", ver));
                     if jar.exists() && is_valid_zip_file(&jar) {
-                        tracing::info!("  ✅ Alter minecraft-client-patched JAR gefunden: {:?}", jar);
+                        tracing::info!(
+                            "  ✅ Alter minecraft-client-patched JAR gefunden: {:?}",
+                            jar
+                        );
                         return Ok(jar);
                     }
                 }
@@ -641,7 +708,10 @@ pub fn build_launch_command(
     // (z.B. bei AppImage-Launch oder bestimmten Compositor-Setups).
     #[cfg(target_os = "linux")]
     {
-        cmd.env("DISPLAY", std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string()));
+        cmd.env(
+            "DISPLAY",
+            std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string()),
+        );
         if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
             cmd.env("XDG_RUNTIME_DIR", xdg);
         }
@@ -689,7 +759,11 @@ pub fn build_launch_command(
                         let symlink_target = natives_dir.join(unversioned_name);
                         if !symlink_target.exists() {
                             std::os::unix::fs::symlink(entry.path(), &symlink_target).ok();
-                            tracing::info!("Narrator-Fix: Symlink {} → {}", symlink_target.display(), entry.path().display());
+                            tracing::info!(
+                                "Narrator-Fix: Symlink {} → {}",
+                                symlink_target.display(),
+                                entry.path().display()
+                            );
                         }
                         flite_found = true;
                         break 'search;
@@ -708,7 +782,10 @@ pub fn build_launch_command(
     cmd.arg(format!("-DignoreList={}.jar,client-extra", version));
     cmd.arg(format!("-DlibraryDirectory={}", libraries_dir.display()));
     let cp_sep = if cfg!(windows) { ";" } else { ":" };
-    cmd.arg(format!("-DlegacyClassPath={}", installation.classpath.join(cp_sep)));
+    cmd.arg(format!(
+        "-DlegacyClassPath={}",
+        installation.classpath.join(cp_sep)
+    ));
 
     // NeoForge JVM-Args
     for arg in &installation.jvm_args {

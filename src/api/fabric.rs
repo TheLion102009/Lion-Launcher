@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
+use crate::api::client::ApiClient;
 use anyhow::Result;
 use serde::Deserialize;
-use crate::api::client::ApiClient;
 
 const FABRIC_META_URL: &str = "https://meta.fabricmc.net/v2";
 
@@ -17,7 +17,10 @@ impl FabricClient {
         })
     }
 
-    pub async fn get_loader_versions(&self, minecraft_version: &str) -> Result<Vec<FabricLoaderVersion>> {
+    pub async fn get_loader_versions(
+        &self,
+        minecraft_version: &str,
+    ) -> Result<Vec<FabricLoaderVersion>> {
         let url = format!("{}/versions/loader/{}", FABRIC_META_URL, minecraft_version);
         let versions: Vec<FabricLoaderVersion> = self.client.get_json(&url).await?;
         Ok(versions)
@@ -73,7 +76,8 @@ impl MainClass {
     pub fn get_client_class(&self) -> String {
         match self {
             MainClass::Simple(s) => s.clone(),
-            MainClass::Map(m) => m.get("client")
+            MainClass::Map(m) => m
+                .get("client")
                 .or_else(|| m.values().next())
                 .cloned()
                 .unwrap_or_else(|| "net.fabricmc.loader.impl.launch.knot.KnotClient".to_string()),

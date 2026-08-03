@@ -5,12 +5,12 @@
 
 use tauri::Manager;
 
-mod gui;
-mod core;
 mod api;
-mod utils;
-mod types;
 mod config;
+mod core;
+mod gui;
+mod types;
+mod utils;
 
 fn main() {
     #[cfg(target_os = "linux")]
@@ -96,6 +96,17 @@ fn main() {
             gui::launch_server,
             gui::add_server,
             gui::remove_server,
+            // Local Server Profiles
+            gui::get_server_profiles,
+            gui::create_server_profile,
+            gui::delete_server_profile,
+            gui::get_server_properties,
+            gui::save_server_properties,
+            gui::get_server_content,
+            gui::import_server_content_file,
+            gui::remove_server_content_file,
+            gui::get_server_console_output,
+            gui::open_server_folder,
             // Auth
             gui::auth::get_accounts,
             gui::auth::get_active_account,

@@ -1,16 +1,16 @@
 #![allow(dead_code)]
 
+mod forge;
 mod installer;
 mod neoforge;
-mod forge;
 pub mod worlds;
 
-use anyhow::{Result, bail};
+use crate::config::defaults;
+use crate::core::download::DownloadManager;
+use crate::types::profile::Profile;
+use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use crate::types::profile::Profile;
-use crate::core::download::DownloadManager;
-use crate::config::defaults;
 
 const MOJANG_MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const RESOURCES_URL: &str = "https://resources.download.minecraft.net";
@@ -23,10 +23,11 @@ const RESOURCES_URL: &str = "https://resources.download.minecraft.net";
 // Format: (status_text: String, percent: u8)
 type ProgressMsg = (String, u8);
 static LAUNCH_PROGRESS_TX: std::sync::OnceLock<
-    std::sync::Mutex<Option<std::sync::mpsc::SyncSender<ProgressMsg>>>
+    std::sync::Mutex<Option<std::sync::mpsc::SyncSender<ProgressMsg>>>,
 > = std::sync::OnceLock::new();
 
-fn launch_progress_tx() -> &'static std::sync::Mutex<Option<std::sync::mpsc::SyncSender<ProgressMsg>>> {
+fn launch_progress_tx(
+) -> &'static std::sync::Mutex<Option<std::sync::mpsc::SyncSender<ProgressMsg>>> {
     LAUNCH_PROGRESS_TX.get_or_init(|| std::sync::Mutex::new(None))
 }
 
@@ -73,14 +74,16 @@ fn set_extra_launch_args(args: Vec<String>) {
 
 /// Nimmt die Extra-Launch-Argumente heraus und leert den Puffer.
 fn take_extra_launch_args() -> Vec<String> {
-    extra_launch_args().lock()
+    extra_launch_args()
+        .lock()
         .map(|mut guard| std::mem::take(&mut *guard))
         .unwrap_or_default()
 }
 
 /// Liest die Extra-Launch-Argumente (ohne sie zu leeren).
 fn get_extra_launch_args() -> Vec<String> {
-    extra_launch_args().lock()
+    extra_launch_args()
+        .lock()
         .map(|guard| guard.clone())
         .unwrap_or_default()
 }
@@ -90,8 +93,9 @@ static LAUNCH_WARNINGS: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> =
     std::sync::OnceLock::new();
 
 /// Globale Map: Profile-ID → PID der laufenden Minecraft-Instanz
-static RUNNING_PROCESSES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u32>>> =
-    std::sync::OnceLock::new();
+static RUNNING_PROCESSES: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, u32>>,
+> = std::sync::OnceLock::new();
 
 fn running_processes() -> &'static std::sync::Mutex<std::collections::HashMap<String, u32>> {
     RUNNING_PROCESSES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
@@ -113,7 +117,8 @@ pub fn unregister_running_process(profile_id: &str) {
 
 /// Gibt alle aktuell laufenden Profil-IDs zurück.
 pub fn get_running_profile_ids() -> Vec<String> {
-    running_processes().lock()
+    running_processes()
+        .lock()
         .map(|m| m.keys().cloned().collect())
         .unwrap_or_default()
 }
@@ -121,20 +126,29 @@ pub fn get_running_profile_ids() -> Vec<String> {
 /// Beendet die laufende Minecraft-Instanz eines Profils.
 pub fn kill_running_process(profile_id: &str) -> bool {
     let pid = {
-        running_processes().lock().ok()
+        running_processes()
+            .lock()
+            .ok()
             .and_then(|m| m.get(profile_id).copied())
     };
     if let Some(pid) = pid {
-        tracing::info!("Killing Minecraft process PID {} for profile {}", pid, profile_id);
+        tracing::info!(
+            "Killing Minecraft process PID {} for profile {}",
+            pid,
+            profile_id
+        );
         #[cfg(unix)]
         {
-            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM); }
+            unsafe {
+                libc::kill(pid as libc::pid_t, libc::SIGTERM);
+            }
         }
         #[cfg(windows)]
         {
             std::process::Command::new("taskkill")
                 .args(["/PID", &pid.to_string(), "/F"])
-                .spawn().ok();
+                .spawn()
+                .ok();
         }
         unregister_running_process(profile_id);
         true
@@ -156,7 +170,10 @@ pub fn add_launch_warning(msg: impl Into<String>) {
 
 /// Nimmt alle akkumulierten Warnungen heraus und leert den Puffer.
 pub fn take_launch_warnings() -> Vec<String> {
-    launch_warnings().lock().map(|mut w| std::mem::take(&mut *w)).unwrap_or_default()
+    launch_warnings()
+        .lock()
+        .map(|mut w| std::mem::take(&mut *w))
+        .unwrap_or_default()
 }
 
 pub struct MinecraftLauncher {
@@ -275,14 +292,21 @@ fn maven_to_path(maven: &str) -> String {
         let group = parts[0].replace('.', "/");
         let artifact = parts[1];
         let version = parts[2];
-        format!("{}/{}/{}/{}-{}.jar", group, artifact, version, artifact, version)
+        format!(
+            "{}/{}/{}/{}-{}.jar",
+            group, artifact, version, artifact, version
+        )
     } else {
         maven.to_string()
     }
 }
 
 fn classpath_separator() -> &'static str {
-    if cfg!(windows) { ";" } else { ":" }
+    if cfg!(windows) {
+        ";"
+    } else {
+        ":"
+    }
 }
 
 /// Erzeugt plattform-optimierte JVM Performance-Flags basierend auf OS und Java-Version.
@@ -362,7 +386,7 @@ impl MinecraftLauncher {
         username: &str,
         uuid: &str,
         access_token: Option<&str>,
-        extra_args: Vec<String>
+        extra_args: Vec<String>,
     ) -> Result<()> {
         tracing::info!("Launching with extra args: {:?}", extra_args);
 
@@ -378,7 +402,13 @@ impl MinecraftLauncher {
     }
 
     /// Startet Minecraft und gibt Warnungen zurück (z.B. Quilt-Fallback-Info).
-    pub async fn launch(&self, profile: &Profile, username: &str, uuid: &str, access_token: Option<&str>) -> Result<Vec<String>> {
+    pub async fn launch(
+        &self,
+        profile: &Profile,
+        username: &str,
+        uuid: &str,
+        access_token: Option<&str>,
+    ) -> Result<Vec<String>> {
         // Warnungs-Puffer leeren (Überrest aus vorherigem Start)
         take_launch_warnings();
 
@@ -386,7 +416,13 @@ impl MinecraftLauncher {
         let game_dir = Path::new(&profile.game_dir);
         let loader = &profile.loader.loader;
 
-        tracing::info!("Preparing Minecraft {} with {:?} for {} (UUID: {})", version, loader, username, uuid);
+        tracing::info!(
+            "Preparing Minecraft {} with {:?} for {} (UUID: {})",
+            version,
+            loader,
+            username,
+            uuid
+        );
         send_launch_progress("Lade Version-Info...", 5);
 
         // Version-Info laden
@@ -415,28 +451,47 @@ impl MinecraftLauncher {
             send_launch_progress("Lade Minecraft Client-JAR...", 15);
             tokio::fs::create_dir_all(client_jar.parent().unwrap()).await?;
             self.download_manager
-                .download_with_hash(&version_info.downloads.client.url, &client_jar, Some(&version_info.downloads.client.sha1))
+                .download_with_hash(
+                    &version_info.downloads.client.url,
+                    &client_jar,
+                    Some(&version_info.downloads.client.sha1),
+                )
                 .await?;
         }
 
         // Libraries (Vanilla)
         tracing::info!("Checking libraries...");
         send_launch_progress("Lade Libraries...", 30);
-        let classpath = self.download_libraries(&version_info, &libraries_dir, &natives_dir).await?;
+        let classpath = self
+            .download_libraries(&version_info, &libraries_dir, &natives_dir)
+            .await?;
 
         // Assets
         tracing::info!("Checking assets...");
-        send_launch_progress("Lade Assets (Sounds, Texturen)... Das kann beim ersten Mal 1-2 Min. dauern.", 50);
-        self.download_assets(&version_info.assetIndex, &assets_dir).await?;
+        send_launch_progress(
+            "Lade Assets (Sounds, Texturen)... Das kann beim ersten Mal 1-2 Min. dauern.",
+            50,
+        );
+        self.download_assets(&version_info.assetIndex, &assets_dir)
+            .await?;
 
         // NeoForge/Forge verwendet einen speziellen Launch-Mechanismus
         if matches!(loader, crate::types::version::ModLoader::NeoForge) {
             send_launch_progress("Installiere NeoForge...", 70);
             self.launch_neoforge_new(
-                profile, &version_info, &classpath, &libraries_dir,
-                &versions_dir, &assets_dir, &natives_dir, game_dir,
-                username, uuid, access_token
-            ).await?;
+                profile,
+                &version_info,
+                &classpath,
+                &libraries_dir,
+                &versions_dir,
+                &assets_dir,
+                &natives_dir,
+                game_dir,
+                username,
+                uuid,
+                access_token,
+            )
+            .await?;
             send_launch_progress("Minecraft gestartet!", 100);
             return Ok(take_launch_warnings());
         }
@@ -444,61 +499,82 @@ impl MinecraftLauncher {
         if matches!(loader, crate::types::version::ModLoader::Forge) {
             send_launch_progress("Installiere Forge...", 70);
             self.launch_neoforge_or_forge(
-                profile, &version_info, &client_jar, &classpath,
-                &libraries_dir, &assets_dir, &natives_dir, game_dir,
-                username, uuid, access_token
-            ).await?;
+                profile,
+                &version_info,
+                &client_jar,
+                &classpath,
+                &libraries_dir,
+                &assets_dir,
+                &natives_dir,
+                game_dir,
+                username,
+                uuid,
+                access_token,
+            )
+            .await?;
             send_launch_progress("Minecraft gestartet!", 100);
             return Ok(take_launch_warnings());
         }
 
         // Mod-Loader-spezifische Konfiguration für Fabric/Quilt/Vanilla
-        let (main_class, final_classpath) = match loader {
-            crate::types::version::ModLoader::Fabric => {
-                tracing::info!("Installing Fabric loader...");
-                send_launch_progress("Installiere Fabric Loader...", 70);
-                let (fabric_classpath, fabric_main_class) = self.install_fabric(version, &libraries_dir).await?;
+        let (main_class, final_classpath) =
+            match loader {
+                crate::types::version::ModLoader::Fabric => {
+                    tracing::info!("Installing Fabric loader...");
+                    send_launch_progress("Installiere Fabric Loader...", 70);
+                    let (fabric_classpath, fabric_main_class) =
+                        self.install_fabric(version, &libraries_dir).await?;
 
-                let mut cp_entries = split_classpath_entries(&fabric_classpath);
-                cp_entries.extend(
-                    split_classpath_entries(&classpath)
-                        .into_iter()
-                        .filter(|path| !path.contains("/org/ow2/asm/") && !path.contains("\\org\\ow2\\asm\\"))
-                );
-                cp_entries.push(client_jar.display().to_string());
-                let cp = join_classpath_entries(cp_entries);
-                (fabric_main_class, cp)
-            }
-            crate::types::version::ModLoader::Quilt => {
-                tracing::info!("Installing Quilt loader...");
-                let (quilt_classpath, quilt_main_class) = self.install_quilt(version, &libraries_dir).await?;
+                    let mut cp_entries = split_classpath_entries(&fabric_classpath);
+                    cp_entries.extend(split_classpath_entries(&classpath).into_iter().filter(
+                        |path| {
+                            !path.contains("/org/ow2/asm/") && !path.contains("\\org\\ow2\\asm\\")
+                        },
+                    ));
+                    cp_entries.push(client_jar.display().to_string());
+                    let cp = join_classpath_entries(cp_entries);
+                    (fabric_main_class, cp)
+                }
+                crate::types::version::ModLoader::Quilt => {
+                    tracing::info!("Installing Quilt loader...");
+                    let (quilt_classpath, quilt_main_class) =
+                        self.install_quilt(version, &libraries_dir).await?;
 
-                let mut cp_entries = split_classpath_entries(&quilt_classpath);
-                cp_entries.extend(
-                    split_classpath_entries(&classpath)
-                        .into_iter()
-                        .filter(|path| !path.contains("/org/ow2/asm/") && !path.contains("\\org\\ow2\\asm\\"))
-                );
-                cp_entries.push(client_jar.display().to_string());
-                let cp = join_classpath_entries(cp_entries);
-                (quilt_main_class, cp)
-            }
-            crate::types::version::ModLoader::Vanilla => {
-                let mut cp_entries = split_classpath_entries(&classpath);
-                cp_entries.push(client_jar.display().to_string());
-                let cp = join_classpath_entries(cp_entries);
-                (version_info.mainClass.clone(), cp)
-            }
-            _ => unreachable!()
-        };
+                    let mut cp_entries = split_classpath_entries(&quilt_classpath);
+                    cp_entries.extend(split_classpath_entries(&classpath).into_iter().filter(
+                        |path| {
+                            !path.contains("/org/ow2/asm/") && !path.contains("\\org\\ow2\\asm\\")
+                        },
+                    ));
+                    cp_entries.push(client_jar.display().to_string());
+                    let cp = join_classpath_entries(cp_entries);
+                    (quilt_main_class, cp)
+                }
+                crate::types::version::ModLoader::Vanilla => {
+                    let mut cp_entries = split_classpath_entries(&classpath);
+                    cp_entries.push(client_jar.display().to_string());
+                    let cp = join_classpath_entries(cp_entries);
+                    (version_info.mainClass.clone(), cp)
+                }
+                _ => unreachable!(),
+            };
 
         // Standard-Launch für Fabric/Quilt/Vanilla
         send_launch_progress("Starte Minecraft...", 90);
         self.launch_standard(
-            profile, &main_class, &final_classpath, &client_jar,
-            &assets_dir, &natives_dir, game_dir, &version_info,
-            username, uuid, access_token
-        ).await?;
+            profile,
+            &main_class,
+            &final_classpath,
+            &client_jar,
+            &assets_dir,
+            &natives_dir,
+            game_dir,
+            &version_info,
+            username,
+            uuid,
+            access_token,
+        )
+        .await?;
         send_launch_progress("Minecraft gestartet!", 100);
 
         Ok(take_launch_warnings())
@@ -527,21 +603,37 @@ impl MinecraftLauncher {
             &profile.loader.version
         };
 
-        tracing::info!("🚀 Launching NeoForge {} for Minecraft {}", loader_version, version);
+        tracing::info!(
+            "🚀 Launching NeoForge {} for Minecraft {}",
+            loader_version,
+            version
+        );
 
         // Wichtige Verzeichnisse sicherstellen
         tokio::fs::create_dir_all(game_dir.join("mods")).await.ok();
-        tokio::fs::create_dir_all(game_dir.join("config")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("config"))
+            .await
+            .ok();
         tokio::fs::create_dir_all(game_dir.join("logs")).await.ok();
         tokio::fs::create_dir_all(game_dir.join("saves")).await.ok();
-        tokio::fs::create_dir_all(game_dir.join("resourcepacks")).await.ok();
-        tracing::info!("mods/ dir: {:?} ({} files)",
+        tokio::fs::create_dir_all(game_dir.join("resourcepacks"))
+            .await
+            .ok();
+        tracing::info!(
+            "mods/ dir: {:?} ({} files)",
             game_dir.join("mods"),
-            std::fs::read_dir(game_dir.join("mods")).map(|d| d.count()).unwrap_or(0)
+            std::fs::read_dir(game_dir.join("mods"))
+                .map(|d| d.count())
+                .unwrap_or(0)
         );
 
         // Finde Java – verwende die von Mojang angegebene Mindestversion (mindestens 21 für NeoForge)
-        let required_java = version_info.javaVersion.as_ref().map(|j| j.majorVersion).unwrap_or(21).max(21);
+        let required_java = version_info
+            .javaVersion
+            .as_ref()
+            .map(|j| j.majorVersion)
+            .unwrap_or(21)
+            .max(21);
         tracing::info!("Required Java version: {}", required_java);
         let java_path = self.ensure_java_installed(required_java, None).await?;
 
@@ -553,7 +645,8 @@ impl MinecraftLauncher {
             versions_dir,
             &java_path,
             vanilla_classpath,
-        ).await?;
+        )
+        .await?;
 
         // Baue das Launch-Command
         let memory_mb = profile.memory_mb.unwrap_or(4096);
@@ -623,7 +716,11 @@ impl MinecraftLauncher {
                     if status.success() {
                         tracing::info!("✅ Minecraft (PID {}) exited successfully", pid);
                     } else {
-                        tracing::warn!("⚠️  Minecraft (PID {}) exited with status: {}", pid, status);
+                        tracing::warn!(
+                            "⚠️  Minecraft (PID {}) exited with status: {}",
+                            pid,
+                            status
+                        );
                     }
                 }
                 Err(e) => tracing::error!("❌ Error waiting for Minecraft: {}", e),
@@ -673,11 +770,12 @@ impl MinecraftLauncher {
         tracing::info!("=== Forge Launch ===");
 
         // Loader-Version auflösen
-        let loader_version = if profile.loader.version == "latest" || profile.loader.version.is_empty() {
-            self.resolve_latest_forge_version(version).await?
-        } else {
-            profile.loader.version.clone()
-        };
+        let loader_version =
+            if profile.loader.version == "latest" || profile.loader.version.is_empty() {
+                self.resolve_latest_forge_version(version).await?
+            } else {
+                profile.loader.version.clone()
+            };
 
         tracing::info!("Using Forge version: {}", loader_version);
 
@@ -686,35 +784,46 @@ impl MinecraftLauncher {
         // Ohne dieses Verzeichnis lädt Forge KEINE Mods – auch wenn die JARs im Cache sind.
         let mods_dir = game_dir.join("mods");
         tokio::fs::create_dir_all(&mods_dir).await?;
-        tracing::info!("Mods directory: {:?} ({} files)",
+        tracing::info!(
+            "Mods directory: {:?} ({} files)",
             mods_dir,
             std::fs::read_dir(&mods_dir).map(|d| d.count()).unwrap_or(0)
         );
 
         // Weitere wichtige Forge-Verzeichnisse sicherstellen
-        tokio::fs::create_dir_all(game_dir.join("config")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("config"))
+            .await
+            .ok();
         tokio::fs::create_dir_all(game_dir.join("logs")).await.ok();
         tokio::fs::create_dir_all(game_dir.join("saves")).await.ok();
-        tokio::fs::create_dir_all(game_dir.join("resourcepacks")).await.ok();
-        tokio::fs::create_dir_all(game_dir.join("shaderpacks")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("resourcepacks"))
+            .await
+            .ok();
+        tokio::fs::create_dir_all(game_dir.join("shaderpacks"))
+            .await
+            .ok();
 
         tracing::info!("Final Forge version: {}", loader_version);
 
         // Java-Version bestimmen: ZUERST, bevor fml.toml und Installer laufen
         // WICHTIG: .max(17) NICHT verwenden! Alte MC-Versionen (≤1.16.x) brauchen Java 8,
         // MC 1.17 braucht Java 16, MC 1.18+ braucht Java 17+.
-        let required_java = version_info.javaVersion.as_ref().map(|j| j.majorVersion).unwrap_or(8);
+        let required_java = version_info
+            .javaVersion
+            .as_ref()
+            .map(|j| j.majorVersion)
+            .unwrap_or(8);
 
         // Alte Forge-Versionen (MC ≤ 1.16.5) nutzen Nashorn (jdk.nashorn), das in Java 15 entfernt wurde.
         // → Java maximal 8 (sicherster Wert, alle alten Forge-Versionen getestet damit).
         // Für MC 1.17 ist Java 16 vorgeschrieben, ab 1.18 Java 17+, ab 1.20.5 Java 21+.
-        let max_java: Option<u32> = if required_java <= 8 {
-            Some(8)
-        } else {
-            None
-        };
+        let max_java: Option<u32> = if required_java <= 8 { Some(8) } else { None };
 
-        tracing::info!("Required Java version for Forge: {} (max: {:?})", required_java, max_java);
+        tracing::info!(
+            "Required Java version for Forge: {} (max: {:?})",
+            required_java,
+            max_java
+        );
         let java_path = self.ensure_java_installed(required_java, max_java).await?;
 
         // fml.toml schreiben: EarlyDisplay deaktivieren.
@@ -743,15 +852,24 @@ disableOptimizedDFU = true
 maxThreads = -1
 ";
             tokio::fs::write(&fml_toml, content).await.ok();
-            tracing::info!("Wrote fml.toml (earlyWindowControl=false) to {:?}", fml_toml);
+            tracing::info!(
+                "Wrote fml.toml (earlyWindowControl=false) to {:?}",
+                fml_toml
+            );
         }
 
         // Forge installieren
 
         let forge_installer = forge::ForgeInstaller::new(self.download_manager.clone());
-        let install_result = forge_installer.install_forge_complete(
-            version, &loader_version, libraries_dir, client_jar, Some(&java_path)
-        ).await?;
+        let install_result = forge_installer
+            .install_forge_complete(
+                version,
+                &loader_version,
+                libraries_dir,
+                client_jar,
+                Some(&java_path),
+            )
+            .await?;
 
         // Natives-Verzeichnis leeren und neu befüllen
         if natives_dir.exists() {
@@ -798,26 +916,34 @@ maxThreads = -1
         // Das deckt LWJGL, jtracy (MC 1.21.11+) und alle anderen Vanilla-Natives ab.
         // download_libraries hat diese JARs bereits heruntergeladen, aber aus dem CP gefiltert.
         let native_os_suffix = match os.as_str() {
-            "linux"   => "natives-linux",
+            "linux" => "natives-linux",
             "windows" => "natives-windows",
-            "osx"     => "natives-macos",
-            _         => "natives-linux",
+            "osx" => "natives-macos",
+            _ => "natives-linux",
         };
         for lib in &version_info.libraries {
             if let Some(rules) = &lib.rules {
-                if !self.check_rules(rules) { continue; }
+                if !self.check_rules(rules) {
+                    continue;
+                }
             }
             if let Some(dl) = &lib.downloads {
                 if let Some(art) = &dl.artifact {
                     if art.path.contains(native_os_suffix) {
                         // Architektur-Filter: natives-windows-arm64 auf x64 NICHT extrahieren
                         if !Self::should_extract_native_for_platform(&art.path, &os) {
-                            tracing::debug!("Skipping wrong-arch native (Forge Quelle 2): {}", art.path);
+                            tracing::debug!(
+                                "Skipping wrong-arch native (Forge Quelle 2): {}",
+                                art.path
+                            );
                             continue;
                         }
                         let native_path = libraries_dir.join(&art.path);
                         if native_path.exists() {
-                            let fname = native_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                            let fname = native_path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("");
                             tracing::info!("Extracting Vanilla native: {}", fname);
                             self.extract_native(&native_path, natives_dir)?;
                         }
@@ -829,7 +955,10 @@ maxThreads = -1
                     if let Some(nat) = classifiers.get(&key) {
                         let native_path = libraries_dir.join(&nat.path);
                         if native_path.exists() {
-                            let fname = native_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                            let fname = native_path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("");
                             tracing::info!("Extracting Vanilla native (legacy): {}", fname);
                             self.extract_native(&native_path, natives_dir)?;
                         }
@@ -841,35 +970,59 @@ maxThreads = -1
         // Quelle 3: Direkte Suche im libraries-Verzeichnis nach natives-linux JARs.
         // Fallback wenn Quellen 1+2 nichts fanden (z.B. frischer Download).
         let extracted = std::fs::read_dir(natives_dir)
-            .map(|d| d.count()).unwrap_or(0);
+            .map(|d| d.count())
+            .unwrap_or(0);
         if extracted == 0 {
             tracing::warn!("No natives extracted from classpath — scanning libraries dir");
             if let Ok(entries) = walkdir_lwjgl_natives(libraries_dir, &os) {
                 for native_path in entries {
-                    let fname = native_path.file_name()
-                        .and_then(|n| n.to_str()).unwrap_or("");
+                    let fname = native_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("");
                     tracing::info!("Fallback: Extracting native {}", fname);
                     self.extract_native(&native_path, natives_dir)?;
                 }
             }
         }
 
-        tracing::info!("Natives directory populated: {} files",
-            std::fs::read_dir(natives_dir).map(|d| d.count()).unwrap_or(0));
+        tracing::info!(
+            "Natives directory populated: {} files",
+            std::fs::read_dir(natives_dir)
+                .map(|d| d.count())
+                .unwrap_or(0)
+        );
 
         // options.txt: fullscreen=false + narrator=0 setzen
         Self::patch_game_options(game_dir).await;
 
         let memory_mb = profile.memory_mb.unwrap_or(4096);
         let token = access_token.unwrap_or("0");
-        let user_type = if access_token.is_some() && token != "0" { "msa" } else { "legacy" };
+        let user_type = if access_token.is_some() && token != "0" {
+            "msa"
+        } else {
+            "legacy"
+        };
 
         // Platzhalter in JVM-Args ersetzen
-        let resolved_jvm_args: Vec<String> = install_result.jvm_args.iter()
-            .map(|arg| forge::resolve_arg_placeholders(
-                arg, libraries_dir, natives_dir, game_dir, assets_dir,
-                &version_info.assetIndex.id, version, uuid, token, user_type, username,
-            ))
+        let resolved_jvm_args: Vec<String> = install_result
+            .jvm_args
+            .iter()
+            .map(|arg| {
+                forge::resolve_arg_placeholders(
+                    arg,
+                    libraries_dir,
+                    natives_dir,
+                    game_dir,
+                    assets_dir,
+                    &version_info.assetIndex.id,
+                    version,
+                    uuid,
+                    token,
+                    user_type,
+                    username,
+                )
+            })
             .collect();
 
         // Platzhalter in Game-Args ersetzen
@@ -892,11 +1045,23 @@ maxThreads = -1
             game_args_filtered.push(arg.clone());
         }
 
-        let resolved_game_args: Vec<String> = game_args_filtered.iter()
-            .map(|arg| forge::resolve_arg_placeholders(
-                arg, libraries_dir, natives_dir, game_dir, assets_dir,
-                &version_info.assetIndex.id, version, uuid, token, user_type, username,
-            ))
+        let resolved_game_args: Vec<String> = game_args_filtered
+            .iter()
+            .map(|arg| {
+                forge::resolve_arg_placeholders(
+                    arg,
+                    libraries_dir,
+                    natives_dir,
+                    game_dir,
+                    assets_dir,
+                    &version_info.assetIndex.id,
+                    version,
+                    uuid,
+                    token,
+                    user_type,
+                    username,
+                )
+            })
             .collect();
 
         tracing::info!("JVM args resolved: {}", resolved_jvm_args.len());
@@ -911,7 +1076,10 @@ maxThreads = -1
         #[cfg(target_os = "linux")]
         {
             // DISPLAY muss explizit gesetzt sein – Tauri-Kindprozesse erben env nicht immer.
-            cmd.env("DISPLAY", std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string()));
+            cmd.env(
+                "DISPLAY",
+                std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string()),
+            );
             if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
                 cmd.env("XDG_RUNTIME_DIR", xdg);
             }
@@ -922,7 +1090,10 @@ maxThreads = -1
             // NVIDIA-Treiber für GLX explizit wählen (nicht Mesa-Fallback)
             cmd.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia");
             // NVIDIA EGL-Treiber explizit (für LWJGL EGL-Pfad)
-            cmd.env("__EGL_VENDOR_LIBRARY_FILENAMES", "/usr/lib/x86_64-linux-gnu/libEGL_nvidia.so.0");
+            cmd.env(
+                "__EGL_VENDOR_LIBRARY_FILENAMES",
+                "/usr/lib/x86_64-linux-gnu/libEGL_nvidia.so.0",
+            );
             // Threaded Optimizations AUS – verursacht BadValue bei Context-Create
             cmd.env("__GL_THREADED_OPTIMIZATIONS", "0");
             // Kein indirektes Rendering (würde Software-Fallback erzwingen)
@@ -1049,32 +1220,47 @@ maxThreads = -1
                 let bytes = name.as_bytes();
                 let mut pos = 0;
                 for i in 0..name.len() {
-                    if bytes[i] == b'-' && i + 1 < name.len() && bytes[i+1].is_ascii_digit() {
+                    if bytes[i] == b'-' && i + 1 < name.len() && bytes[i + 1].is_ascii_digit() {
                         pos = i;
                         break;
                     }
                 }
-                if pos > 0 { &name[..pos] } else { name }
+                if pos > 0 {
+                    &name[..pos]
+                } else {
+                    name
+                }
             }
 
             // Basis-Namen aller Forge-JARs sammeln
-            let forge_bases: std::collections::HashSet<&str> = install_result.bootstrap_classpath
+            let forge_bases: std::collections::HashSet<&str> = install_result
+                .bootstrap_classpath
                 .iter()
                 .chain(install_result.classpath.iter())
-                .map(|p| artifact_base(
-                    std::path::Path::new(p).file_name()
-                        .and_then(|n| n.to_str()).unwrap_or("")
-                ))
+                .map(|p| {
+                    artifact_base(
+                        std::path::Path::new(p)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(""),
+                    )
+                })
                 .collect();
 
             // Vanilla-CP filtern: Konflikte mit Forge-JARs und Natives entfernen
             let filtered_vanilla: Vec<String> = split_classpath_entries(vanilla_classpath)
                 .into_iter()
                 .filter(|e| {
-                    if e.is_empty() { return false; }
+                    if e.is_empty() {
+                        return false;
+                    }
                     let fname = std::path::Path::new(e)
-                        .file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    if fname.contains("-natives-") { return false; }
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("");
+                    if fname.contains("-natives-") {
+                        return false;
+                    }
                     let base = artifact_base(fname);
                     if forge_bases.contains(base) {
                         tracing::debug!("Filtering vanilla JAR (conflicts with forge): {}", fname);
@@ -1098,7 +1284,8 @@ maxThreads = -1
             cp_parts.retain(|p| seen_cp.insert(p.clone()));
 
             let bootstrap_cp = join_classpath_entries(cp_parts.iter());
-            tracing::info!("Bootstrap classpath: {} JARs ({} forge + {} vanilla)",
+            tracing::info!(
+                "Bootstrap classpath: {} JARs ({} forge + {} vanilla)",
                 cp_parts.len(),
                 install_result.bootstrap_classpath.len() + install_result.classpath.len(),
                 filtered_vanilla.len()
@@ -1109,8 +1296,6 @@ maxThreads = -1
             // Main-Class: ForgeBootstrap direkt via Classpath (NICHT -m !)
             tracing::info!("Starting: {}", install_result.main_class);
             cmd.arg(&install_result.main_class);
-
-
         } else {
             // === ALLE ANDEREN FORGE-VERSIONEN (ModLauncher 1.13-1.20.1, LaunchWrapper ≤1.12.2) ===
             //
@@ -1134,7 +1319,8 @@ maxThreads = -1
             full_cp_entries.retain(|p| !p.is_empty() && seen_cp.insert(p.clone()));
 
             let full_cp = join_classpath_entries(full_cp_entries.iter());
-            tracing::info!("Forge classpath: {} JARs ({} forge + vanilla)",
+            tracing::info!(
+                "Forge classpath: {} JARs ({} forge + vanilla)",
                 full_cp_entries.len(),
                 install_result.bootstrap_classpath.len() + install_result.classpath.len()
             );
@@ -1148,11 +1334,23 @@ maxThreads = -1
             // Einzelner String mit ${Platzhaltern}, durch Leerzeichen getrennt.
             // Enthält bereits --tweakClass und alle nötigen Minecraft-Args.
             tracing::info!("Legacy Forge: Verwende minecraftArguments");
-            let legacy_args: Vec<String> = mc_args_str.split_whitespace()
-                .map(|arg| forge::resolve_arg_placeholders(
-                    arg, libraries_dir, natives_dir, game_dir, assets_dir,
-                    &version_info.assetIndex.id, version, uuid, token, user_type, username,
-                ))
+            let legacy_args: Vec<String> = mc_args_str
+                .split_whitespace()
+                .map(|arg| {
+                    forge::resolve_arg_placeholders(
+                        arg,
+                        libraries_dir,
+                        natives_dir,
+                        game_dir,
+                        assets_dir,
+                        &version_info.assetIndex.id,
+                        version,
+                        uuid,
+                        token,
+                        user_type,
+                        username,
+                    )
+                })
                 .collect();
             for arg in &legacy_args {
                 cmd.arg(arg);
@@ -1170,11 +1368,15 @@ maxThreads = -1
             // der FMLClientLaunchProvider sucht den Client über den Classpath/ModuleLayer.
             if is_bootstrap_era {
                 cmd.arg("--gameJar").arg(&install_result.patched_client_jar);
-                tracing::info!("--gameJar: {:?}", install_result.patched_client_jar.display());
+                tracing::info!(
+                    "--gameJar: {:?}",
+                    install_result.patched_client_jar.display()
+                );
             }
 
             if !has_arg("--fml.forgeVersion") {
-                cmd.arg("--fml.forgeVersion").arg(&install_result.forge_version);
+                cmd.arg("--fml.forgeVersion")
+                    .arg(&install_result.forge_version);
             }
             if !has_arg("--fml.mcVersion") {
                 cmd.arg("--fml.mcVersion").arg(version);
@@ -1219,12 +1421,17 @@ maxThreads = -1
 
         // Debug-Kommando speichern
         let debug_cmd_path = game_dir.join("java_command_debug.txt");
-        let full_cmd_str = format!("{} {}",
+        let full_cmd_str = format!(
+            "{} {}",
             cmd.get_program().to_string_lossy(),
             cmd.get_args()
                 .map(|a| {
                     let s = a.to_string_lossy().to_string();
-                    if s.contains(' ') { format!("\"{}\"", s) } else { s }
+                    if s.contains(' ') {
+                        format!("\"{}\"", s)
+                    } else {
+                        s
+                    }
                 })
                 .collect::<Vec<_>>()
                 .join(" ")
@@ -1292,7 +1499,11 @@ maxThreads = -1
         // Verwende die von Mojang angegebene Java-Version (aus version.json javaVersion.majorVersion).
         // Fallback 8 (nicht 21): Alte Minecraft-Versionen (< 1.17) haben keine javaVersion im manifest,
         // aber benötigen Java 8. Mit 21 als Fallback würde Forge ≤1.16.5 (Nashorn) crashen.
-        let required_java = version_info.javaVersion.as_ref().map(|j| j.majorVersion).unwrap_or(8);
+        let required_java = version_info
+            .javaVersion
+            .as_ref()
+            .map(|j| j.majorVersion)
+            .unwrap_or(8);
         tracing::info!("Required Java version: {}", required_java);
         let java_path = self.ensure_java_installed(required_java, None).await?;
 
@@ -1323,7 +1534,10 @@ maxThreads = -1
         // da Tauri-Kindprozesse DISPLAY nicht immer erben (z.B. AppImage-Launch).
         #[cfg(target_os = "linux")]
         {
-            cmd.env("DISPLAY", std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string()));
+            cmd.env(
+                "DISPLAY",
+                std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string()),
+            );
             if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
                 cmd.env("XDG_RUNTIME_DIR", xdg);
             }
@@ -1387,7 +1601,11 @@ maxThreads = -1
         cmd.arg(main_class);
 
         let token = access_token.unwrap_or("0");
-        let user_type = if access_token.is_some() && token != "0" { "msa" } else { "legacy" };
+        let user_type = if access_token.is_some() && token != "0" {
+            "msa"
+        } else {
+            "legacy"
+        };
 
         cmd.arg("--username").arg(username);
         cmd.arg("--version").arg(&profile.minecraft_version);
@@ -1414,7 +1632,8 @@ maxThreads = -1
 
         tracing::info!("Launching Minecraft ({})...", loader.as_str());
         tracing::info!("Java: {}", java_bin);
-        let mut child = cmd.spawn()
+        let mut child = cmd
+            .spawn()
             .map_err(|e| anyhow::anyhow!("Konnte Minecraft nicht starten ({}): {}", java_bin, e))?;
         let pid = child.id();
         tracing::info!("🎮 Minecraft gestartet mit PID: {}", pid);
@@ -1582,17 +1801,16 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         let options_file = game_dir.join("options.txt");
 
         // Vorhandene Datei lesen; bei fehlendem File leeren String verwenden
-        let content = tokio::fs::read_to_string(&options_file).await.unwrap_or_default();
+        let content = tokio::fs::read_to_string(&options_file)
+            .await
+            .unwrap_or_default();
         let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
 
         // (Schlüssel, gewünschter Wert) – Format in options.txt: "key:value"
-        let patches: &[(&str, &str)] = &[
-            ("fullscreen", "false"),
-            ("narrator",   "0"),
-        ];
+        let patches: &[(&str, &str)] = &[("fullscreen", "false"), ("narrator", "0")];
 
         for (key, value) in patches {
-            let prefix   = format!("{}:", key);
+            let prefix = format!("{}:", key);
             let new_line = format!("{}:{}", key, value);
 
             if let Some(pos) = lines.iter().position(|l| l.starts_with(&prefix)) {
@@ -1616,7 +1834,7 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
 
     /// Entfernt doppelte Einträge aus dem Classpath
     fn deduplicate_classpath(classpath: &str) -> String {
-        use std::collections::{HashSet, HashMap};
+        use std::collections::{HashMap, HashSet};
 
         let mut seen_paths = HashSet::new();
         let mut seen_libraries: HashMap<String, String> = HashMap::new(); // library_name -> full_path
@@ -1639,7 +1857,12 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
             // Finde den ersten Teil der eine Versionsnummer ist (beginnt mit Ziffer)
             let mut lib_name_parts = Vec::new();
             for part in parts {
-                if part.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                if part
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_digit())
+                    .unwrap_or(false)
+                {
                     break;
                 }
                 lib_name_parts.push(part);
@@ -1668,17 +1891,32 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
             if let Some(lib_name) = extract_library_name(entry) {
                 // Bestimmte Libraries die bekannt für Konflikte sind
                 let conflict_libraries = [
-                    "guava", "failureaccess", "asm", "asm-commons", "asm-tree",
-                    "asm-util", "asm-analysis", "jtracy", "gson", "netty",
-                    "commons-io", "commons-lang3", "log4j"
+                    "guava",
+                    "failureaccess",
+                    "asm",
+                    "asm-commons",
+                    "asm-tree",
+                    "asm-util",
+                    "asm-analysis",
+                    "jtracy",
+                    "gson",
+                    "netty",
+                    "commons-io",
+                    "commons-lang3",
+                    "log4j",
                 ];
 
-                let is_conflict_library = conflict_libraries.iter()
-                    .any(|&lib| lib_name.eq_ignore_ascii_case(lib) || lib_name.starts_with(&format!("{}-", lib)));
+                let is_conflict_library = conflict_libraries.iter().any(|&lib| {
+                    lib_name.eq_ignore_ascii_case(lib) || lib_name.starts_with(&format!("{}-", lib))
+                });
 
                 if is_conflict_library {
                     if let Some(existing) = seen_libraries.get(&lib_name.to_lowercase()) {
-                        tracing::debug!("Skipping duplicate library {} (already have {})", entry, existing);
+                        tracing::debug!(
+                            "Skipping duplicate library {} (already have {})",
+                            entry,
+                            existing
+                        );
                         continue;
                     }
                     seen_libraries.insert(lib_name.to_lowercase(), entry.to_string());
@@ -1689,7 +1927,8 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         }
 
         let result = join_classpath_entries(unique_entries.iter());
-        tracing::info!("Classpath deduplicated: {} -> {} entries",
+        tracing::info!(
+            "Classpath deduplicated: {} -> {} entries",
             split_classpath_entries(classpath).len(),
             unique_entries.len()
         );
@@ -1705,7 +1944,8 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         let versions = client.get_loader_versions(mc_version).await?;
 
         // Nehme die erste (neueste) Version
-        let version = versions.first()
+        let version = versions
+            .first()
             .ok_or_else(|| anyhow::anyhow!("No NeoForge version found for MC {}", mc_version))?;
 
         Ok(version.version.clone())
@@ -1730,39 +1970,54 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         let versions = client.get_loader_versions(mc_version).await?;
 
         // Filtere bekannte kaputte Versionen heraus
-        let usable_versions: Vec<_> = versions.iter()
+        let usable_versions: Vec<_> = versions
+            .iter()
             .filter(|v| {
-                !known_broken.iter().any(|(mc, fv)| *mc == mc_version && *fv == v.forge_version)
+                !known_broken
+                    .iter()
+                    .any(|(mc, fv)| *mc == mc_version && *fv == v.forge_version)
             })
             .collect();
 
         let search_in = if usable_versions.is_empty() {
-            tracing::warn!("All Forge versions for {} are on the broken list, falling back to latest", mc_version);
+            tracing::warn!(
+                "All Forge versions for {} are on the broken list, falling back to latest",
+                mc_version
+            );
             versions.iter().collect::<Vec<_>>()
         } else {
             usable_versions
         };
 
         // Bevorzuge empfohlene Version, sonst die neueste stabile (versions sind bereits neueste-zuerst sortiert)
-        let version = search_in.iter()
+        let version = search_in
+            .iter()
             .find(|v| v.recommended)
             .or_else(|| search_in.first())
             .ok_or_else(|| anyhow::anyhow!("No Forge version found for MC {}", mc_version))?;
 
-        tracing::info!("Resolved Forge version for {}: {} (recommended: {})", mc_version, version.forge_version, version.recommended);
+        tracing::info!(
+            "Resolved Forge version for {}: {} (recommended: {})",
+            mc_version,
+            version.forge_version,
+            version.recommended
+        );
         Ok(version.forge_version.clone())
     }
 
-
-
     /// Fabric Loader installieren und (Classpath, MainClass) zurückgeben
-    async fn install_fabric(&self, mc_version: &str, libraries_dir: &Path) -> Result<(String, String)> {
+    async fn install_fabric(
+        &self,
+        mc_version: &str,
+        libraries_dir: &Path,
+    ) -> Result<(String, String)> {
         use crate::api::fabric::FabricClient;
 
         let fabric = FabricClient::new()?;
         let loader_versions = fabric.get_loader_versions(mc_version).await?;
 
-        let loader = loader_versions.first()
+        let loader = loader_versions
+            .first()
             .ok_or_else(|| anyhow::anyhow!("No Fabric loader found for MC {}", mc_version))?;
 
         tracing::info!("Using Fabric loader version: {}", loader.loader.version);
@@ -1782,7 +2037,9 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         if !loader_dest.exists() {
             tracing::info!("Downloading Fabric loader: {}", loader.loader.version);
             tokio::fs::create_dir_all(loader_dest.parent().unwrap()).await?;
-            self.download_manager.download_with_hash(&loader_url, &loader_dest, None).await?;
+            self.download_manager
+                .download_with_hash(&loader_url, &loader_dest, None)
+                .await?;
         }
         classpath_entries.push(loader_dest.display().to_string());
 
@@ -1795,12 +2052,18 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         if !intermediary_dest.exists() {
             tracing::info!("Downloading Fabric intermediary...");
             tokio::fs::create_dir_all(intermediary_dest.parent().unwrap()).await?;
-            self.download_manager.download_with_hash(&intermediary_url, &intermediary_dest, None).await?;
+            self.download_manager
+                .download_with_hash(&intermediary_url, &intermediary_dest, None)
+                .await?;
         }
         classpath_entries.push(intermediary_dest.display().to_string());
 
         // Fabric Libraries (client + common)
-        let all_libs: Vec<_> = loader.launcher_meta.libraries.client.iter()
+        let all_libs: Vec<_> = loader
+            .launcher_meta
+            .libraries
+            .client
+            .iter()
             .chain(loader.launcher_meta.libraries.common.iter())
             .collect();
 
@@ -1820,11 +2083,23 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                 tracing::info!("Downloading Fabric library: {}", lib.name);
                 tokio::fs::create_dir_all(lib_dest.parent().unwrap()).await?;
                 // Ignoriere Fehler bei einzelnen Libraries - manche sind optional
-                if let Err(e) = self.download_manager.download_with_hash(&lib_url, &lib_dest, None).await {
-                    tracing::warn!("Failed to download {}: {}, trying alternate sources...", lib.name, e);
+                if let Err(e) = self
+                    .download_manager
+                    .download_with_hash(&lib_url, &lib_dest, None)
+                    .await
+                {
+                    tracing::warn!(
+                        "Failed to download {}: {}, trying alternate sources...",
+                        lib.name,
+                        e
+                    );
                     // Versuche Maven Central als Fallback
                     let maven_central_url = format!("https://repo1.maven.org/maven2/{}", lib_path);
-                    if let Err(e2) = self.download_manager.download_with_hash(&maven_central_url, &lib_dest, None).await {
+                    if let Err(e2) = self
+                        .download_manager
+                        .download_with_hash(&maven_central_url, &lib_dest, None)
+                        .await
+                    {
                         tracing::warn!("Also failed from Maven Central: {}", e2);
                         continue; // Überspringe diese Library
                     }
@@ -1833,7 +2108,10 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
             classpath_entries.push(lib_dest.display().to_string());
         }
 
-        tracing::info!("Fabric installed with {} libraries", classpath_entries.len());
+        tracing::info!(
+            "Fabric installed with {} libraries",
+            classpath_entries.len()
+        );
         Ok((join_classpath_entries(classpath_entries), main_class))
     }
 
@@ -1846,11 +2124,14 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
     /// Hintergrund: Der Listen-Endpunkt gibt maximal `0.20.0-beta.9` zurück, welcher
     /// nur `fabricloader 0.14.21` bereitstellt. Fabric-API >= 0.140.x benötigt aber
     /// `fabricloader >= 0.17.3`, weshalb neuere Loader-Versionen zwingend notwendig sind.
-    async fn install_quilt(&self, mc_version: &str, libraries_dir: &Path) -> Result<(String, String)> {
+    async fn install_quilt(
+        &self,
+        mc_version: &str,
+        libraries_dir: &Path,
+    ) -> Result<(String, String)> {
         use crate::api::quilt::QuiltClient;
 
         let quilt = QuiltClient::new()?;
-
 
         let loader_version = quilt.get_latest_loader_version().await
             .unwrap_or_else(|e| {
@@ -1860,11 +2141,17 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
 
         tracing::info!("Verwende Quilt Loader Version: {}", loader_version);
 
-        let profile = quilt.get_loader_profile(mc_version, &loader_version).await
-            .map_err(|e| anyhow::anyhow!(
-                "Konnte Quilt-Profil für MC {} / Loader {} nicht laden: {}",
-                mc_version, loader_version, e
-            ))?;
+        let profile = quilt
+            .get_loader_profile(mc_version, &loader_version)
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Konnte Quilt-Profil für MC {} / Loader {} nicht laden: {}",
+                    mc_version,
+                    loader_version,
+                    e
+                )
+            })?;
 
         tracing::info!("Quilt main class: {}", profile.main_class);
         tracing::info!("Quilt Profil hat {} Libraries", profile.libraries.len());
@@ -1882,11 +2169,26 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
             if !lib_dest.exists() {
                 tracing::info!("Lade Quilt Library: {}", lib.name);
                 tokio::fs::create_dir_all(lib_dest.parent().unwrap()).await?;
-                if let Err(e) = self.download_manager.download_with_hash(&lib_url, &lib_dest, None).await {
-                    tracing::warn!("Fehler beim Laden von {}: {} – versuche Maven Central...", lib.name, e);
+                if let Err(e) = self
+                    .download_manager
+                    .download_with_hash(&lib_url, &lib_dest, None)
+                    .await
+                {
+                    tracing::warn!(
+                        "Fehler beim Laden von {}: {} – versuche Maven Central...",
+                        lib.name,
+                        e
+                    );
                     let fallback_url = format!("https://repo1.maven.org/maven2/{}", lib_path);
-                    if let Err(e2) = self.download_manager.download_with_hash(&fallback_url, &lib_dest, None).await {
-                        tracing::warn!("Auch Maven Central fehlgeschlagen: {} – überspringe Library", e2);
+                    if let Err(e2) = self
+                        .download_manager
+                        .download_with_hash(&fallback_url, &lib_dest, None)
+                        .await
+                    {
+                        tracing::warn!(
+                            "Auch Maven Central fehlgeschlagen: {} – überspringe Library",
+                            e2
+                        );
                         continue;
                     }
                 }
@@ -1896,13 +2198,16 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
             }
         }
 
-        tracing::info!("Quilt installiert mit {} Libraries (Loader {})", classpath_entries.len(), loader_version);
-        Ok((join_classpath_entries(classpath_entries), profile.main_class))
+        tracing::info!(
+            "Quilt installiert mit {} Libraries (Loader {})",
+            classpath_entries.len(),
+            loader_version
+        );
+        Ok((
+            join_classpath_entries(classpath_entries),
+            profile.main_class,
+        ))
     }
-
-
-
-
 
     /// Prüft ob eine Datei ein gültiges ZIP/JAR-Archiv ist.
     ///
@@ -1923,8 +2228,7 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                 }
                 // ZIP Local File Header: PK\x03\x04
                 // ZIP End-of-Central-Directory (leere ZIPs): PK\x05\x06
-                let ok = magic == [0x50, 0x4B, 0x03, 0x04]
-                    || magic == [0x50, 0x4B, 0x05, 0x06];
+                let ok = magic == [0x50, 0x4B, 0x03, 0x04] || magic == [0x50, 0x4B, 0x05, 0x06];
                 if !ok {
                     tracing::warn!("Not a ZIP (bad magic {:02X?}): {:?}", magic, path);
                 }
@@ -1938,7 +2242,11 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
     }
 
     /// Extrahiert NeoForge Libraries aus dem Installer
-    async fn extract_neoforge_libraries(&self, installer_jar: &Path, libraries_dir: &Path) -> Result<(Vec<String>, String)> {
+    async fn extract_neoforge_libraries(
+        &self,
+        installer_jar: &Path,
+        libraries_dir: &Path,
+    ) -> Result<(Vec<String>, String)> {
         use std::io::Read;
 
         // Alle ZIP-Operationen synchron ausführen und Daten sammeln
@@ -1948,7 +2256,8 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
 
             // Lese version.json aus dem Installer
             let version_json = {
-                let mut entry = archive.by_name("version.json")
+                let mut entry = archive
+                    .by_name("version.json")
                     .map_err(|_| anyhow::anyhow!("version.json not found in installer"))?;
                 let mut data = String::new();
                 entry.read_to_string(&mut data)?;
@@ -2041,11 +2350,11 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                         tracing::info!("Downloading NeoForge library: {}", lib.name);
                         tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
 
-                        if let Err(e) = self.download_manager.download_with_hash(
-                            &artifact.url,
-                            &dest,
-                            artifact.sha1.as_deref()
-                        ).await {
+                        if let Err(e) = self
+                            .download_manager
+                            .download_with_hash(&artifact.url, &dest, artifact.sha1.as_deref())
+                            .await
+                        {
                             tracing::warn!("Failed to download {}: {}", lib.name, e);
                             continue;
                         }
@@ -2069,7 +2378,12 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                     ];
 
                     for url in maven_urls {
-                        if self.download_manager.download_with_hash(&url, &dest, None).await.is_ok() {
+                        if self
+                            .download_manager
+                            .download_with_hash(&url, &dest, None)
+                            .await
+                            .is_ok()
+                        {
                             tracing::info!("Downloaded {} from {}", lib.name, url);
                             break;
                         }
@@ -2092,8 +2406,15 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
             let group = parts[0].replace('.', "/");
             let artifact = parts[1];
             let version = parts[2];
-            let classifier = if parts.len() > 3 { format!("-{}", parts[3]) } else { String::new() };
-            format!("{}/{}/{}/{}-{}{}.jar", group, artifact, version, artifact, version, classifier)
+            let classifier = if parts.len() > 3 {
+                format!("-{}", parts[3])
+            } else {
+                String::new()
+            };
+            format!(
+                "{}/{}/{}/{}-{}{}.jar",
+                group, artifact, version, artifact, version, classifier
+            )
         } else {
             maven.to_string()
         }
@@ -2101,16 +2422,28 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
 
     async fn get_version_info(&self, version: &str) -> Result<VersionInfo> {
         let manifest: VersionManifest = reqwest::get(MOJANG_MANIFEST_URL).await?.json().await?;
-        let entry = manifest.versions.iter().find(|v| v.id == version)
+        let entry = manifest
+            .versions
+            .iter()
+            .find(|v| v.id == version)
             .ok_or_else(|| anyhow::anyhow!("Version not found: {}", version))?;
         Ok(reqwest::get(&entry.url).await?.json().await?)
     }
 
-    async fn download_libraries(&self, info: &VersionInfo, lib_dir: &Path, natives_dir: &Path) -> Result<String> {
+    async fn download_libraries(
+        &self,
+        info: &VersionInfo,
+        lib_dir: &Path,
+        natives_dir: &Path,
+    ) -> Result<String> {
         let mut cp = Vec::new();
         let os = Self::get_os();
 
-        tracing::info!("Processing {} libraries for OS: {}", info.libraries.len(), os);
+        tracing::info!(
+            "Processing {} libraries for OS: {}",
+            info.libraries.len(),
+            os
+        );
 
         for lib in &info.libraries {
             if let Some(rules) = &lib.rules {
@@ -2126,14 +2459,19 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                     let is_archive = art.path.ends_with(".jar") || art.path.ends_with(".zip");
 
                     if dest.exists() && is_archive && !Self::is_valid_zip(&dest) {
-                        tracing::warn!("Corrupt cached archive detected, re-downloading: {:?}", dest);
+                        tracing::warn!(
+                            "Corrupt cached archive detected, re-downloading: {:?}",
+                            dest
+                        );
                         tokio::fs::remove_file(&dest).await.ok();
                     }
 
                     if !dest.exists() {
                         tracing::info!("Downloading: {}", lib.name);
                         tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
-                        self.download_manager.download_with_hash(&art.url, &dest, Some(&art.sha1)).await?;
+                        self.download_manager
+                            .download_with_hash(&art.url, &dest, Some(&art.sha1))
+                            .await?;
                     }
 
                     // Modernes Format (1.19+): natives-JARs haben "natives-<os>" im Pfad
@@ -2151,11 +2489,19 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                         // Architektur- und OS-bewusste Extraktion:
                         if Self::should_extract_native_for_platform(&art.path, &os) {
                             if !Self::is_valid_zip(&dest) {
-                                tracing::warn!("Corrupt native archive detected, re-downloading: {:?}", dest);
+                                tracing::warn!(
+                                    "Corrupt native archive detected, re-downloading: {:?}",
+                                    dest
+                                );
                                 tokio::fs::remove_file(&dest).await.ok();
-                                self.download_manager.download_with_hash(&art.url, &dest, Some(&art.sha1)).await?;
+                                self.download_manager
+                                    .download_with_hash(&art.url, &dest, Some(&art.sha1))
+                                    .await?;
                                 if !Self::is_valid_zip(&dest) {
-                                    bail!("Native archive remains corrupt after redownload: {}", dest.display());
+                                    bail!(
+                                        "Native archive remains corrupt after redownload: {}",
+                                        dest.display()
+                                    );
                                 }
                             }
                             tracing::debug!("Extracting native: {}", lib.name);
@@ -2182,7 +2528,9 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                                 if !dest.exists() {
                                     tracing::info!("Downloading native (legacy): {}", lib.name);
                                     tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
-                                    self.download_manager.download_with_hash(&nat.url, &dest, Some(&nat.sha1)).await?;
+                                    self.download_manager
+                                        .download_with_hash(&nat.url, &dest, Some(&nat.sha1))
+                                        .await?;
                                 }
                                 if !Self::is_valid_zip(&dest) {
                                     bail!("Legacy native archive is corrupt: {}", dest.display());
@@ -2209,7 +2557,9 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
 
         let idx_path = idx_dir.join(format!("{}.json", info.id));
         if !idx_path.exists() {
-            self.download_manager.download_with_hash(&info.url, &idx_path, Some(&info.sha1)).await?;
+            self.download_manager
+                .download_with_hash(&info.url, &idx_path, Some(&info.sha1))
+                .await?;
         }
 
         let idx: AssetIndex = serde_json::from_str(&tokio::fs::read_to_string(&idx_path).await?)?;
@@ -2222,9 +2572,13 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
             if !dest.exists() {
                 tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
                 let url = format!("{}/{}/{}", RESOURCES_URL, pre, asset.hash);
-                self.download_manager.download_with_hash(&url, &dest, Some(&asset.hash)).await?;
+                self.download_manager
+                    .download_with_hash(&url, &dest, Some(&asset.hash))
+                    .await?;
                 done += 1;
-                if done % 200 == 0 { tracing::info!("Assets: {}/{}", done, total); }
+                if done % 200 == 0 {
+                    tracing::info!("Assets: {}/{}", done, total);
+                }
             }
         }
         Ok(())
@@ -2241,13 +2595,16 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
             let name = f.name().to_string();
 
             // Überspringe Verzeichnisse und META-INF
-            if name.ends_with('/') || name.starts_with("META-INF") { continue; }
+            if name.ends_with('/') || name.starts_with("META-INF") {
+                continue;
+            }
 
             // Extrahiere nur .so / .dll / .dylib
-            let native_ext = name.ends_with(".so")
-                || name.ends_with(".dll")
-                || name.ends_with(".dylib");
-            if !native_ext { continue; }
+            let native_ext =
+                name.ends_with(".so") || name.ends_with(".dll") || name.ends_with(".dylib");
+            if !native_ext {
+                continue;
+            }
 
             // LWJGL 3.3.2+ packt Natives nach Architektur:
             // linux/x64/org/lwjgl/liblwjgl.so
@@ -2257,10 +2614,22 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
             let path_lower = name.to_lowercase();
 
             let wrong_arch = match arch {
-                "x86_64" => path_lower.contains("/arm64/") || path_lower.contains("/arm32/") || path_lower.contains("/arm/"),
-                "aarch64" => path_lower.contains("/x64/") || path_lower.contains("/x86/") || path_lower.contains("/arm32/"),
-                "arm"     => path_lower.contains("/x64/") || path_lower.contains("/x86/") || path_lower.contains("/arm64/"),
-                _         => false,
+                "x86_64" => {
+                    path_lower.contains("/arm64/")
+                        || path_lower.contains("/arm32/")
+                        || path_lower.contains("/arm/")
+                }
+                "aarch64" => {
+                    path_lower.contains("/x64/")
+                        || path_lower.contains("/x86/")
+                        || path_lower.contains("/arm32/")
+                }
+                "arm" => {
+                    path_lower.contains("/x64/")
+                        || path_lower.contains("/x86/")
+                        || path_lower.contains("/arm64/")
+                }
+                _ => false,
             };
             if wrong_arch {
                 tracing::debug!("Skipping wrong-arch native: {}", name);
@@ -2286,12 +2655,21 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
     fn find_java(&self) -> Result<String> {
         // 1. JAVA_HOME
         if let Ok(home) = std::env::var("JAVA_HOME") {
-            let p = PathBuf::from(&home).join("bin").join(if cfg!(windows) { "java.exe" } else { "java" });
-            if p.exists() { return Ok(p.display().to_string()); }
+            let p = PathBuf::from(&home).join("bin").join(if cfg!(windows) {
+                "java.exe"
+            } else {
+                "java"
+            });
+            if p.exists() {
+                return Ok(p.display().to_string());
+            }
         }
 
         // 2. Launcher's own managed Java
-        let java_bin = defaults::java_dir().join("bin").join(if cfg!(windows) { "java.exe" } else { "java" });
+        let java_bin =
+            defaults::java_dir()
+                .join("bin")
+                .join(if cfg!(windows) { "java.exe" } else { "java" });
         if java_bin.exists() {
             return Ok(java_bin.display().to_string());
         }
@@ -2324,12 +2702,15 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
     /// Findet oder installiert Java mit der passenden Version.
     /// `max_major`: Wenn gesetzt, wird NUR Java im Bereich [required_major, max_major] akzeptiert.
     ///              Wichtig für alte Forge-Versionen die Nashorn brauchen (Java ≤ 14).
-    async fn ensure_java_installed(&self, required_major: u32, max_major: Option<u32>) -> Result<String> {
+    async fn ensure_java_installed(
+        &self,
+        required_major: u32,
+        max_major: Option<u32>,
+    ) -> Result<String> {
         let java_bin_name = if cfg!(windows) { "java.exe" } else { "java" };
 
-        let version_ok = |v: u32| -> bool {
-            v >= required_major && max_major.map_or(true, |max| v <= max)
-        };
+        let version_ok =
+            |v: u32| -> bool { v >= required_major && max_major.map_or(true, |max| v <= max) };
 
         // Auf Windows: prüft ob javaw.exe im gleichen bin/-Verzeichnis wie java.exe vorhanden ist.
         // Einige minimale JDKs liefern nur java.exe ohne javaw.exe – solche Installationen
@@ -2341,7 +2722,10 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                 if p.file_name().and_then(|n| n.to_str()) == Some("java.exe") {
                     let javaw = p.with_file_name("javaw.exe");
                     if !javaw.exists() {
-                        tracing::warn!("javaw.exe fehlt neben java.exe: {:?} – überspringe diese Installation", javaw);
+                        tracing::warn!(
+                            "javaw.exe fehlt neben java.exe: {:?} – überspringe diese Installation",
+                            javaw
+                        );
                         return false;
                     }
                 }
@@ -2392,7 +2776,8 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                     if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                         let candidate = entry.path().join("bin").join(java_bin_name);
                         if candidate.exists() {
-                            let v = Self::java_major_version(&candidate.display().to_string()).await;
+                            let v =
+                                Self::java_major_version(&candidate.display().to_string()).await;
                             if version_ok(v) && javaw_ok(&candidate.display().to_string()) {
                                 tracing::info!("Using managed Java {}: {}", v, candidate.display());
                                 return Ok(candidate.display().to_string());
@@ -2407,7 +2792,11 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         if legacy_java_bin.exists() {
             let v = Self::java_major_version(&legacy_java_bin.display().to_string()).await;
             if version_ok(v) && javaw_ok(&legacy_java_bin.display().to_string()) {
-                tracing::info!("Using legacy managed Java {}: {}", v, legacy_java_bin.display());
+                tracing::info!(
+                    "Using legacy managed Java {}: {}",
+                    v,
+                    legacy_java_bin.display()
+                );
                 return Ok(legacy_java_bin.display().to_string());
             }
         }
@@ -2520,9 +2909,15 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                                 let candidate = entry.path().join("bin").join("java.exe");
                                 if candidate.exists() {
-                                    let v = Self::java_major_version(&candidate.display().to_string()).await;
+                                    let v =
+                                        Self::java_major_version(&candidate.display().to_string())
+                                            .await;
                                     if version_ok(v) && javaw_ok(&candidate.display().to_string()) {
-                                        tracing::info!("Using Windows system Java {}: {}", v, candidate.display());
+                                        tracing::info!(
+                                            "Using Windows system Java {}: {}",
+                                            v,
+                                            candidate.display()
+                                        );
                                         return Ok(candidate.display().to_string());
                                     }
                                 }
@@ -2535,7 +2930,12 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
 
         // java / java.exe auf PATH testen
         let path_bin = if cfg!(windows) { "java.exe" } else { "java" };
-        if tokio::process::Command::new(path_bin).arg("-version").output().await.is_ok() {
+        if tokio::process::Command::new(path_bin)
+            .arg("-version")
+            .output()
+            .await
+            .is_ok()
+        {
             let v = Self::java_major_version(path_bin).await;
             if version_ok(v) && javaw_ok(path_bin) {
                 return Ok(path_bin.to_string());
@@ -2553,7 +2953,11 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                 return Ok(java_bin.display().to_string());
             }
         }
-        bail!("{} installation failed. Please install {} manually.", label, label)
+        bail!(
+            "{} installation failed. Please install {} manually.",
+            label,
+            label
+        )
     }
     /// Returns the major version number of the given java binary (e.g. 21, 25).
     /// Returns 0 if the version cannot be determined.
@@ -2561,8 +2965,11 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         // java -version writes to stderr, e.g.: openjdk version "21.0.2" 2024-01-16
         let Ok(out) = tokio::process::Command::new(java_bin)
             .arg("-version")
-            .output().await
-        else { return 0; };
+            .output()
+            .await
+        else {
+            return 0;
+        };
         let text = String::from_utf8_lossy(&out.stderr);
         for line in text.lines() {
             if line.contains("version \"") {
@@ -2573,11 +2980,16 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                         // "21.0.2" -> 21,  "1.8.0_392" -> 8
                         let raw = ver.split('.').next().unwrap_or("0");
                         let major: u32 = if raw == "1" {
-                            ver.split('.').nth(1).and_then(|s| s.parse().ok()).unwrap_or(0)
+                            ver.split('.')
+                                .nth(1)
+                                .and_then(|s| s.parse().ok())
+                                .unwrap_or(0)
                         } else {
                             raw.parse().unwrap_or(0)
                         };
-                        if major > 0 { return major; }
+                        if major > 0 {
+                            return major;
+                        }
                     }
                 }
             }
@@ -2585,16 +2997,28 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         0
     }
     async fn download_java(&self, java_dir: &Path, major: u32) -> Result<()> {
-        let os = if cfg!(target_os = "windows") { "windows" }
-                 else if cfg!(target_os = "macos") { "mac" }
-                 else { "linux" };
-        let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x64" };
+        let os = if cfg!(target_os = "windows") {
+            "windows"
+        } else if cfg!(target_os = "macos") {
+            "mac"
+        } else {
+            "linux"
+        };
+        let arch = if cfg!(target_arch = "aarch64") {
+            "aarch64"
+        } else {
+            "x64"
+        };
         let url = format!(
             "https://api.adoptium.net/v3/binary/latest/{}/ga/{}/{}/jre/hotspot/normal/eclipse",
             major, os, arch
         );
         tracing::info!("Downloading Java {} JRE from Adoptium...", major);
-        let archive_name = if cfg!(windows) { "java_download.zip" } else { "java_download.tar.gz" };
+        let archive_name = if cfg!(windows) {
+            "java_download.zip"
+        } else {
+            "java_download.tar.gz"
+        };
         let archive_path = java_dir.parent().unwrap_or(java_dir).join(archive_name);
         self.download_manager
             .download_file(&url, &archive_path, None::<fn(u64, u64)>)
@@ -2608,14 +3032,23 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                     p = archive_path.display(), d = java_dir.display()
                 )])
                 .status().await?;
-            if !status.success() { bail!("Failed to extract Java on Windows"); }
+            if !status.success() {
+                bail!("Failed to extract Java on Windows");
+            }
         } else {
             let status = tokio::process::Command::new("tar")
-                .args(["-xzf", &archive_path.display().to_string(),
-                       "--strip-components=1",
-                       "-C", &java_dir.display().to_string()])
-                .status().await?;
-            if !status.success() { bail!("Failed to extract Java archive with tar"); }
+                .args([
+                    "-xzf",
+                    &archive_path.display().to_string(),
+                    "--strip-components=1",
+                    "-C",
+                    &java_dir.display().to_string(),
+                ])
+                .status()
+                .await?;
+            if !status.success() {
+                bail!("Failed to extract Java archive with tar");
+            }
         }
         #[cfg(unix)]
         {
@@ -2633,9 +3066,14 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
     }
 
     fn get_os() -> String {
-        if cfg!(target_os = "windows") { "windows" }
-        else if cfg!(target_os = "macos") { "osx" }
-        else { "linux" }.to_string()
+        if cfg!(target_os = "windows") {
+            "windows"
+        } else if cfg!(target_os = "macos") {
+            "osx"
+        } else {
+            "linux"
+        }
+        .to_string()
     }
 
     /// Prüft ob ein natives-JAR für das aktuelle Betriebssystem UND die aktuelle CPU-Architektur
@@ -2658,7 +3096,9 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
 
         match os {
             "windows" => {
-                if !path.contains("natives-windows") { return false; }
+                if !path.contains("natives-windows") {
+                    return false;
+                }
                 match arch {
                     "x86_64" => {
                         // Nur natives-windows (x64) – NICHT arm64 oder x86
@@ -2677,7 +3117,9 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                 }
             }
             "linux" => {
-                if !path.contains("natives-linux") { return false; }
+                if !path.contains("natives-linux") {
+                    return false;
+                }
                 match arch {
                     "x86_64" => {
                         // Nur natives-linux (x64) – NICHT arm64 / aarch64
@@ -2706,7 +3148,9 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                     }
                     "aarch64" => {
                         // Apple Silicon: natives-macos-arm64 bevorzugen, Fallback auf universale
-                        path.contains("arm64") || (!path.contains("natives-macos-arm64") && !path.contains("natives-osx-arm64"))
+                        path.contains("arm64")
+                            || (!path.contains("natives-macos-arm64")
+                                && !path.contains("natives-osx-arm64"))
                     }
                     _ => !path.contains("arm64"),
                 }
@@ -2720,8 +3164,12 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         for r in rules {
             if let Some(o) = &r.os {
                 if let Some(n) = &o.name {
-                    if r.action == "allow" && n != &os { return false; }
-                    if r.action == "disallow" && n == &os { return false; }
+                    if r.action == "allow" && n != &os {
+                        return false;
+                    }
+                    if r.action == "disallow" && n == &os {
+                        return false;
+                    }
                 }
             }
         }
@@ -2734,10 +3182,10 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
 /// Filtert Architektur-spezifische Varianten (arm64, x86) für die aktuelle Plattform.
 fn walkdir_lwjgl_natives(dir: &Path, os: &str) -> std::io::Result<Vec<PathBuf>> {
     let suffix = match os {
-        "linux"   => "-natives-linux",
+        "linux" => "-natives-linux",
         "windows" => "-natives-windows",
-        "osx"     => "-natives-macos",
-        _         => "-natives-linux",
+        "osx" => "-natives-macos",
+        _ => "-natives-linux",
     };
     let arch = std::env::consts::ARCH;
     // Alle natives-JARs für das OS suchen
@@ -2755,39 +3203,51 @@ fn walkdir_lwjgl_natives(dir: &Path, os: &str) -> std::io::Result<Vec<PathBuf>> 
         "x86_64" => all, // x64: nur natives ohne architektur-Suffix (arm64/x86 filtern)
         "aarch64" => {
             // ARM64: arm64-Varianten bevorzugen, sonst universelle
-            if arm_variants.is_empty() { all } else { arm_variants }
+            if arm_variants.is_empty() {
+                all
+            } else {
+                arm_variants
+            }
         }
         _ => all,
     };
 
     // Nach relevanten LWJGL-Komponenten filtern
-    Ok(combined.into_iter().filter(|p| {
-        let fname = p.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
-        let fname_lower = fname.to_lowercase();
-        // Architektur-Suffix nochmals prüfen: keine arm64 auf x86_64 usw.
-        let wrong_arch = match arch {
-            "x86_64" => fname_lower.contains("-arm64") || (fname_lower.contains("-x86.") && !fname_lower.contains("x86_64")),
-            "aarch64" => false, // arm64 nimmt alles
-            _ => false,
-        };
-        if wrong_arch { return false; }
-        fname_lower.starts_with("lwjgl")
-            || fname_lower.contains("glfw")
-            || fname_lower.contains("openal")
-            || fname_lower.contains("jemalloc")
-            || fname_lower.contains("stb")
-            || fname_lower.contains("freetype")
-            || fname_lower.contains("jtracy")
-            || fname_lower.contains("tinyfd")
-    }).collect())
+    Ok(combined
+        .into_iter()
+        .filter(|p| {
+            let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let fname_lower = fname.to_lowercase();
+            // Architektur-Suffix nochmals prüfen: keine arm64 auf x86_64 usw.
+            let wrong_arch = match arch {
+                "x86_64" => {
+                    fname_lower.contains("-arm64")
+                        || (fname_lower.contains("-x86.") && !fname_lower.contains("x86_64"))
+                }
+                "aarch64" => false, // arm64 nimmt alles
+                _ => false,
+            };
+            if wrong_arch {
+                return false;
+            }
+            fname_lower.starts_with("lwjgl")
+                || fname_lower.contains("glfw")
+                || fname_lower.contains("openal")
+                || fname_lower.contains("jemalloc")
+                || fname_lower.contains("stb")
+                || fname_lower.contains("freetype")
+                || fname_lower.contains("jtracy")
+                || fname_lower.contains("tinyfd")
+        })
+        .collect())
 }
 
 /// Durchsucht `dir` rekursiv nach JARs die `suffix` im Dateinamen haben.
 fn walkdir_find_natives_suffix(dir: &Path, suffix: &str) -> std::io::Result<Vec<PathBuf>> {
     let mut results = Vec::new();
-    if !dir.is_dir() { return Ok(results); }
+    if !dir.is_dir() {
+        return Ok(results);
+    }
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -2795,7 +3255,8 @@ fn walkdir_find_natives_suffix(dir: &Path, suffix: &str) -> std::io::Result<Vec<
             if let Ok(mut sub) = walkdir_find_natives_suffix(&path, suffix) {
                 results.append(&mut sub);
             }
-        } else if path.file_name()
+        } else if path
+            .file_name()
             .and_then(|n| n.to_str())
             .map(|n| n.ends_with(suffix))
             .unwrap_or(false)
@@ -2805,4 +3266,3 @@ fn walkdir_find_natives_suffix(dir: &Path, suffix: &str) -> std::io::Result<Vec<
     }
     Ok(results)
 }
-

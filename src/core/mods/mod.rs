@@ -1,10 +1,10 @@
 #![allow(dead_code)]
 
+use crate::api::{curseforge::CurseForgeClient, modrinth::ModrinthClient};
+use crate::core::download::DownloadManager;
+use crate::types::mod_info::{ModInfo, ModSearchQuery, ModVersion};
 use anyhow::Result;
 use std::path::Path;
-use crate::types::mod_info::{ModInfo, ModVersion, ModSearchQuery};
-use crate::api::{modrinth::ModrinthClient, curseforge::CurseForgeClient};
-use crate::core::download::DownloadManager;
 
 pub struct ModManager {
     modrinth: ModrinthClient,
@@ -21,7 +21,12 @@ impl ModManager {
         })
     }
 
-    pub async fn search_mods(&self, query: &ModSearchQuery, use_modrinth: bool, use_curseforge: bool) -> Result<Vec<ModInfo>> {
+    pub async fn search_mods(
+        &self,
+        query: &ModSearchQuery,
+        use_modrinth: bool,
+        use_curseforge: bool,
+    ) -> Result<Vec<ModInfo>> {
         let mut all_mods = Vec::new();
 
         if use_modrinth {
@@ -53,29 +58,28 @@ impl ModManager {
         }
     }
 
-    pub async fn get_mod_versions_raw(&self, mod_id: &str, source: crate::types::mod_info::ModSource) -> Result<Vec<ModVersion>> {
+    pub async fn get_mod_versions_raw(
+        &self,
+        mod_id: &str,
+        source: crate::types::mod_info::ModSource,
+    ) -> Result<Vec<ModVersion>> {
         match source {
-            crate::types::mod_info::ModSource::Modrinth => {
-                self.modrinth.get_versions(mod_id).await
-            }
-            crate::types::mod_info::ModSource::CurseForge => {
-                Ok(Vec::new())
-            }
+            crate::types::mod_info::ModSource::Modrinth => self.modrinth.get_versions(mod_id).await,
+            crate::types::mod_info::ModSource::CurseForge => Ok(Vec::new()),
         }
     }
 
-    pub async fn download_mod(
-        &self,
-        mod_version: &ModVersion,
-        mods_dir: &Path,
-    ) -> Result<()> {
+    pub async fn download_mod(&self, mod_version: &ModVersion, mods_dir: &Path) -> Result<()> {
         // Finde primary file, oder nimm das erste file
-        let file = mod_version.files.iter().find(|f| f.primary)
+        let file = mod_version
+            .files
+            .iter()
+            .find(|f| f.primary)
             .or_else(|| mod_version.files.first());
 
         if let Some(file) = file {
             let dest = mods_dir.join(&file.filename);
-            
+
             tracing::info!("Downloading mod file: {} to {:?}", file.filename, dest);
             tracing::info!("Download URL: {}", file.url);
 
@@ -109,9 +113,7 @@ impl ModManager {
             crate::types::mod_info::ModSource::Modrinth => {
                 self.modrinth.get_versions(mod_id).await?
             }
-            crate::types::mod_info::ModSource::CurseForge => {
-                Vec::new()
-            }
+            crate::types::mod_info::ModSource::CurseForge => Vec::new(),
         };
 
         if let Some(version) = versions.iter().find(|v| v.id == version_id) {
@@ -157,12 +159,14 @@ async fn remove_meta_inf(jar_path: &Path) -> Result<()> {
         // - META-INF/MANIFEST.MF (Mod-Metadaten)
         // - META-INF/mods.toml (Forge Mods)
         // - META-INF/neoforge.mods.toml (NeoForge Mods)
-        let should_skip = name.starts_with("META-INF/") && (
-            name.ends_with(".SF") ||   // Signature File
+        let should_skip = name.starts_with("META-INF/")
+            && (
+                name.ends_with(".SF") ||   // Signature File
             name.ends_with(".DSA") ||  // Digital Signature
             name.ends_with(".RSA") ||  // RSA Signature
-            name.ends_with(".EC")      // Elliptic Curve Signature
-        );
+            name.ends_with(".EC")
+                // Elliptic Curve Signature
+            );
 
         if should_skip {
             tracing::debug!("Removing signature file: {}", name);
@@ -196,7 +200,11 @@ async fn remove_meta_inf(jar_path: &Path) -> Result<()> {
     drop(archive);
 
     if removed_count > 0 {
-        tracing::info!("Removed {} signature files, kept {} nested JARs", removed_count, kept_count);
+        tracing::info!(
+            "Removed {} signature files, kept {} nested JARs",
+            removed_count,
+            kept_count
+        );
     }
 
     // Ersetze originale Datei mit bereinigter Version
@@ -205,4 +213,3 @@ async fn remove_meta_inf(jar_path: &Path) -> Result<()> {
 
     Ok(())
 }
-

@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
+use crate::api::client::ApiClient;
 use anyhow::Result;
 use serde::Deserialize;
-use crate::api::client::ApiClient;
 
 const QUILT_META_URL: &str = "https://meta.quiltmc.org/v3";
 
@@ -20,7 +20,10 @@ impl QuiltClient {
     /// Lädt alle verfügbaren Quilt-Loader-Versionen für eine Minecraft-Version.
     /// Falls die Version nicht direkt unterstützt wird, wird automatisch auf die
     /// neueste unterstützte Version zurückgefallen (wie der Modrinth-Launcher).
-    pub async fn get_loader_versions(&self, minecraft_version: &str) -> Result<Vec<QuiltLoaderVersion>> {
+    pub async fn get_loader_versions(
+        &self,
+        minecraft_version: &str,
+    ) -> Result<Vec<QuiltLoaderVersion>> {
         match self.try_get_loader_versions(minecraft_version).await {
             Ok(versions) => Ok(versions),
             Err(_) => {
@@ -32,31 +35,44 @@ impl QuiltClient {
                 let fallback_version = self.get_latest_supported_game_version().await?;
                 tracing::info!(
                     "Quilt-Fallback: Verwende Loader für MC {} (für Launch von MC {})",
-                    fallback_version, minecraft_version
+                    fallback_version,
+                    minecraft_version
                 );
-                let versions = self.try_get_loader_versions(&fallback_version).await
-                    .map_err(|e| anyhow::anyhow!(
-                        "Quilt Fallback für MC {} fehlgeschlagen (Fallback-Version {}): {}",
-                        minecraft_version, fallback_version, e
-                    ))?;
+                let versions = self
+                    .try_get_loader_versions(&fallback_version)
+                    .await
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            "Quilt Fallback für MC {} fehlgeschlagen (Fallback-Version {}): {}",
+                            minecraft_version,
+                            fallback_version,
+                            e
+                        )
+                    })?;
                 Ok(versions)
             }
         }
     }
 
     /// Interner Versuch, Loader-Versionen von der API zu laden (ohne Fallback).
-    async fn try_get_loader_versions(&self, minecraft_version: &str) -> Result<Vec<QuiltLoaderVersion>> {
+    async fn try_get_loader_versions(
+        &self,
+        minecraft_version: &str,
+    ) -> Result<Vec<QuiltLoaderVersion>> {
         let url = format!("{}/versions/loader/{}", QUILT_META_URL, minecraft_version);
         let response = self.client.get(&url).await?;
 
         let status = response.status();
-        let text = response.text().await
+        let text = response
+            .text()
+            .await
             .map_err(|e| anyhow::anyhow!("Quilt API Antwort konnte nicht gelesen werden: {}", e))?;
 
         if status.as_u16() >= 400 {
             anyhow::bail!(
                 "Quilt API HTTP {} für MC {}: {}",
-                status.as_u16(), minecraft_version,
+                status.as_u16(),
+                minecraft_version,
                 text.chars().take(120).collect::<String>()
             );
         }
@@ -65,13 +81,21 @@ impl QuiltClient {
             .map_err(|e| anyhow::anyhow!("Ungültiges JSON von Quilt API: {}", e))?;
 
         if let Some(obj) = value.as_object() {
-            let code = obj.get("code").and_then(|v| v.as_str()).unwrap_or("unknown");
-            anyhow::bail!("Quilt API Fehler für MC {}: code={}", minecraft_version, code);
+            let code = obj
+                .get("code")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            anyhow::bail!(
+                "Quilt API Fehler für MC {}: code={}",
+                minecraft_version,
+                code
+            );
         }
 
         if value.is_array() {
-            let versions: Vec<QuiltLoaderVersion> = serde_json::from_value(value)
-                .map_err(|e| anyhow::anyhow!("Quilt-Versionen konnten nicht geparst werden: {}", e))?;
+            let versions: Vec<QuiltLoaderVersion> = serde_json::from_value(value).map_err(|e| {
+                anyhow::anyhow!("Quilt-Versionen konnten nicht geparst werden: {}", e)
+            })?;
             if versions.is_empty() {
                 anyhow::bail!("Leere Quilt-Versionsliste für MC {}", minecraft_version);
             }
@@ -90,7 +114,8 @@ impl QuiltClient {
         let versions: Vec<QuiltGameVersion> = self.client.get_json(&url).await?;
 
         // Bevorzuge stabile Releases, dann neueste überhaupt
-        let version = versions.iter()
+        let version = versions
+            .iter()
             .find(|v| v.stable)
             .or_else(|| versions.first())
             .ok_or_else(|| anyhow::anyhow!("Keine unterstützten Quilt-Game-Versionen gefunden"))?;
@@ -121,7 +146,8 @@ impl QuiltClient {
         let versions = self.get_all_loader_versions().await?;
         // Neueste Version direkt verwenden (Beta-Releases sind produktionsreif und
         // bieten aktuell die einzige Möglichkeit, fabricloader >= 0.17.3 bereitzustellen)
-        let version = versions.first()
+        let version = versions
+            .first()
             .ok_or_else(|| anyhow::anyhow!("Keine Quilt Loader Versionen gefunden"))?;
         Ok(version.version.clone())
     }
@@ -129,7 +155,11 @@ impl QuiltClient {
     /// Lädt das vollständige Launcher-Profil für eine bestimmte Loader+MC-Version.
     /// Dieser Endpunkt funktioniert für ALLE Loader-Versionen, auch für neuere die
     /// nicht im game-version-spezifischen Listen-Endpunkt erscheinen.
-    pub async fn get_loader_profile(&self, mc_version: &str, loader_version: &str) -> Result<QuiltLoaderProfile> {
+    pub async fn get_loader_profile(
+        &self,
+        mc_version: &str,
+        loader_version: &str,
+    ) -> Result<QuiltLoaderProfile> {
         let url = format!(
             "{}/versions/loader/{}/{}/profile/json",
             QUILT_META_URL, mc_version, loader_version
@@ -187,7 +217,8 @@ impl QuiltMainClass {
     pub fn get_client_class(&self) -> String {
         match self {
             QuiltMainClass::Simple(s) => s.clone(),
-            QuiltMainClass::Map(m) => m.get("client")
+            QuiltMainClass::Map(m) => m
+                .get("client")
                 .or_else(|| m.values().next())
                 .cloned()
                 .unwrap_or_else(|| "org.quiltmc.loader.impl.launch.knot.KnotClient".to_string()),
@@ -229,4 +260,3 @@ pub struct QuiltProfileLibrary {
     pub name: String,
     pub url: String,
 }
-

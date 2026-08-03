@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use chrono::{DateTime, Utc, Duration};
 
 // Azure AD App - MultiMC's öffentliche Client ID (funktioniert mit Device Code Flow)
 const AZURE_CLIENT_ID: &str = "499c8d36-be2a-4231-9ebd-ef291b7bb64c";
@@ -28,7 +28,6 @@ pub struct AuthState {
     pub accounts: Vec<MinecraftAccount>,
     pub active_account: Option<String>, // UUID des aktiven Accounts
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceCodeFlow {
@@ -114,12 +113,10 @@ impl MinecraftAuth {
 
     /// Startet den Device Code Flow - gibt Code zurück den der User eingeben muss
     pub async fn begin_device_code_flow(&self) -> Result<DeviceCodeFlow> {
-        let params = [
-            ("client_id", AZURE_CLIENT_ID),
-            ("scope", SCOPE),
-        ];
+        let params = [("client_id", AZURE_CLIENT_ID), ("scope", SCOPE)];
 
-        let response = self.client
+        let response = self
+            .client
             .post(DEVICE_CODE_URL)
             .form(&params)
             .send()
@@ -146,8 +143,9 @@ impl MinecraftAuth {
             }
         }
 
-        let device_code: DeviceCodeResponse = serde_json::from_str(&text)
-            .map_err(|e| anyhow::anyhow!("Fehler beim Parsen der Response: {} - Raw: {}", e, text))?;
+        let device_code: DeviceCodeResponse = serde_json::from_str(&text).map_err(|e| {
+            anyhow::anyhow!("Fehler beim Parsen der Response: {} - Raw: {}", e, text)
+        })?;
 
         Ok(DeviceCodeFlow {
             user_code: device_code.user_code,
@@ -167,11 +165,7 @@ impl MinecraftAuth {
             ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
         ];
 
-        let response = self.client
-            .post(TOKEN_URL)
-            .form(&params)
-            .send()
-            .await?;
+        let response = self.client.post(TOKEN_URL).form(&params).send().await?;
 
         let text = response.text().await?;
 
@@ -195,13 +189,19 @@ impl MinecraftAuth {
         }
 
         // Token erfolgreich - jetzt Xbox Live Auth
-        let account = self.complete_auth(&token.access_token, token.refresh_token).await?;
+        let account = self
+            .complete_auth(&token.access_token, token.refresh_token)
+            .await?;
 
         Ok(Some(account))
     }
 
     /// Komplettiert die Auth nach Erhalt des Microsoft Tokens
-    async fn complete_auth(&self, ms_access_token: &str, refresh_token: Option<String>) -> Result<MinecraftAccount> {
+    async fn complete_auth(
+        &self,
+        ms_access_token: &str,
+        refresh_token: Option<String>,
+    ) -> Result<MinecraftAccount> {
         tracing::info!("Got Microsoft token, getting Xbox Live token...");
 
         // 1. Xbox Live Token
@@ -220,12 +220,14 @@ impl MinecraftAuth {
         let profile = self.get_minecraft_profile(&mc_token.access_token).await?;
         tracing::info!("Got Minecraft profile: {}", profile.name);
 
-        let skin_url = profile.skins
+        let skin_url = profile
+            .skins
             .as_ref()
             .and_then(|s| s.iter().find(|skin| skin.state == "ACTIVE"))
             .map(|s| s.url.clone());
 
-        let cape_url = profile.capes
+        let cape_url = profile
+            .capes
             .as_ref()
             .and_then(|c| c.iter().find(|cape| cape.state == "ACTIVE"))
             .map(|c| c.url.clone());
@@ -253,7 +255,8 @@ impl MinecraftAuth {
             "TokenType": "JWT"
         });
 
-        let response: XboxLiveResponse = self.client
+        let response: XboxLiveResponse = self
+            .client
             .post("https://user.auth.xboxlive.com/user/authenticate")
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
@@ -263,7 +266,8 @@ impl MinecraftAuth {
             .json()
             .await?;
 
-        let user_hash = response.display_claims
+        let user_hash = response
+            .display_claims
             .get("xui")
             .and_then(|v| v.as_array())
             .and_then(|arr| arr.first())
@@ -285,7 +289,8 @@ impl MinecraftAuth {
             "TokenType": "JWT"
         });
 
-        let response: XboxLiveResponse = self.client
+        let response: XboxLiveResponse = self
+            .client
             .post("https://xsts.auth.xboxlive.com/xsts/authorize")
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
@@ -298,12 +303,17 @@ impl MinecraftAuth {
         Ok(response.token)
     }
 
-    async fn get_minecraft_token(&self, xsts_token: &str, user_hash: &str) -> Result<MinecraftAuthResponse> {
+    async fn get_minecraft_token(
+        &self,
+        xsts_token: &str,
+        user_hash: &str,
+    ) -> Result<MinecraftAuthResponse> {
         let body = serde_json::json!({
             "identityToken": format!("XBL3.0 x={};{}", user_hash, xsts_token)
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post("https://api.minecraftservices.com/authentication/login_with_xbox")
             .header("Content-Type", "application/json")
             .json(&body)
@@ -316,7 +326,8 @@ impl MinecraftAuth {
     }
 
     async fn get_minecraft_profile(&self, access_token: &str) -> Result<MinecraftProfileResponse> {
-        let response = self.client
+        let response = self
+            .client
             .get("https://api.minecraftservices.com/minecraft/profile")
             .header("Authorization", format!("Bearer {}", access_token))
             .send()
@@ -336,7 +347,8 @@ impl MinecraftAuth {
             ("scope", SCOPE),
         ];
 
-        let token_response: TokenResponse = self.client
+        let token_response: TokenResponse = self
+            .client
             .post(TOKEN_URL)
             .form(&params)
             .send()
@@ -344,7 +356,8 @@ impl MinecraftAuth {
             .json()
             .await?;
 
-        self.complete_auth(&token_response.access_token, token_response.refresh_token).await
+        self.complete_auth(&token_response.access_token, token_response.refresh_token)
+            .await
     }
 
     /// Offline Account erstellen

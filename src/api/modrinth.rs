@@ -1,9 +1,12 @@
 #![allow(dead_code)]
 
+use crate::api::client::ApiClient;
+use crate::types::mod_info::{
+    DependencyType, FileHashes, ModDependency, ModFile, ModInfo, ModSearchQuery, ModSource,
+    ModVersion,
+};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use crate::api::client::ApiClient;
-use crate::types::mod_info::{ModInfo, ModVersion, ModSource, ModSearchQuery, ModFile, FileHashes, ModDependency, DependencyType};
 
 const MODRINTH_API_BASE: &str = "https://api.modrinth.com/v2";
 
@@ -85,31 +88,35 @@ impl ModrinthClient {
 
         let response: ModrinthSearchResponse = self.client.get_json(&url).await?;
 
-        let mods = response.hits.into_iter().map(|hit| ModInfo {
-            id: hit.project_id,
-            slug: hit.slug.clone(),
-            name: hit.title,
-            description: hit.description,
-            body: None,
-            icon_url: Some(hit.icon_url),
-            author: hit.author,
-            downloads: hit.downloads as u64,
-            followers: None,
-            categories: hit.categories,
-            source: ModSource::Modrinth,
-            versions: hit.versions.clone(),
-            game_versions: hit.versions,
-            loaders: vec![],
-            project_url: format!("https://modrinth.com/mod/{}", hit.slug),
-            updated_at: hit.date_modified,
-            client_side: hit.client_side,
-            server_side: hit.server_side,
-            source_url: None,
-            issues_url: None,
-            wiki_url: None,
-            discord_url: None,
-            gallery: vec![],
-        }).collect();
+        let mods = response
+            .hits
+            .into_iter()
+            .map(|hit| ModInfo {
+                id: hit.project_id,
+                slug: hit.slug.clone(),
+                name: hit.title,
+                description: hit.description,
+                body: None,
+                icon_url: Some(hit.icon_url),
+                author: hit.author,
+                downloads: hit.downloads as u64,
+                followers: None,
+                categories: hit.categories,
+                source: ModSource::Modrinth,
+                versions: hit.versions.clone(),
+                game_versions: hit.versions,
+                loaders: vec![],
+                project_url: format!("https://modrinth.com/mod/{}", hit.slug),
+                updated_at: hit.date_modified,
+                client_side: hit.client_side,
+                server_side: hit.server_side,
+                source_url: None,
+                issues_url: None,
+                wiki_url: None,
+                discord_url: None,
+                gallery: vec![],
+            })
+            .collect();
 
         Ok(mods)
     }
@@ -141,11 +148,15 @@ impl ModrinthClient {
             issues_url: project.issues_url,
             wiki_url: project.wiki_url,
             discord_url: project.discord_url,
-            gallery: project.gallery.into_iter().map(|img| crate::types::mod_info::GalleryImage {
-                url: img.url,
-                title: img.title,
-                description: img.description,
-            }).collect(),
+            gallery: project
+                .gallery
+                .into_iter()
+                .map(|img| crate::types::mod_info::GalleryImage {
+                    url: img.url,
+                    title: img.title,
+                    description: img.description,
+                })
+                .collect(),
         })
     }
 
@@ -153,37 +164,48 @@ impl ModrinthClient {
         let url = format!("{}/project/{}/version", MODRINTH_API_BASE, mod_id);
         let versions: Vec<ModrinthVersion> = self.client.get_json(&url).await?;
 
-        let mod_versions = versions.into_iter().map(|v| ModVersion {
-            id: v.id.clone(),
-            mod_id: v.project_id,
-            name: v.name,
-            version_number: v.version_number,
-            game_versions: v.game_versions,
-            loaders: v.loaders,
-            files: v.files.into_iter().map(|f| ModFile {
-                url: f.url,
-                filename: f.filename,
-                primary: f.primary,
-                size: f.size as u64,
-                hashes: FileHashes {
-                    sha1: f.hashes.sha1,
-                    sha512: f.hashes.sha512,
-                },
-            }).collect(),
-            dependencies: v.dependencies.into_iter().map(|d| ModDependency {
-                mod_id: d.project_id.unwrap_or_default(),
-                dependency_type: match d.dependency_type.as_str() {
-                    "required" => DependencyType::Required,
-                    "optional" => DependencyType::Optional,
-                    "incompatible" => DependencyType::Incompatible,
-                    "embedded" => DependencyType::Embedded,
-                    _ => DependencyType::Optional,
-                },
-            }).collect(),
-            published: v.date_published,
-            version_type: Some(v.version_type),
-            downloads: Some(v.downloads as u64),
-        }).collect();
+        let mod_versions = versions
+            .into_iter()
+            .map(|v| ModVersion {
+                id: v.id.clone(),
+                mod_id: v.project_id,
+                name: v.name,
+                version_number: v.version_number,
+                game_versions: v.game_versions,
+                loaders: v.loaders,
+                files: v
+                    .files
+                    .into_iter()
+                    .map(|f| ModFile {
+                        url: f.url,
+                        filename: f.filename,
+                        primary: f.primary,
+                        size: f.size as u64,
+                        hashes: FileHashes {
+                            sha1: f.hashes.sha1,
+                            sha512: f.hashes.sha512,
+                        },
+                    })
+                    .collect(),
+                dependencies: v
+                    .dependencies
+                    .into_iter()
+                    .map(|d| ModDependency {
+                        mod_id: d.project_id.unwrap_or_default(),
+                        dependency_type: match d.dependency_type.as_str() {
+                            "required" => DependencyType::Required,
+                            "optional" => DependencyType::Optional,
+                            "incompatible" => DependencyType::Incompatible,
+                            "embedded" => DependencyType::Embedded,
+                            _ => DependencyType::Optional,
+                        },
+                    })
+                    .collect(),
+                published: v.date_published,
+                version_type: Some(v.version_type),
+                downloads: Some(v.downloads as u64),
+            })
+            .collect();
 
         Ok(mod_versions)
     }
@@ -302,4 +324,3 @@ pub struct ModrinthCategory {
     pub project_type: String,
     pub header: String,
 }
-

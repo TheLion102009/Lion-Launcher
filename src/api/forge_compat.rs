@@ -1,13 +1,13 @@
 #![allow(dead_code)]
 
-use anyhow::Result;
 use crate::api::{forge, neoforge};
+use anyhow::Result;
 
 /// Einheitliche Forge/NeoForge-Kompatibilitätsschicht
-/// 
+///
 /// Diese Schicht entscheidet automatisch, ob Forge oder NeoForge
 /// für eine bestimmte Minecraft-Version verwendet werden soll.
-/// 
+///
 /// Regel:
 /// - MC < 1.20.1: Nur Forge verfügbar
 /// - MC >= 1.20.1: Beide verfügbar, aber NeoForge bevorzugt für neuere Versionen
@@ -108,7 +108,7 @@ impl ForgeCompatClient {
         // NeoForge ist zu einem großen Teil rückwärtskompatibel mit Forge-Mods
         // Ab MC 1.20.1+ ist die Kompatibilität sehr hoch
         // Ab MC 1.21+ kann es Kompatibilitätsprobleme geben
-        
+
         if Self::compare_versions(minecraft_version, "1.21.0") != std::cmp::Ordering::Less {
             // MC 1.21+: Teilweise kompatibel (Mods müssen getestet werden)
             false
@@ -126,13 +126,16 @@ impl ForgeCompatClient {
         if !neoforge::NeoForgeClient::is_available_for_version(minecraft_version) {
             return MigrationInfo {
                 can_migrate: false,
-                recommendation: "NeoForge ist für diese Minecraft-Version nicht verfügbar.".to_string(),
+                recommendation: "NeoForge ist für diese Minecraft-Version nicht verfügbar."
+                    .to_string(),
                 compatibility_notes: vec![],
             };
         }
 
         let can_migrate = true;
-        let recommendation = if Self::compare_versions(minecraft_version, "1.21.0") != std::cmp::Ordering::Less {
+        let recommendation = if Self::compare_versions(minecraft_version, "1.21.0")
+            != std::cmp::Ordering::Less
+        {
             "Für Minecraft 1.21+ wird NeoForge dringend empfohlen, da Forge hier weniger aktiv entwickelt wird.".to_string()
         } else {
             "NeoForge ist eine modernere Alternative zu Forge mit verbesserter Performance und aktiver Entwicklung.".to_string()
@@ -165,13 +168,13 @@ impl ForgeCompatClient {
         for i in 0..a_parts.len().max(b_parts.len()) {
             let a_part = a_parts.get(i).copied().unwrap_or(0);
             let b_part = b_parts.get(i).copied().unwrap_or(0);
-            
+
             match a_part.cmp(&b_part) {
                 std::cmp::Ordering::Equal => continue,
                 other => return other,
             }
         }
-        
+
         std::cmp::Ordering::Equal
     }
 }
@@ -224,16 +227,22 @@ impl ForgeCompatVersions {
         match self.recommended_loader {
             LoaderType::NeoForge => {
                 // Suche die neueste stabile NeoForge-Version
-                all_versions.iter()
+                all_versions
+                    .iter()
                     .find(|v| v.loader_type == LoaderType::NeoForge && !v.is_beta)
                     .cloned()
             }
             LoaderType::Forge => {
                 // Suche die empfohlene Forge-Version oder die neueste
-                all_versions.iter()
+                all_versions
+                    .iter()
                     .filter(|v| v.loader_type == LoaderType::Forge)
                     .find(|v| v.recommended)
-                    .or_else(|| all_versions.iter().find(|v| v.loader_type == LoaderType::Forge))
+                    .or_else(|| {
+                        all_versions
+                            .iter()
+                            .find(|v| v.loader_type == LoaderType::Forge)
+                    })
                     .cloned()
             }
         }

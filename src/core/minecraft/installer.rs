@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
-use anyhow::{Result, bail};
+use crate::core::download::DownloadManager;
+use anyhow::{bail, Result};
 use serde::Deserialize;
 use std::path::Path;
-use crate::core::download::DownloadManager;
 
 /// Forge/NeoForge Installer Handler
 /// Unterstützt beide Loader-Typen mit einheitlicher Schnittstelle
@@ -56,7 +56,12 @@ impl ForgeInstaller {
 
                     let mut success = false;
                     for url in maven_urls {
-                        if self.download_manager.download_with_hash(&url, &lib_dest, None).await.is_ok() {
+                        if self
+                            .download_manager
+                            .download_with_hash(&url, &lib_dest, None)
+                            .await
+                            .is_ok()
+                        {
                             success = true;
                             break;
                         }
@@ -91,7 +96,8 @@ impl ForgeInstaller {
     ) -> Result<ForgeInstallation> {
         // NeoForge verwendet das gleiche Installationsformat wie Forge
         tracing::info!("Processing NeoForge installer: {:?}", installer_jar);
-        self.install_forge(installer_jar, libraries_dir, mc_version).await
+        self.install_forge(installer_jar, libraries_dir, mc_version)
+            .await
     }
 
     fn extract_install_profile(&self, installer_jar: &Path) -> Result<ForgeInstallProfile> {
@@ -137,8 +143,15 @@ impl ForgeInstaller {
             let group = parts[0].replace('.', "/");
             let artifact = parts[1];
             let version = parts[2];
-            let classifier = if parts.len() > 3 { format!("-{}", parts[3]) } else { String::new() };
-            format!("{}/{}/{}/{}-{}{}.jar", group, artifact, version, artifact, version, classifier)
+            let classifier = if parts.len() > 3 {
+                format!("-{}", parts[3])
+            } else {
+                String::new()
+            };
+            format!(
+                "{}/{}/{}/{}-{}{}.jar",
+                group, artifact, version, artifact, version, classifier
+            )
         } else {
             maven.to_string()
         }
@@ -153,11 +166,11 @@ impl ForgeInstaller {
         if let Ok(mut entry) = archive.by_name("install_profile.json") {
             let mut data = String::new();
             std::io::Read::read_to_string(&mut entry, &mut data)?;
-            
+
             if data.contains("neoforged") || data.contains("net.neoforged") {
                 return Ok(LoaderType::NeoForge);
             }
-            
+
             if data.contains("minecraftforge") || data.contains("net.minecraftforge") {
                 return Ok(LoaderType::Forge);
             }

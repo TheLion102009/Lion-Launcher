@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::fs;
@@ -36,7 +36,8 @@ pub async fn get_worlds(game_dir: &Path) -> Result<Vec<WorldInfo>> {
     }
 
     let mut worlds = Vec::new();
-    let mut entries = fs::read_dir(&saves_dir).await
+    let mut entries = fs::read_dir(&saves_dir)
+        .await
         .context("Failed to read saves directory")?;
 
     while let Some(entry) = entries.next_entry().await? {
@@ -51,13 +52,15 @@ pub async fn get_worlds(game_dir: &Path) -> Result<Vec<WorldInfo>> {
             continue;
         }
 
-        let folder_name = path.file_name()
+        let folder_name = path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("Unknown")
             .to_string();
 
         // Versuche level.dat zu lesen (NBT Format)
-        let world_info = read_world_info(&path, &folder_name).await
+        let world_info = read_world_info(&path, &folder_name)
+            .await
             .unwrap_or_else(|_| WorldInfo {
                 name: folder_name.clone(),
                 folder_name: folder_name.clone(),
@@ -79,8 +82,8 @@ pub async fn get_worlds(game_dir: &Path) -> Result<Vec<WorldInfo>> {
 
 /// Liest World-Info aus level.dat
 async fn read_world_info(world_path: &Path, folder_name: &str) -> Result<WorldInfo> {
-    use std::io::Read;
     use flate2::read::GzDecoder;
+    use std::io::Read;
 
     let level_dat_path = world_path.join("level.dat");
     let data = fs::read(&level_dat_path).await?;
@@ -91,11 +94,10 @@ async fn read_world_info(world_path: &Path, folder_name: &str) -> Result<WorldIn
     decoder.read_to_end(&mut decompressed)?;
 
     // Parse NBT (vereinfacht - wir suchen nach bekannten Strings)
-    let name = extract_nbt_string(&decompressed, "LevelName")
-        .unwrap_or_else(|| folder_name.to_string());
+    let name =
+        extract_nbt_string(&decompressed, "LevelName").unwrap_or_else(|| folder_name.to_string());
 
-    let last_played = extract_nbt_long(&decompressed, "LastPlayed")
-        .unwrap_or(0);
+    let last_played = extract_nbt_long(&decompressed, "LastPlayed").unwrap_or(0);
 
     let game_mode = match extract_nbt_int(&decompressed, "GameType") {
         Some(0) => "Survival",
@@ -103,7 +105,8 @@ async fn read_world_info(world_path: &Path, folder_name: &str) -> Result<WorldIn
         Some(2) => "Adventure",
         Some(3) => "Spectator",
         _ => "Unknown",
-    }.to_string();
+    }
+    .to_string();
 
     let difficulty = match extract_nbt_int(&decompressed, "Difficulty") {
         Some(0) => "Peaceful",
@@ -111,14 +114,18 @@ async fn read_world_info(world_path: &Path, folder_name: &str) -> Result<WorldIn
         Some(2) => "Normal",
         Some(3) => "Hard",
         _ => "Normal",
-    }.to_string();
+    }
+    .to_string();
 
     // Versuche Icon zu laden
     let icon_path = world_path.join("icon.png");
     let icon_base64 = if icon_path.exists() {
         fs::read(&icon_path).await.ok().map(|data| {
-            use base64::{Engine as _, engine::general_purpose};
-            format!("data:image/png;base64,{}", general_purpose::STANDARD.encode(&data))
+            use base64::{engine::general_purpose, Engine as _};
+            format!(
+                "data:image/png;base64,{}",
+                general_purpose::STANDARD.encode(&data)
+            )
         })
     } else {
         None
@@ -230,9 +237,7 @@ pub async fn get_servers(game_dir: &Path) -> Result<Vec<ServerInfo>> {
 
     // Versuche live Status (Icon + MOTD) für alle Server PARALLEL zu holen
     // So dauert es max 5s statt 5s × Anzahl Server
-    let status_futures: Vec<_> = servers.iter()
-        .map(|s| query_server_status(&s.ip))
-        .collect();
+    let status_futures: Vec<_> = servers.iter().map(|s| query_server_status(&s.ip)).collect();
 
     let results = futures_util::future::join_all(status_futures).await;
 
@@ -273,35 +278,49 @@ async fn query_server_status(address: &str) -> Result<ServerStatusResponse> {
         .user_agent("Lion-Launcher/1.0")
         .build()?;
 
-    let resp = client.get(&url).send().await
-        .map_err(|e| {
-            tracing::warn!("Server status request failed for '{}': {}", address, e);
-            e
-        })?;
+    let resp = client.get(&url).send().await.map_err(|e| {
+        tracing::warn!("Server status request failed for '{}': {}", address, e);
+        e
+    })?;
 
     let status_code = resp.status();
     if !status_code.is_success() {
-        tracing::warn!("Server status API returned {} for '{}'", status_code, address);
+        tracing::warn!(
+            "Server status API returned {} for '{}'",
+            status_code,
+            address
+        );
         anyhow::bail!("API returned {}", status_code);
     }
 
     let body = resp.text().await?;
-    tracing::debug!("Server status response for '{}': {}...chars", address, body.len());
+    tracing::debug!(
+        "Server status response for '{}': {}...chars",
+        address,
+        body.len()
+    );
 
-    let json: serde_json::Value = serde_json::from_str(&body)
-        .map_err(|e| {
-            tracing::warn!("Failed to parse server status JSON for '{}': {}", address, e);
+    let json: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
+        tracing::warn!(
+            "Failed to parse server status JSON for '{}': {}",
+            address,
             e
-        })?;
+        );
+        e
+    })?;
 
-    let online = json.get("online").and_then(|v| v.as_bool()).unwrap_or(false);
+    let online = json
+        .get("online")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if !online {
         tracing::info!("Server '{}' reports as offline", address);
         anyhow::bail!("Server offline");
     }
 
     // Icon: API v2 gibt base64-String OHNE data:-Prefix zurück
-    let icon_base64 = json.get("icon")
+    let icon_base64 = json
+        .get("icon")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| {
@@ -313,38 +332,51 @@ async fn query_server_status(address: &str) -> Result<ServerStatusResponse> {
         });
 
     // MOTD: clean-Array (ohne Farb-Codes) als Fallback
-    let motd = json.get("motd")
+    let motd = json
+        .get("motd")
         .and_then(|v| v.get("clean"))
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter()
-            .filter_map(|v| v.as_str())
-            .collect::<Vec<_>>()
-            .join(" ")
-        )
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
         .filter(|s| !s.trim().is_empty());
 
     // MOTD als HTML-Array: Jede Zeile ist ein HTML-String mit Minecraft-Farben und Bold/Italic
-    let motd_html = json.get("motd")
+    let motd_html = json
+        .get("motd")
         .and_then(|v| v.get("html"))
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter()
-            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-            .collect::<Vec<String>>()
-        )
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect::<Vec<String>>()
+        })
         .filter(|v| !v.is_empty());
 
-    let online_players = json.get("players")
+    let online_players = json
+        .get("players")
         .and_then(|v| v.get("online"))
         .and_then(|v| v.as_u64())
         .map(|v| v as u32);
 
-    let max_players = json.get("players")
+    let max_players = json
+        .get("players")
         .and_then(|v| v.get("max"))
         .and_then(|v| v.as_u64())
         .map(|v| v as u32);
 
-    tracing::info!("Server '{}': online, icon={}, motd={}, motd_html={}, players={:?}/{:?}",
-        address, icon_base64.is_some(), motd.is_some(), motd_html.is_some(), online_players, max_players);
+    tracing::info!(
+        "Server '{}': online, icon={}, motd={}, motd_html={}, players={:?}/{:?}",
+        address,
+        icon_base64.is_some(),
+        motd.is_some(),
+        motd_html.is_some(),
+        online_players,
+        max_players
+    );
 
     Ok(ServerStatusResponse {
         icon_base64,
@@ -443,7 +475,7 @@ fn build_servers_dat(servers: &[ServerInfo]) -> Vec<u8> {
     data.push(0x09); // TAG_List type
     write_nbt_string_tag_name(&mut data, "servers");
     data.push(0x0A); // Element-Typ: TAG_Compound
-    // Anzahl der Einträge (big-endian i32)
+                     // Anzahl der Einträge (big-endian i32)
     let count = servers.len() as i32;
     data.extend_from_slice(&count.to_be_bytes());
 
@@ -492,9 +524,15 @@ fn parse_servers_dat(data: &[u8]) -> Result<Vec<ServerInfo>> {
         // Suche nach "name" Tag gefolgt von String
         if let Some(pos) = find_sequence(data, i, b"name") {
             // pos zeigt direkt auf die Wert-Länge (2 Bytes) nach "name"
-            if pos + 2 > data.len() { i = pos; continue; }
+            if pos + 2 > data.len() {
+                i = pos;
+                continue;
+            }
             let name_len = ((data[pos] as usize) << 8) | (data[pos + 1] as usize);
-            if pos + 2 + name_len > data.len() { i = pos; continue; }
+            if pos + 2 + name_len > data.len() {
+                i = pos;
+                continue;
+            }
             let name = String::from_utf8_lossy(&data[pos + 2..pos + 2 + name_len]).to_string();
 
             // Suche nach "ip" in der Nähe (innerhalb 200 Bytes)
@@ -504,10 +542,17 @@ fn parse_servers_dat(data: &[u8]) -> Result<Vec<ServerInfo>> {
             if let Some(ip_pos) = find_sequence(data, search_start, b"ip") {
                 if ip_pos < search_end {
                     // ip_pos zeigt direkt auf die Wert-Länge (2 Bytes) nach "ip"
-                    if ip_pos + 2 > data.len() { i = ip_pos; continue; }
+                    if ip_pos + 2 > data.len() {
+                        i = ip_pos;
+                        continue;
+                    }
                     let ip_len = ((data[ip_pos] as usize) << 8) | (data[ip_pos + 1] as usize);
-                    if ip_pos + 2 + ip_len > data.len() { i = ip_pos; continue; }
-                    let ip = String::from_utf8_lossy(&data[ip_pos + 2..ip_pos + 2 + ip_len]).to_string();
+                    if ip_pos + 2 + ip_len > data.len() {
+                        i = ip_pos;
+                        continue;
+                    }
+                    let ip =
+                        String::from_utf8_lossy(&data[ip_pos + 2..ip_pos + 2 + ip_len]).to_string();
 
                     // Vermeide Duplikate
                     if !servers.iter().any(|s: &ServerInfo| s.ip == ip) {
