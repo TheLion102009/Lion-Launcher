@@ -14,6 +14,14 @@ pub fn profiles_dir() -> PathBuf {
     launcher_dir().join("profiles")
 }
 
+pub fn servers_dir() -> PathBuf {
+    launcher_dir().join("servers")
+}
+
+pub fn server_profiles_file() -> PathBuf {
+    launcher_dir().join("server_profiles.json")
+}
+
 pub fn libraries_dir() -> PathBuf {
     launcher_dir().join("libraries")
 }

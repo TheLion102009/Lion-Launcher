@@ -10,10 +10,9 @@ PKG_CONFIG_PATH = { value = "/run/host/usr/lib64/pkgconfig:/run/host/usr/lib/pkg
 linker = "x86_64-w64-mingw32-gcc"
 ar = "x86_64-w64-mingw32-ar"
 
-# Alternativ: Windows Cross-Compilation mit MSVC (benötigt lld)
-[target.x86_64-pc-windows-msvc]
-linker = "lld-link"
-rustflags = ["-C", "target-feature=+crt-static"]
+# Kein erzwungener MSVC-Linker hier:
+# - Native Windows-Builds sollen den Standard (link.exe) nutzen
+# - cargo-xwin soll nur explizit auf Linux/macOS verwendet werden
 
 # Linux ARM64 Cross-Compilation
 [target.aarch64-unknown-linux-gnu]

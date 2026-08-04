@@ -130,6 +130,23 @@ const MODS_PER_PAGE = 20;
 let currentContentType = 'mods';
 let serverProfiles = [];
 let currentServerProfile = null;
+let serverHubPollInterval = null;
+let serverConsolePollInterval = null;
+let serverDetailsPollInterval = null;
+let currentServerFilesPath = '';
+let currentServerEditedFile = null;
+const serverMetricHistory = new Map();
+let serverConsoleAutoScroll = true;
+const DEFAULT_SERVER_JAVA_ARGS = [
+    '-XX:+UnlockExperimentalVMOptions',
+    '-XX:+UseG1GC',
+    '-XX:G1NewSizePercent=20',
+    '-XX:G1ReservePercent=20',
+    '-XX:MaxGCPauseMillis=50',
+    '-XX:G1HeapRegionSize=32M',
+].join(' ');
+let latestStableJavaMajor = 21;
+let javaRuntimeOptionsCache = [];
 
 // Berechne effektives Limit: Bei "Hide Installed" mehr laden, um Seite zu füllen
 function getEffectiveLimit() {
@@ -248,7 +265,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
 
         debugLog('Loading settings...', 'info');
-        loadSettings();
+        await loadSettings();
 
         debugLog('Loading accounts...', 'info');
         await loadAccounts();
@@ -480,6 +497,8 @@ function switchPage(page) {
 
     if (page === 'servers-hub') {
         loadServerHub();
+    } else {
+        clearServerHubIntervals();
     }
 }
 
@@ -2023,9 +2042,15 @@ function updateProfileScrollableBoxes() {
     if (!boxes.length) return;
 
     boxes.forEach(box => {
+        if (box.offsetParent === null) return;
         const rect = box.getBoundingClientRect();
-        const available = Math.floor(window.innerHeight - rect.top - 42);
-        const targetHeight = Math.max(220, Math.min(available, 560));
+        const viewportAvailable = Math.floor(window.innerHeight - rect.top - 24);
+        const contentHost = box.closest('.content, #server-detail-content, #main-category-shell');
+        const hostAvailable = contentHost
+            ? Math.floor(contentHost.getBoundingClientRect().bottom - rect.top - 12)
+            : viewportAvailable;
+        const available = Math.min(viewportAvailable, hostAvailable);
+        const targetHeight = Math.max(180, Math.min(available, 520));
         box.style.height = `${targetHeight}px`;
         box.style.maxHeight = `${targetHeight}px`;
     });
@@ -3653,10 +3678,120 @@ async function launchServer(profileId, serverIp) {
 
 // ==================== LOCAL SERVER HUB ====================
 
+function getServerModeLabel(mode) {
+    return mode === 'plugins' ? 'Plugins' : 'Modded';
+}
+
+function getServerIcon(mode) {
+    return mode === 'plugins' ? 'bi-plug-fill' : 'bi-puzzle-fill';
+}
+
+function getServerSoftwareOptions(mode) {
+    if (mode === 'modded') {
+        return [
+            { value: 'fabric', label: 'Fabric (recommended)' },
+            { value: 'vanilla', label: 'Vanilla' },
+        ];
+    }
+
+    return [
+        { value: 'paper', label: 'Paper (recommended)' },
+        { value: 'purpur', label: 'Purpur' },
+        { value: 'vanilla', label: 'Vanilla' },
+    ];
+}
+
+function renderServerSoftwareOptions(mode, selected = '') {
+    return getServerSoftwareOptions(mode)
+        .map(opt => `<option value="${escapeAttr(opt.value)}" ${opt.value === selected ? 'selected' : ''}>${escapeHtml(opt.label)}</option>`)
+        .join('');
+}
+
+function updateServerSoftwareFieldByMode() {
+    const modeSelect = document.getElementById('new-server-mode');
+    const softwareSelect = document.getElementById('new-server-software');
+    if (!modeSelect || !softwareSelect) return;
+
+    const mode = modeSelect.value || 'plugins';
+    const options = getServerSoftwareOptions(mode);
+    const current = softwareSelect.value;
+    const fallback = options[0]?.value || 'paper';
+    const next = options.some(o => o.value === current) ? current : fallback;
+    softwareSelect.innerHTML = renderServerSoftwareOptions(mode, next);
+}
+
+function clearServerHubIntervals() {
+    if (serverHubPollInterval) {
+        clearInterval(serverHubPollInterval);
+        serverHubPollInterval = null;
+    }
+    if (serverDetailsPollInterval) {
+        clearInterval(serverDetailsPollInterval);
+        serverDetailsPollInterval = null;
+    }
+    if (serverConsolePollInterval) {
+        clearInterval(serverConsolePollInterval);
+        serverConsolePollInterval = null;
+    }
+}
+
+function animateServerTabContent(shell) {
+    if (!shell) return;
+    shell.classList.remove('server-tab-enter');
+    void shell.offsetWidth;
+    shell.classList.add('server-tab-enter');
+}
+
+function updateServerAutoScrollButton() {
+    const btn = document.getElementById('server-auto-scroll-btn');
+    if (!btn) return;
+    btn.textContent = serverConsoleAutoScroll ? 'Auto-Scroll: On' : 'Auto-Scroll: Off';
+    btn.style.color = serverConsoleAutoScroll ? '#fff' : 'var(--text-secondary)';
+}
+
+function toggleServerConsoleAutoScroll() {
+    serverConsoleAutoScroll = !serverConsoleAutoScroll;
+    updateServerAutoScrollButton();
+    if (serverConsoleAutoScroll) {
+        const el = document.getElementById('server-console-output');
+        if (el) {
+            el.scrollTop = el.scrollHeight;
+        }
+    }
+}
+
+function getServerCardTemplate(server) {
+    const modeLabel = getServerModeLabel(server.mode);
+    const iconClass = getServerIcon(server.mode);
+    const safeId = escapeAttr(server.id);
+
+    return `
+        <div class="server-card server-card-rich" onclick="openServerProfileDetails('${safeId}')">
+            <div class="server-card-top">
+                <div class="server-card-icon"><i class="bi ${iconClass}"></i></div>
+                <div style="flex:1; min-width:0;">
+                    <h3 class="server-card-title">${escapeHtml(server.name)}</h3>
+                    <div class="server-card-subtitle">${escapeHtml(server.software)} • MC ${escapeHtml(server.minecraft_version)} • ${modeLabel}</div>
+                </div>
+            </div>
+
+            <div class="server-runtime-badge" id="server-runtime-${safeId}">Status wird geladen...</div>
+            <div class="server-load-row" id="server-load-${safeId}">CPU --% • RAM -- MB • Uptime --</div>
+
+            <div class="server-card-actions" onclick="event.stopPropagation()">
+                <button class="btn" data-server-toggle-btn="${safeId}" onclick="toggleServerProfile('${safeId}')">
+                    <i class="bi bi-play-fill"></i> Start
+                </button>
+            </div>
+        </div>
+    `;
+}
+
 async function loadServerHub() {
     const root = document.getElementById('servers-hub-content');
     if (!root) return;
 
+    clearServerHubIntervals();
     root.innerHTML = '<div class="loading">Loading local servers...</div>';
 
     try {
@@ -3675,24 +3810,7 @@ async function loadServerHub() {
             return;
         }
 
-        const cards = serverProfiles.map(server => {
-            const mode = server.mode === 'plugins' ? 'Plugins' : 'Modded';
-            return `
-                <div class="server-card" onclick="openServerProfileDetails('${server.id}')">
-                    <div style="display:flex; justify-content:space-between; gap:10px; margin-bottom:8px;">
-                        <h3 style="margin:0; color: var(--gold);">${escapeHtml(server.name)}</h3>
-                        <span style="font-size:12px; color: var(--text-secondary);">${mode}</span>
-                    </div>
-                    <div style="color:var(--text-secondary); font-size:14px; margin-bottom:10px;">
-                        ${escapeHtml(server.software)} • MC ${escapeHtml(server.minecraft_version)}
-                    </div>
-                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                        <span style="background:var(--bg-dark); padding:4px 8px; border-radius:999px; font-size:12px;">${escapeHtml(server.software_version || 'latest')}</span>
-                        <span style="background:var(--bg-dark); padding:4px 8px; border-radius:999px; font-size:12px;">ID ${escapeHtml(server.id.slice(0, 8))}</span>
-                    </div>
-                </div>
-            `;
-        }).join('');
+        const cards = serverProfiles.map(server => getServerCardTemplate(server)).join('');
 
         root.innerHTML = `
             <div style="display:flex; justify-content:flex-end; margin-bottom:15px;">
@@ -3708,6 +3826,15 @@ async function loadServerHub() {
                 </div>
             </div>
         `;
+
+        serverProfiles.forEach(server => refreshServerRuntimeUI(server.id, false));
+        serverHubPollInterval = setInterval(() => {
+            if (currentPage !== 'servers-hub') return;
+            serverProfiles.forEach(server => refreshServerRuntimeUI(server.id, false));
+            if (currentServerProfile) {
+                refreshServerRuntimeUI(currentServerProfile.id, false);
+            }
+        }, 1600);
     } catch (error) {
         root.innerHTML = `<div style="color:#f44336;">Failed to load servers: ${escapeHtml(String(error))}</div>`;
     }
@@ -3748,17 +3875,7 @@ async function openCreateServerProfileModal() {
             </div>
             <div class="form-group">
                 <label>Software</label>
-                <select id="new-server-software">
-                    <option value="paper">Paper</option>
-                    <option value="bukkit">Bukkit</option>
-                    <option value="spigot">Spigot</option>
-                    <option value="purpur">Purpur</option>
-                    <option value="fabric">Fabric</option>
-                    <option value="forge">Forge</option>
-                    <option value="neoforge">NeoForge</option>
-                    <option value="quilt">Quilt</option>
-                    <option value="vanilla">Vanilla</option>
-                </select>
+                <select id="new-server-software">${renderServerSoftwareOptions('plugins', 'paper')}</select>
             </div>
             <div class="form-group">
                 <label>Minecraft Version</label>
@@ -3768,6 +3885,10 @@ async function openCreateServerProfileModal() {
                 <label>Software Version / Build</label>
                 <input type="text" id="new-server-software-version" placeholder="latest" value="latest">
             </div>
+            <div class="form-group">
+                <label>Port</label>
+                <input type="number" id="new-server-port" min="1" max="65535" value="25565" placeholder="25565">
+            </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeCreateServerProfileModal()">Cancel</button>
                 <button class="btn" onclick="submitCreateServerProfile()">Create</button>
@@ -3776,6 +3897,10 @@ async function openCreateServerProfileModal() {
     `;
 
     document.body.appendChild(modal);
+    const modeSelect = document.getElementById('new-server-mode');
+    if (modeSelect) {
+        modeSelect.addEventListener('change', updateServerSoftwareFieldByMode);
+    }
 }
 
 function closeCreateServerProfileModal() {
@@ -3789,6 +3914,8 @@ async function submitCreateServerProfile() {
     const software = document.getElementById('new-server-software')?.value || 'paper';
     const minecraftVersion = document.getElementById('new-server-mc-version')?.value || '';
     const softwareVersion = document.getElementById('new-server-software-version')?.value.trim() || 'latest';
+    const rawPort = parseInt(document.getElementById('new-server-port')?.value || '25565', 10);
+    const port = Number.isFinite(rawPort) && rawPort > 0 && rawPort <= 65535 ? rawPort : 25565;
 
     if (!name) {
         showToast('Please enter a server name', 'error', 2500);
@@ -3806,6 +3933,7 @@ async function submitCreateServerProfile() {
             software,
             minecraftVersion,
             softwareVersion,
+            port,
         });
         closeCreateServerProfileModal();
         await loadServerHub();
@@ -3820,88 +3948,353 @@ function openServerProfileDetails(serverId) {
     if (!root) return;
     const server = serverProfiles.find(s => s.id === serverId);
     if (!server) return;
+
+    clearServerHubIntervals();
     currentServerProfile = server;
+    currentServerFilesPath = '';
+    currentServerEditedFile = null;
+    if (!serverMetricHistory.has(server.id)) {
+        serverMetricHistory.set(server.id, []);
+    }
 
     root.innerHTML = `
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:15px;">
-            <div>
-                <h2 style="color:var(--gold); margin:0;">${escapeHtml(server.name)}</h2>
-                <p style="margin:6px 0 0; color:var(--text-secondary);">${escapeHtml(server.software)} • ${escapeHtml(server.mode)} • MC ${escapeHtml(server.minecraft_version)}</p>
-            </div>
-            <div style="display:flex; gap:8px;">
-                <button class="btn btn-secondary" onclick="loadServerHub()">← Back</button>
-                <button class="btn btn-secondary" onclick="deleteServerProfile('${server.id}')"><i class="bi bi-trash"></i></button>
+        <div style="margin-bottom:14px;">
+            <button class="btn btn-secondary" onclick="loadServerHub()" style="margin-bottom:10px;">← Back</button>
+            <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+                <div style="flex:1; min-width:0;">
+                    <h2 style="color:var(--gold); margin:0;">${escapeHtml(server.name)}</h2>
+                    <p style="margin:6px 0 0; color:var(--text-secondary);">${escapeHtml(server.software)} • ${escapeHtml(server.mode)} • MC ${escapeHtml(server.minecraft_version)}</p>
+                    <div id="server-detail-runtime" class="server-runtime-badge" style="margin-top:8px; width:fit-content;">Status wird geladen...</div>
+                    <div id="server-detail-load" class="server-load-row" style="margin-top:6px;">CPU --% • RAM -- MB • Uptime --</div>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
+                    <div class="server-address-badge" id="server-detail-address">127.0.0.1:${server.port || 25565}</div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+                        <button class="btn" id="server-detail-toggle-btn" data-server-toggle-btn="${server.id}" onclick="toggleServerProfile('${server.id}')">
+                            <i class="bi bi-play-fill"></i> Start
+                        </button>
+                        <button class="btn btn-secondary" onclick="restartServerProfile('${server.id}')"><i class="bi bi-arrow-clockwise"></i> Restart</button>
+                        <button class="btn btn-secondary" onclick="killServerProfile('${server.id}')"><i class="bi bi-lightning-charge"></i> Kill</button>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
-            <button class="btn btn-secondary server-detail-tab active" data-server-tab="content" onclick="switchServerDetailTab('content','${server.id}')">Content</button>
-            <button class="btn btn-secondary server-detail-tab" data-server-tab="console" onclick="switchServerDetailTab('console','${server.id}')">Console</button>
-            <button class="btn btn-secondary server-detail-tab" data-server-tab="settings" onclick="switchServerDetailTab('settings','${server.id}')">Settings</button>
-            <button class="btn btn-secondary server-detail-tab" data-server-tab="files" onclick="switchServerDetailTab('files','${server.id}')">Files</button>
+        <div class="server-tab-shell">
+            <div class="server-tab-inner">
+                <button class="btn btn-secondary server-detail-tab" data-server-tab="console" onclick="switchServerDetailTab('console','${server.id}')">Console</button>
+                <button class="btn btn-secondary server-detail-tab" data-server-tab="content" onclick="switchServerDetailTab('content','${server.id}')">Content</button>
+                <button class="btn btn-secondary server-detail-tab" data-server-tab="settings" onclick="switchServerDetailTab('settings','${server.id}')">Settings</button>
+                <button class="btn btn-secondary server-detail-tab" data-server-tab="files" onclick="switchServerDetailTab('files','${server.id}')">Files</button>
+            </div>
         </div>
-        <div id="server-detail-content"></div>
+        <div id="server-detail-content" style="max-height: calc(100vh - 260px); overflow-y: auto; padding-right: 4px;"></div>
     `;
 
-    switchServerDetailTab('content', server.id);
+    switchServerDetailTab('console', server.id);
+    refreshServerRuntimeUI(server.id, false);
+    serverDetailsPollInterval = setInterval(() => {
+        if (!currentServerProfile || currentServerProfile.id !== server.id) return;
+        refreshServerRuntimeUI(server.id, false);
+    }, 1500);
 }
 
 function switchServerDetailTab(tab, serverId) {
     document.querySelectorAll('.server-detail-tab').forEach(btn => {
-        if (btn.dataset.serverTab === tab) {
-            btn.classList.add('active');
-            btn.style.borderColor = 'var(--gold)';
-            btn.style.color = 'var(--gold)';
-        } else {
-            btn.classList.remove('active');
-            btn.style.borderColor = '';
-            btn.style.color = '';
-        }
+        btn.classList.toggle('active', btn.dataset.serverTab === tab);
     });
 
     const shell = document.getElementById('server-detail-content');
     if (!shell) return;
+    if (serverConsolePollInterval) {
+        clearInterval(serverConsolePollInterval);
+        serverConsolePollInterval = null;
+    }
 
     if (tab === 'content') {
         const contentType = currentServerProfile?.mode === 'plugins' ? 'plugins' : 'mods';
         shell.innerHTML = `
-            <div style="display:flex; gap:8px; margin-bottom:12px;">
-                <button class="btn btn-secondary" onclick="openServerFolder('${serverId}', '${contentType}')"><i class="bi bi-folder"></i> Open ${contentType}</button>
-                <button class="btn btn-secondary" onclick="triggerServerContentUpload()"><i class="bi bi-upload"></i> Add .jar</button>
-                <input id="server-content-upload" type="file" accept=".jar" style="display:none;" onchange="uploadServerContentFile('${serverId}','${contentType}', this)">
-            </div>
+            <div style="margin-bottom:10px; color:var(--text-secondary); font-size:13px;">Installierte ${contentType} (Dateiverwaltung und Upload im Tab "Files")</div>
             <div id="server-content-list" class="profile-scroll-box" style="background:var(--bg-medium); border-radius:10px; padding:10px;"></div>
         `;
+        animateServerTabContent(shell);
         loadServerContent(serverId, contentType);
         return;
     }
 
     if (tab === 'console') {
         shell.innerHTML = `
-            <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
-                <button class="btn btn-secondary" onclick="loadServerConsole('${serverId}')"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+            <div style="display:flex; justify-content:space-between; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-secondary" onclick="loadServerConsole('${serverId}')"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                    <button class="btn btn-secondary" onclick="clearServerConsoleOutput()"><i class="bi bi-eraser"></i> Clear View</button>
+                    <button class="btn btn-secondary" id="server-auto-scroll-btn" onclick="toggleServerConsoleAutoScroll()">Auto-Scroll: On</button>
+                </div>
+                <div style="color:var(--text-secondary); font-size:12px; display:flex; align-items:center;">Live stream (polling)</div>
             </div>
-            <pre id="server-console-output" class="profile-scroll-box" style="background:#0c0c0c; border:1px solid var(--bg-light); border-radius:10px; padding:12px; font-size:12px; line-height:1.45; white-space:pre-wrap;"></pre>
+            <pre id="server-console-output" class="profile-scroll-box" style="background:#0c0c0c; border:1px solid var(--bg-light); border-radius:10px; padding:12px; font-size:12px; line-height:1.45; white-space:pre-wrap; min-height:430px;"></pre>
+            <div style="display:flex; gap:8px; margin-top:10px;">
+                <input id="server-console-command" type="text" placeholder="say Server ready" style="flex:1;">
+                <button class="btn" onclick="sendServerConsoleCommand('${serverId}')">Send</button>
+            </div>
+            <div style="margin-top:10px; background:var(--bg-medium); border:1px solid var(--bg-light); border-radius:10px; padding:10px;">
+                <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:8px; font-size:12px;">
+                    <span id="server-metric-cpu">CPU: --%</span>
+                    <span id="server-metric-ram">RAM: -- MB</span>
+                    <span id="server-metric-net">NET: -- KB/s</span>
+                </div>
+                <canvas id="server-metrics-chart" width="1200" height="180" style="width:100%; height:180px; display:block;"></canvas>
+            </div>
         `;
+        const input = document.getElementById('server-console-command');
+        if (input) {
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    sendServerConsoleCommand(serverId);
+                }
+            });
+        }
+
+        animateServerTabContent(shell);
+        updateServerAutoScrollButton();
         loadServerConsole(serverId);
+        renderServerMetricsChart(serverId);
+        serverConsolePollInterval = setInterval(() => {
+            if (!currentServerProfile || currentServerProfile.id !== serverId) return;
+            loadServerConsole(serverId);
+            renderServerMetricsChart(serverId);
+        }, 1000);
         return;
     }
 
     if (tab === 'settings') {
         shell.innerHTML = `<div id="server-settings-content" style="background:var(--bg-medium); border-radius:10px; padding:12px;">Loading settings...</div>`;
+        animateServerTabContent(shell);
         loadServerSettings(serverId);
         return;
     }
 
     shell.innerHTML = `
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="btn btn-secondary" onclick="openServerFolder('${serverId}', null)"><i class="bi bi-folder2-open"></i> Server Root</button>
-            <button class="btn btn-secondary" onclick="openServerFolder('${serverId}', 'world')"><i class="bi bi-globe"></i> World</button>
-            <button class="btn btn-secondary" onclick="openServerFolder('${serverId}', 'logs')"><i class="bi bi-file-text"></i> Logs</button>
-            <button class="btn btn-secondary" onclick="openServerFolder('${serverId}', 'plugins')"><i class="bi bi-plug"></i> Plugins</button>
-            <button class="btn btn-secondary" onclick="openServerFolder('${serverId}', 'mods')"><i class="bi bi-puzzle"></i> Mods</button>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn-secondary" onclick="navigateServerFilesUp('${serverId}')"><i class="bi bi-arrow-up"></i> Up</button>
+                <button class="btn btn-secondary" onclick="loadServerFiles('${serverId}', currentServerFilesPath)"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                <button class="btn btn-secondary" onclick="createServerFolderPrompt('${serverId}')"><i class="bi bi-folder-plus"></i> New Folder</button>
+                <button class="btn btn-secondary" onclick="triggerServerFileUpload()"><i class="bi bi-upload"></i> Upload</button>
+                <button class="btn btn-secondary" onclick="openServerFolder('${serverId}', currentServerFilesPath || null)"><i class="bi bi-box-arrow-up-right"></i> Open Extern</button>
+                <input id="server-file-upload" type="file" style="display:none;" onchange="uploadServerFileFromInput('${serverId}', this)">
+            </div>
+            <div id="server-files-path" style="font-size:12px; color:var(--text-secondary);">/</div>
+        </div>
+        <div id="server-files-list" class="profile-scroll-box" style="background:var(--bg-medium); border-radius:10px; padding:10px; min-height:240px;"></div>
+        <div id="server-file-editor-shell" style="display:none; margin-top:12px; background:var(--bg-medium); border-radius:10px; padding:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;">
+                <strong id="server-file-editor-name"></strong>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-secondary" onclick="closeServerFileEditor()">Close</button>
+                    <button class="btn" onclick="saveServerFileEditor('${serverId}')">Save</button>
+                </div>
+            </div>
+            <textarea id="server-file-editor" style="width:100%; min-height:260px; font-family:Consolas, monospace;"></textarea>
         </div>
     `;
+    animateServerTabContent(shell);
+    loadServerFiles(serverId, currentServerFilesPath || '');
+}
+
+async function refreshServerRuntimeUI(serverId, showErrorToast = false) {
+    try {
+        const runtime = await invoke('get_server_runtime', { serverId });
+        const running = !!runtime?.running;
+        const networkKbps = Number(runtime?.network_kbps || 0);
+
+        const runtimeText = running
+            ? `Running (PID ${runtime.pid || '-'})`
+            : 'Offline';
+        const uptimeText = running
+            ? `${Math.floor((runtime.uptime_seconds || 0) / 60)} min`
+            : '--';
+        const loadText = running
+            ? `CPU ${(runtime.cpu_percent || 0).toFixed(1)}% • RAM ${runtime.memory_mb || 0} MB • NET ${networkKbps.toFixed(1)} KB/s • Uptime ${uptimeText}`
+            : 'CPU --% • RAM -- MB • NET -- KB/s • Uptime --';
+
+        const runtimeBadge = document.getElementById(`server-runtime-${serverId}`);
+        if (runtimeBadge) {
+            runtimeBadge.textContent = runtimeText;
+            runtimeBadge.style.color = running ? '#55d66b' : 'var(--text-secondary)';
+        }
+
+        const loadRow = document.getElementById(`server-load-${serverId}`);
+        if (loadRow) {
+            loadRow.textContent = loadText;
+        }
+
+        const detailBadge = document.getElementById('server-detail-runtime');
+        const detailLoad = document.getElementById('server-detail-load');
+        const detailAddress = document.getElementById('server-detail-address');
+        if (currentServerProfile && currentServerProfile.id === serverId) {
+            if (detailBadge) {
+                detailBadge.textContent = runtimeText;
+                detailBadge.style.color = running ? '#55d66b' : 'var(--text-secondary)';
+            }
+            if (detailLoad) {
+                detailLoad.textContent = loadText;
+            }
+            if (detailAddress) {
+                detailAddress.textContent = `127.0.0.1:${currentServerProfile.port || 25565}`;
+            }
+
+            const cpuLabel = document.getElementById('server-metric-cpu');
+            const ramLabel = document.getElementById('server-metric-ram');
+            const netLabel = document.getElementById('server-metric-net');
+            if (cpuLabel) cpuLabel.textContent = `CPU: ${(runtime.cpu_percent || 0).toFixed(1)}%`;
+            if (ramLabel) ramLabel.textContent = `RAM: ${runtime.memory_mb || 0} MB`;
+            if (netLabel) netLabel.textContent = `NET: ${networkKbps.toFixed(1)} KB/s`;
+
+            const history = serverMetricHistory.get(serverId) || [];
+            history.push({
+                cpu: Number(runtime.cpu_percent || 0),
+                ram: Number(runtime.memory_mb || 0),
+                net: networkKbps,
+                ts: Date.now(),
+            });
+            while (history.length > 60) history.shift();
+            serverMetricHistory.set(serverId, history);
+        }
+
+        document.querySelectorAll(`[data-server-toggle-btn="${serverId}"]`).forEach(btn => {
+            if (running) {
+                btn.innerHTML = '<i class="bi bi-stop-fill"></i> Stop';
+                btn.style.background = '#c0392b';
+                btn.style.color = '#fff';
+            } else {
+                btn.innerHTML = '<i class="bi bi-play-fill"></i> Start';
+                btn.style.background = '';
+                btn.style.color = '';
+            }
+        });
+
+        renderServerMetricsChart(serverId);
+    } catch (error) {
+        if (showErrorToast) {
+            showToast('Server status konnte nicht geladen werden: ' + error, 'error', 3500);
+        }
+    }
+}
+
+function drawMetricLine(ctx, points, maxValue, width, height, color) {
+    if (!points.length) return;
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+
+    points.forEach((value, index) => {
+        const x = (index / Math.max(points.length - 1, 1)) * width;
+        const normalized = maxValue > 0 ? Math.min(value / maxValue, 1) : 0;
+        const y = height - normalized * (height - 10) - 5;
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+}
+
+function renderServerMetricsChart(serverId) {
+    const canvas = document.getElementById('server-metrics-chart');
+    if (!canvas || !currentServerProfile || currentServerProfile.id !== serverId) return;
+
+    const history = serverMetricHistory.get(serverId) || [];
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = canvas.width;
+    const height = canvas.height;
+    ctx.clearRect(0, 0, width, height);
+
+    ctx.fillStyle = '#0f1117';
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i <= 4; i++) {
+        const y = (height / 5) * i;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+    }
+
+    if (!history.length) {
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = '14px sans-serif';
+        ctx.fillText('Warte auf Runtime-Daten...', 14, 28);
+        return;
+    }
+
+    const cpuValues = history.map(v => v.cpu);
+    const ramValues = history.map(v => v.ram);
+    const netValues = history.map(v => v.net);
+
+    const maxCpu = 100;
+    const maxRam = Math.max(512, ...ramValues);
+    const maxNet = Math.max(64, ...netValues);
+
+    drawMetricLine(ctx, cpuValues, maxCpu, width, height, '#ffb703');
+    drawMetricLine(ctx, ramValues, maxRam, width, height, '#4dabf7');
+    drawMetricLine(ctx, netValues, maxNet, width, height, '#7bd88f');
+
+    ctx.fillStyle = '#ffb703';
+    ctx.fillRect(10, 8, 12, 3);
+    ctx.fillStyle = '#d7d7d7';
+    ctx.font = '12px sans-serif';
+    ctx.fillText('CPU %', 28, 12);
+
+    ctx.fillStyle = '#4dabf7';
+    ctx.fillRect(90, 8, 12, 3);
+    ctx.fillStyle = '#d7d7d7';
+    ctx.fillText('RAM MB', 108, 12);
+
+    ctx.fillStyle = '#7bd88f';
+    ctx.fillRect(188, 8, 12, 3);
+    ctx.fillStyle = '#d7d7d7';
+    ctx.fillText('NET KB/s', 206, 12);
+}
+
+async function toggleServerProfile(serverId) {
+    try {
+        const runtime = await invoke('get_server_runtime', { serverId });
+        if (runtime?.running) {
+            await invoke('stop_server_profile', { serverId });
+            showToast('Server wird gestoppt...', 'info', 1800);
+        } else {
+            await invoke('start_server_profile', { serverId });
+            showToast('Server wird gestartet (JAR Download automatisch bei Bedarf)', 'success', 2600);
+        }
+
+        setTimeout(() => refreshServerRuntimeUI(serverId, false), 400);
+    } catch (error) {
+        showToast('Server Aktion fehlgeschlagen: ' + error, 'error', 4200);
+    }
+}
+
+async function restartServerProfile(serverId) {
+    try {
+        await invoke('restart_server_profile', { serverId });
+        showToast('Server wird neugestartet...', 'info', 2200);
+        setTimeout(() => refreshServerRuntimeUI(serverId, false), 500);
+    } catch (error) {
+        showToast('Neustart fehlgeschlagen: ' + error, 'error', 4200);
+    }
+}
+
+async function killServerProfile(serverId) {
+    if (!confirm('Server-Prozess wirklich sofort killen?')) return;
+    try {
+        await invoke('kill_server_profile', { serverId });
+        showToast('Server-Prozess wurde gekillt', 'info', 2200);
+        setTimeout(() => refreshServerRuntimeUI(serverId, false), 250);
+    } catch (error) {
+        showToast('Kill fehlgeschlagen: ' + error, 'error', 3500);
+    }
 }
 
 function triggerServerContentUpload() {
@@ -3984,11 +4377,36 @@ async function removeServerContentFile(serverId, contentType, fileName) {
 async function loadServerConsole(serverId) {
     const el = document.getElementById('server-console-output');
     if (!el) return;
+
+    const shouldStickToBottom = serverConsoleAutoScroll
+        || Math.abs((el.scrollHeight - el.scrollTop) - el.clientHeight) < 20;
     try {
         const output = await invoke('get_server_console_output', { serverId });
         el.textContent = output || '';
+        if (shouldStickToBottom) {
+            el.scrollTop = el.scrollHeight;
+        }
     } catch (error) {
         el.textContent = 'Failed to read console output: ' + error;
+    }
+}
+
+function clearServerConsoleOutput() {
+    const el = document.getElementById('server-console-output');
+    if (el) el.textContent = '';
+}
+
+async function sendServerConsoleCommand(serverId) {
+    const input = document.getElementById('server-console-command');
+    const command = input?.value.trim() || '';
+    if (!command) return;
+
+    try {
+        await invoke('send_server_console_command', { serverId, command });
+        if (input) input.value = '';
+        await loadServerConsole(serverId);
+    } catch (error) {
+        showToast('Command konnte nicht gesendet werden: ' + error, 'error', 3000);
     }
 }
 
@@ -3997,47 +4415,124 @@ async function loadServerSettings(serverId) {
     if (!shell) return;
 
     try {
+        const profile = serverProfiles.find(s => s.id === serverId);
         const response = await invoke('get_server_properties', { serverId });
-        if (!response.exists) {
-            shell.innerHTML = `
-                <div style="padding:8px; color:var(--text-secondary);">
-                    server.properties wurde für diesen Server noch nicht generiert oder existiert nicht.
-                </div>
-            `;
-            return;
-        }
-
-        const values = response.values || {};
+        const values = response.exists ? (response.values || {}) : {};
         const bool = (key, def = 'false') => (values[key] ?? def) === 'true' ? 'checked' : '';
+        const javaArgsRaw = Array.isArray(profile?.java_args) && profile.java_args.length > 0
+            ? profile.java_args.join(' ')
+            : DEFAULT_SERVER_JAVA_ARGS;
+        const memoryMb = profile?.memory_mb || 4096;
+        const port = Number(profile?.port || values['server-port'] || 25565);
+        const autoRestart = profile?.auto_restart ? 'checked' : '';
 
         shell.innerHTML = `
-            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:14px;">
-                <label>Online Mode <input id="srv-online-mode" type="checkbox" ${bool('online-mode', 'true')}></label>
-                <label>PvP <input id="srv-pvp" type="checkbox" ${bool('pvp', 'true')}></label>
-                <label>Allow Flight <input id="srv-allow-flight" type="checkbox" ${bool('allow-flight', 'false')}></label>
-                <label>View Distance <input id="srv-view-distance" type="range" min="2" max="32" value="${escapeAttr(values['view-distance'] || '10')}"></label>
-                <label>Max Players <input id="srv-max-players" type="number" min="1" max="1000" value="${escapeAttr(values['max-players'] || '20')}"></label>
-                <label>Difficulty
-                    <select id="srv-difficulty">
-                        <option value="peaceful" ${(values.difficulty || 'easy') === 'peaceful' ? 'selected' : ''}>Peaceful</option>
-                        <option value="easy" ${(values.difficulty || 'easy') === 'easy' ? 'selected' : ''}>Easy</option>
-                        <option value="normal" ${(values.difficulty || 'easy') === 'normal' ? 'selected' : ''}>Normal</option>
-                        <option value="hard" ${(values.difficulty || 'easy') === 'hard' ? 'selected' : ''}>Hard</option>
-                    </select>
-                </label>
-                <label>Gamemode
-                    <select id="srv-gamemode">
-                        <option value="survival" ${(values.gamemode || 'survival') === 'survival' ? 'selected' : ''}>Survival</option>
-                        <option value="creative" ${(values.gamemode || 'survival') === 'creative' ? 'selected' : ''}>Creative</option>
-                        <option value="adventure" ${(values.gamemode || 'survival') === 'adventure' ? 'selected' : ''}>Adventure</option>
-                        <option value="spectator" ${(values.gamemode || 'survival') === 'spectator' ? 'selected' : ''}>Spectator</option>
-                    </select>
-                </label>
-                <label style="grid-column:1 / -1;">MOTD <input id="srv-motd" type="text" value="${escapeAttr(values.motd || 'A Lion Server')}"></label>
-                <label style="grid-column:1 / -1;">Seed <input id="srv-seed" type="text" value="${escapeAttr(values['level-seed'] || '')}"></label>
+            ${response.exists ? '' : '<div style="margin-bottom:10px; padding:8px 10px; border-radius:8px; background:var(--bg-light); color:var(--text-secondary); font-size:12px;">server.properties wird beim ersten Start automatisch erstellt. Du kannst die Werte trotzdem schon konfigurieren.</div>'}
+            <div class="server-settings-panel">
+                <h3 style="margin:0 0 10px; color:var(--gold);">Server Launch Settings</h3>
+                <div class="server-settings-grid">
+                    <label class="server-field">
+                        <span>Memory (MB)</span>
+                        <input class="server-input" id="srv-memory" type="number" min="512" max="65536" step="256" value="${escapeAttr(String(memoryMb))}">
+                    </label>
+                    <label class="server-field">
+                        <span>Port</span>
+                        <input class="server-input" id="srv-port" type="number" min="1" max="65535" value="${escapeAttr(String(port || 25565))}">
+                    </label>
+                    <div class="server-toggle-row">
+                        <span>Auto Restart (bei Crash)</span>
+                        <label class="switch">
+                            <input id="srv-auto-restart" type="checkbox" ${autoRestart}>
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                    <label class="server-field server-field-wide">
+                        <span>Java Flags</span>
+                        <textarea class="server-textarea" id="srv-java-args">${escapeHtml(javaArgsRaw)}</textarea>
+                    </label>
+                </div>
+            </div>
+
+            <div class="server-settings-panel" style="margin-top:14px;">
+                <h3 style="margin:0 0 10px; color:var(--gold);">server.properties</h3>
+                <div class="server-settings-grid">
+                    <div class="server-toggle-row">
+                        <span>Online Mode</span>
+                        <label class="switch">
+                            <input id="srv-online-mode" type="checkbox" ${bool('online-mode', 'true')}>
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                    <div class="server-toggle-row">
+                        <span>PvP</span>
+                        <label class="switch">
+                            <input id="srv-pvp" type="checkbox" ${bool('pvp', 'true')}>
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                    <div class="server-toggle-row">
+                        <span>Allow Flight</span>
+                        <label class="switch">
+                            <input id="srv-allow-flight" type="checkbox" ${bool('allow-flight', 'false')}>
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                    <div class="server-toggle-row">
+                        <span>Command Blocks</span>
+                        <label class="switch">
+                            <input id="srv-command-block" type="checkbox" ${bool('enable-command-block', 'false')}>
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                    <label class="server-field">
+                        <span>View Distance</span>
+                        <input class="server-input" id="srv-view-distance" type="number" min="2" max="32" value="${escapeAttr(values['view-distance'] || '10')}">
+                    </label>
+                    <label class="server-field">
+                        <span>Max Players</span>
+                        <input class="server-input" id="srv-max-players" type="number" min="1" max="1000" value="${escapeAttr(values['max-players'] || '20')}">
+                    </label>
+                    <label class="server-field">
+                        <span>Server Port</span>
+                        <input class="server-input" id="srv-prop-port" type="number" min="1" max="65535" value="${escapeAttr(values['server-port'] || String(port || 25565))}">
+                    </label>
+                    <label class="server-field">
+                        <span>Difficulty</span>
+                        <select class="server-select" id="srv-difficulty">
+                            <option value="peaceful" ${(values.difficulty || 'easy') === 'peaceful' ? 'selected' : ''}>Peaceful</option>
+                            <option value="easy" ${(values.difficulty || 'easy') === 'easy' ? 'selected' : ''}>Easy</option>
+                            <option value="normal" ${(values.difficulty || 'easy') === 'normal' ? 'selected' : ''}>Normal</option>
+                            <option value="hard" ${(values.difficulty || 'easy') === 'hard' ? 'selected' : ''}>Hard</option>
+                        </select>
+                    </label>
+                    <label class="server-field">
+                        <span>Gamemode</span>
+                        <select class="server-select" id="srv-gamemode">
+                            <option value="survival" ${(values.gamemode || 'survival') === 'survival' ? 'selected' : ''}>Survival</option>
+                            <option value="creative" ${(values.gamemode || 'survival') === 'creative' ? 'selected' : ''}>Creative</option>
+                            <option value="adventure" ${(values.gamemode || 'survival') === 'adventure' ? 'selected' : ''}>Adventure</option>
+                            <option value="spectator" ${(values.gamemode || 'survival') === 'spectator' ? 'selected' : ''}>Spectator</option>
+                        </select>
+                    </label>
+                    <label class="server-field server-field-wide">
+                        <span>MOTD</span>
+                        <input class="server-input" id="srv-motd" type="text" value="${escapeAttr(values.motd || 'A Lion Server')}">
+                    </label>
+                    <label class="server-field server-field-wide">
+                        <span>Seed</span>
+                        <input class="server-input" id="srv-seed" type="text" value="${escapeAttr(values['level-seed'] || '')}">
+                    </label>
+                </div>
             </div>
             <div style="margin-top:14px; display:flex; justify-content:flex-end;">
-                <button class="btn" onclick="saveServerSettings('${serverId}')">Save server.properties</button>
+                <button class="btn" onclick="saveServerSettings('${serverId}')">Save Server Settings</button>
+            </div>
+            <div style="margin-top:18px; background:rgba(180, 34, 34, 0.14); border:1px solid #a11f1f; border-radius:10px; padding:12px;">
+                <div style="color:#ff8e8e; font-weight:700; margin-bottom:6px;">Danger Zone</div>
+                <div style="font-size:12px; color:#ffb2b2; margin-bottom:10px;">Serverprofil und alle Dateien werden dauerhaft geloescht.</div>
+                <button class="btn" style="background:#b71c1c; color:#fff;" onclick="deleteServerProfile('${serverId}')">
+                    <i class="bi bi-trash"></i> Delete Server
+                </button>
             </div>
         `;
     } catch (error) {
@@ -4050,19 +4545,245 @@ async function saveServerSettings(serverId) {
         'online-mode': document.getElementById('srv-online-mode')?.checked ? 'true' : 'false',
         pvp: document.getElementById('srv-pvp')?.checked ? 'true' : 'false',
         'allow-flight': document.getElementById('srv-allow-flight')?.checked ? 'true' : 'false',
+        'enable-command-block': document.getElementById('srv-command-block')?.checked ? 'true' : 'false',
         'view-distance': document.getElementById('srv-view-distance')?.value || '10',
         'max-players': document.getElementById('srv-max-players')?.value || '20',
+        'server-port': document.getElementById('srv-prop-port')?.value || document.getElementById('srv-port')?.value || '25565',
         difficulty: document.getElementById('srv-difficulty')?.value || 'easy',
         gamemode: document.getElementById('srv-gamemode')?.value || 'survival',
         motd: document.getElementById('srv-motd')?.value || 'A Lion Server',
         'level-seed': document.getElementById('srv-seed')?.value || '',
     };
 
+    const memoryRaw = parseInt(document.getElementById('srv-memory')?.value || '4096', 10);
+    const memoryMb = Number.isFinite(memoryRaw) ? memoryRaw : 4096;
+    const rawPort = parseInt(document.getElementById('srv-port')?.value || values['server-port'] || '25565', 10);
+    const port = Number.isFinite(rawPort) && rawPort > 0 && rawPort <= 65535 ? rawPort : 25565;
+    const javaArgs = document.getElementById('srv-java-args')?.value || '';
+    const autoRestart = !!document.getElementById('srv-auto-restart')?.checked;
+
     try {
         await invoke('save_server_properties', { serverId, values });
-        showToast('server.properties saved', 'success', 2200);
+        const updated = await invoke('update_server_profile_settings', {
+            serverId,
+            memoryMb,
+            javaArgs,
+            autoRestart,
+            port,
+        });
+
+        const idx = serverProfiles.findIndex(s => s.id === serverId);
+        if (idx >= 0) serverProfiles[idx] = updated;
+        if (currentServerProfile?.id === serverId) currentServerProfile = updated;
+        showToast('Server settings saved', 'success', 2200);
     } catch (error) {
         showToast('Failed to save settings: ' + error, 'error', 4500);
+    }
+}
+
+function triggerServerFileUpload() {
+    const el = document.getElementById('server-file-upload');
+    if (el) el.click();
+}
+
+async function uploadServerFileFromInput(serverId, input) {
+    const file = input?.files?.[0];
+    if (!file) return;
+
+    try {
+        const base64 = await fileToBase64(file);
+        const targetPath = currentServerFilesPath
+            ? `${currentServerFilesPath}/${file.name}`
+            : file.name;
+
+        await invoke('upload_server_file', {
+            serverId,
+            relativePath: targetPath,
+            fileBase64: base64,
+        });
+
+        await loadServerFiles(serverId, currentServerFilesPath || '');
+        showToast(`${file.name} hochgeladen`, 'success', 2200);
+    } catch (error) {
+        showToast('Upload fehlgeschlagen: ' + error, 'error', 3800);
+    } finally {
+        input.value = '';
+    }
+}
+
+function isLikelyTextFile(fileName) {
+    const lower = String(fileName || '').toLowerCase();
+    const textExt = [
+        '.txt', '.log', '.json', '.yml', '.yaml', '.properties', '.cfg', '.toml',
+        '.ini', '.md', '.conf', '.sh', '.bat', '.cmd', '.ps1', '.xml', '.csv', '.mcmeta',
+    ];
+    return textExt.some(ext => lower.endsWith(ext));
+}
+
+async function loadServerFiles(serverId, relativePath = '') {
+    const list = document.getElementById('server-files-list');
+    const pathEl = document.getElementById('server-files-path');
+    if (!list) return;
+
+    list.innerHTML = '<div class="loading">Loading files...</div>';
+
+    try {
+        const response = await invoke('list_server_files', {
+            serverId,
+            relativePath: relativePath || null,
+        });
+
+        currentServerFilesPath = response.current_path || '';
+        if (pathEl) pathEl.textContent = '/' + (currentServerFilesPath || '');
+
+        if (!response.entries || response.entries.length === 0) {
+            list.innerHTML = '<div style="padding:16px; color:var(--text-secondary);">Ordner ist leer.</div>';
+            return;
+        }
+
+        list.innerHTML = response.entries.map(entry => {
+            const escapedPath = String(entry.relative_path)
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'");
+            const canEdit = !entry.is_dir && isLikelyTextFile(entry.name);
+
+            return `
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 10px; margin-bottom:8px; border-radius:8px; background:var(--bg-light);">
+                    <button class="btn btn-secondary" style="padding:6px 10px; min-width:42px;" onclick="openServerFileEntry('${serverId}', '${escapedPath}', ${entry.is_dir})">
+                        <i class="bi ${entry.is_dir ? 'bi-folder2-open' : 'bi-file-earmark-text'}"></i>
+                    </button>
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(entry.name)}</div>
+                        <div style="font-size:12px; color:var(--text-secondary);">${entry.is_dir ? 'Ordner' : formatBytes(entry.size)} • ${new Date((entry.modified_unix || 0) * 1000).toLocaleString()}</div>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                        ${canEdit ? `<button class="btn btn-secondary" style="padding:6px 10px;" onclick="openServerFileEditor('${serverId}', '${escapedPath}')"><i class='bi bi-pencil-square'></i></button>` : ''}
+                        <button class="btn btn-secondary" style="padding:6px 10px;" onclick="promptMoveServerPath('${serverId}', '${escapedPath}')"><i class="bi bi-arrows-move"></i></button>
+                        <button class="btn btn-secondary" style="padding:6px 10px; color:#f44336;" onclick="deleteServerPathEntry('${serverId}', '${escapedPath}', ${entry.is_dir})"><i class="bi bi-trash"></i></button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (error) {
+        list.innerHTML = `<div style="color:#f44336;">Dateiliste konnte nicht geladen werden: ${escapeHtml(String(error))}</div>`;
+    }
+}
+
+function navigateServerFilesUp(serverId) {
+    if (!currentServerFilesPath) {
+        loadServerFiles(serverId, '');
+        return;
+    }
+
+    const segments = currentServerFilesPath.split('/').filter(Boolean);
+    segments.pop();
+    const parent = segments.join('/');
+    loadServerFiles(serverId, parent);
+}
+
+function openServerFileEntry(serverId, relativePath, isDir) {
+    if (isDir) {
+        loadServerFiles(serverId, relativePath);
+        return;
+    }
+
+    if (isLikelyTextFile(relativePath)) {
+        openServerFileEditor(serverId, relativePath);
+    } else {
+        showToast('Dateityp ist nicht direkt editierbar. Nutze "Open Extern".', 'info', 2800);
+    }
+}
+
+async function openServerFileEditor(serverId, relativePath) {
+    try {
+        const content = await invoke('read_server_text_file', { serverId, relativePath });
+        currentServerEditedFile = relativePath;
+
+        const shell = document.getElementById('server-file-editor-shell');
+        const name = document.getElementById('server-file-editor-name');
+        const editor = document.getElementById('server-file-editor');
+
+        if (shell) shell.style.display = 'block';
+        if (name) name.textContent = relativePath;
+        if (editor) editor.value = content || '';
+    } catch (error) {
+        showToast('Datei konnte nicht geoeffnet werden: ' + error, 'error', 3800);
+    }
+}
+
+function closeServerFileEditor() {
+    currentServerEditedFile = null;
+    const shell = document.getElementById('server-file-editor-shell');
+    if (shell) shell.style.display = 'none';
+}
+
+async function saveServerFileEditor(serverId) {
+    if (!currentServerEditedFile) return;
+    const editor = document.getElementById('server-file-editor');
+    if (!editor) return;
+
+    try {
+        await invoke('write_server_text_file', {
+            serverId,
+            relativePath: currentServerEditedFile,
+            content: editor.value,
+        });
+        showToast('Datei gespeichert', 'success', 2000);
+        await loadServerFiles(serverId, currentServerFilesPath || '');
+    } catch (error) {
+        showToast('Speichern fehlgeschlagen: ' + error, 'error', 3500);
+    }
+}
+
+async function deleteServerPathEntry(serverId, relativePath, isDir) {
+    const label = isDir ? 'diesen Ordner' : 'diese Datei';
+    if (!confirm(`Wirklich ${label} loeschen?\n${relativePath}`)) return;
+
+    try {
+        await invoke('delete_server_path', { serverId, relativePath });
+        if (currentServerEditedFile === relativePath) {
+            closeServerFileEditor();
+        }
+        await loadServerFiles(serverId, currentServerFilesPath || '');
+    } catch (error) {
+        showToast('Loeschen fehlgeschlagen: ' + error, 'error', 3500);
+    }
+}
+
+async function promptMoveServerPath(serverId, fromPath) {
+    const target = prompt('Neuer relativer Zielpfad:', fromPath);
+    if (!target || target.trim() === '' || target === fromPath) return;
+
+    try {
+        await invoke('move_server_path', {
+            serverId,
+            fromPath,
+            toPath: target.trim(),
+        });
+
+        if (currentServerEditedFile === fromPath) {
+            currentServerEditedFile = target.trim();
+        }
+
+        await loadServerFiles(serverId, currentServerFilesPath || '');
+    } catch (error) {
+        showToast('Verschieben fehlgeschlagen: ' + error, 'error', 3500);
+    }
+}
+
+async function createServerFolderPrompt(serverId) {
+    const folderName = prompt('Ordnername (relativ zum aktuellen Pfad):', 'new-folder');
+    if (!folderName || !folderName.trim()) return;
+
+    const relativePath = currentServerFilesPath
+        ? `${currentServerFilesPath}/${folderName.trim()}`
+        : folderName.trim();
+
+    try {
+        await invoke('create_server_folder', { serverId, relativePath });
+        await loadServerFiles(serverId, currentServerFilesPath || '');
+    } catch (error) {
+        showToast('Ordner konnte nicht erstellt werden: ' + error, 'error', 3500);
     }
 }
 
@@ -4077,6 +4798,7 @@ async function openServerFolder(serverId, subfolder = null) {
 async function deleteServerProfile(serverId) {
     if (!confirm('Delete this local server profile and all its files?')) return;
     try {
+        clearServerHubIntervals();
         await invoke('delete_server_profile', { serverId });
         currentServerProfile = null;
         await loadServerHub();
@@ -6037,7 +6759,87 @@ function cancelProfileSelect() {
 }
 
 // Settings
-function loadSettings() {
+function normalizeFsPath(value) {
+    return String(value || '')
+        .trim()
+        .replace(/\//g, '\\')
+        .toLowerCase();
+}
+
+function updateJavaRuntimeHint() {
+    const select = document.getElementById('settings-java-runtime');
+    const hint = document.getElementById('settings-java-runtime-hint');
+    if (!select || !hint) return;
+
+    const selected = javaRuntimeOptionsCache.find(o => String(o.value) === String(select.value));
+    if (!selected) {
+        hint.textContent = 'Lion Launcher downloads the selected Java version automatically if needed.';
+        return;
+    }
+
+    if (selected.value === 'auto') {
+        hint.textContent = `Automatic mode uses the latest stable JDK (currently ${selected.major}).`;
+        return;
+    }
+
+    hint.textContent = selected.installed
+        ? `Java ${selected.major} is already available on this machine.`
+        : `Java ${selected.major} will be downloaded when you save settings.`;
+}
+
+async function populateJavaRuntimeOptions(currentJavaPath = null) {
+    const select = document.getElementById('settings-java-runtime');
+    const customInput = document.getElementById('settings-java-custom-path');
+    if (!select) return;
+
+    try {
+        const [latestMajor, options] = await Promise.all([
+            invoke('get_latest_stable_jdk_major').catch(() => 21),
+            invoke('get_java_runtime_options').catch(() => []),
+        ]);
+
+        latestStableJavaMajor = Number(latestMajor) || 21;
+        javaRuntimeOptionsCache = Array.isArray(options) ? options : [];
+
+        if (!javaRuntimeOptionsCache.length) {
+            javaRuntimeOptionsCache = [
+                {
+                    value: 'auto',
+                    label: `Latest stable JDK (${latestStableJavaMajor}) - automatic`,
+                    major: latestStableJavaMajor,
+                    installed: false,
+                    path: null,
+                },
+            ];
+        }
+
+        select.innerHTML = javaRuntimeOptionsCache.map(opt => {
+            const badge = opt.value === 'auto' ? 'recommended' : (opt.installed ? 'installed' : 'download');
+            return `<option value="${escapeAttr(String(opt.value))}">Java ${escapeHtml(String(opt.major))} - ${escapeHtml(String(opt.label))} (${badge})</option>`;
+        }).join('');
+
+        const preferred = localStorage.getItem('preferredJavaRuntime') || 'auto';
+        const hasPreferred = javaRuntimeOptionsCache.some(opt => String(opt.value) === preferred);
+        select.value = hasPreferred ? preferred : 'auto';
+
+        if (currentJavaPath && customInput) {
+            const normalizedCurrent = normalizeFsPath(currentJavaPath);
+            const matched = javaRuntimeOptionsCache.some(opt => {
+                if (!opt.path) return false;
+                return normalizeFsPath(opt.path) === normalizedCurrent;
+            });
+            if (!matched) {
+                customInput.value = currentJavaPath;
+            }
+        }
+
+        updateJavaRuntimeHint();
+    } catch (error) {
+        debugLog('Failed to populate Java runtime options: ' + error, 'warning');
+    }
+}
+
+async function loadSettings() {
     const username = localStorage.getItem('username') || 'Guest';
     currentUsername = username;
 
@@ -6046,15 +6848,33 @@ function loadSettings() {
         usernameDisplay.textContent = t('player_label') + username;
     }
 
-    const usernameInput = document.getElementById('settings-username');
-    if (usernameInput) {
-        usernameInput.value = username;
+    let config = null;
+    try {
+        config = await invoke('get_config');
+    } catch (error) {
+        debugLog('Failed to load backend config: ' + error, 'warning');
     }
 
-    const memory = localStorage.getItem('memory') || '4096';
+    const memory = String(config?.game_settings?.memory_mb || localStorage.getItem('memory') || '4096');
     const memoryInput = document.getElementById('settings-memory');
     if (memoryInput) {
         memoryInput.value = memory;
+    }
+
+    const customJavaInput = document.getElementById('settings-java-custom-path');
+    if (customJavaInput) {
+        customJavaInput.value = config?.game_settings?.java_path || '';
+    }
+
+    await populateJavaRuntimeOptions(config?.game_settings?.java_path || null);
+
+    const javaRuntimeSelect = document.getElementById('settings-java-runtime');
+    if (javaRuntimeSelect && !javaRuntimeSelect.dataset.bound) {
+        javaRuntimeSelect.addEventListener('change', () => {
+            localStorage.setItem('preferredJavaRuntime', javaRuntimeSelect.value || 'auto');
+            updateJavaRuntimeHint();
+        });
+        javaRuntimeSelect.dataset.bound = '1';
     }
 
     // Theme laden
@@ -6112,23 +6932,57 @@ function setAccentColor(color, save = true) {
 
 const saveSettingsBtn = document.getElementById('save-settings-btn');
 if (saveSettingsBtn) {
-    saveSettingsBtn.addEventListener('click', () => {
-        const usernameInput = document.getElementById('settings-username');
+    saveSettingsBtn.addEventListener('click', async () => {
         const memoryInput = document.getElementById('settings-memory');
         const languageSelect = document.getElementById('settings-language');
+        const javaRuntimeSelect = document.getElementById('settings-java-runtime');
+        const customJavaInput = document.getElementById('settings-java-custom-path');
 
-        if (usernameInput && memoryInput) {
-            const username = usernameInput.value;
-            const memory = memoryInput.value;
+        if (!memoryInput) return;
 
-            localStorage.setItem('username', username);
-            localStorage.setItem('memory', memory);
+        try {
+            const memory = Math.max(512, parseInt(memoryInput.value || '4096', 10) || 4096);
+            localStorage.setItem('memory', String(memory));
 
-            currentUsername = username;
-            const usernameDisplay = document.getElementById('username-display');
-            if (usernameDisplay) {
-                usernameDisplay.textContent = t('player_label') + username;
+            let config = await invoke('get_config');
+            if (!config || !config.game_settings) {
+                throw new Error('Config konnte nicht geladen werden');
             }
+
+            const customJavaPath = customJavaInput?.value.trim() || '';
+            let javaPathToSave = customJavaPath;
+
+            const selectedRuntimeValue = javaRuntimeSelect?.value || 'auto';
+            localStorage.setItem('preferredJavaRuntime', selectedRuntimeValue);
+
+            if (!javaPathToSave) {
+                const selectedOption = javaRuntimeOptionsCache.find(o => String(o.value) === selectedRuntimeValue);
+                let targetMajor = latestStableJavaMajor;
+
+                if (selectedOption) {
+                    targetMajor = Number(selectedOption.major) || latestStableJavaMajor;
+                    if (selectedOption.path) {
+                        javaPathToSave = selectedOption.path;
+                    }
+                } else if (selectedRuntimeValue !== 'auto') {
+                    const parsed = parseInt(selectedRuntimeValue, 10);
+                    if (Number.isFinite(parsed) && parsed > 0) {
+                        targetMajor = parsed;
+                    }
+                }
+
+                if (!javaPathToSave) {
+                    showToast(`Preparing Java ${targetMajor}...`, 'info', 2500);
+                    javaPathToSave = await invoke('ensure_java_runtime_for_settings', { major: targetMajor });
+                }
+            }
+
+            config.game_settings.memory_mb = memory;
+            config.game_settings.java_path = javaPathToSave || null;
+
+            await invoke('save_config', { config });
+
+            await populateJavaRuntimeOptions(javaPathToSave || null);
 
             // Language change: save and reload
             if (languageSelect) {
@@ -6143,6 +6997,8 @@ if (saveSettingsBtn) {
             }
 
             showToast(t('toast_settings_saved'), 'success', 3000);
+        } catch (error) {
+            showToast('Settings konnten nicht gespeichert werden: ' + error, 'error', 4200);
         }
     });
 }

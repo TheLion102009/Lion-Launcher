@@ -61,7 +61,7 @@
             <!-- Local Servers Page -->
             <div id="page-servers-hub" class="page hidden">
                 <div class="header">
-                    <h1>Servers</h1>
+                    <h1>Local Servers</h1>
                 </div>
                 <div class="content">
                     <div id="servers-hub-content">
@@ -327,8 +327,8 @@
                 <div class="header">
                     <h1 data-i18n="nav_settings">Settings</h1>
                 </div>
-                <div class="content" style="max-height: calc(100vh - 120px); overflow-y: auto;">
-                    
+                <div class="content" style="height: calc(100vh - 140px); overflow-y: auto; padding-bottom: 24px;">
+
                     <!-- Account Settings -->
                     <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
                         <h3 style="color: var(--gold); margin: 0 0 20px 0;" data-i18n="mc_account">👤 Minecraft Account</h3>
@@ -417,8 +417,17 @@
                             <input type="number" id="settings-memory" placeholder="4096">
                         </div>
                         <div class="form-group">
-                            <label data-i18n="java_path_label">Java Path (Optional)</label>
-                            <input type="text" id="settings-java" data-i18n-placeholder="java_path_placeholder" placeholder="Leave empty to auto-detect">
+                            <label>Java Runtime</label>
+                            <select id="settings-java-runtime">
+                                <option value="auto">Latest stable JDK (automatic)</option>
+                            </select>
+                            <p style="color: var(--text-secondary); font-size: 12px; margin-top: 8px;" id="settings-java-runtime-hint">
+                                If the runtime is missing, Lion Launcher will download it automatically.
+                            </p>
+                        </div>
+                        <div class="form-group">
+                            <label data-i18n="java_path_label">Custom Java Path (Optional Override)</label>
+                            <input type="text" id="settings-java-custom-path" data-i18n-placeholder="java_path_placeholder" placeholder="Leave empty to use selected runtime">
                         </div>
                         <button class="btn" id="save-settings-btn" data-i18n="save_settings">Save Settings</button>
                     </div>

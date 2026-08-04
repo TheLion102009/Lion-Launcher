@@ -1,5 +1,129 @@
 use crate::config::schema::LauncherConfig;
 use crate::types::version::MinecraftVersion;
+use std::collections::BTreeSet;
+
+#[derive(serde::Serialize)]
+pub struct JavaRuntimeOption {
+    pub value: String,
+    pub label: String,
+    pub major: u32,
+    pub installed: bool,
+    pub path: Option<String>,
+}
+
+fn java_bin_name() -> &'static str {
+    if cfg!(windows) {
+        "java.exe"
+    } else {
+        "java"
+    }
+}
+
+fn managed_java_bin_for_major(major: u32) -> std::path::PathBuf {
+    crate::config::defaults::java_dir()
+        .join(format!("java-{}", major))
+        .join("bin")
+        .join(java_bin_name())
+}
+
+async fn detect_latest_stable_jdk_major() -> u32 {
+    #[derive(serde::Deserialize)]
+    struct AdoptiumInfo {
+        most_recent_feature_release: Option<u32>,
+        available_releases: Option<Vec<u32>>,
+    }
+
+    let response = reqwest::Client::new()
+        .get("https://api.adoptium.net/v3/info/available_releases")
+        .send()
+        .await;
+
+    if let Ok(resp) = response {
+        if let Ok(resp) = resp.error_for_status() {
+            if let Ok(info) = resp.json::<AdoptiumInfo>().await {
+                if let Some(v) = info.most_recent_feature_release {
+                    return v.max(17);
+                }
+                if let Some(list) = info.available_releases {
+                    if let Some(v) = list.into_iter().max() {
+                        return v.max(17);
+                    }
+                }
+            }
+        }
+    }
+
+    21
+}
+
+#[tauri::command]
+pub async fn get_latest_stable_jdk_major() -> Result<u32, String> {
+    Ok(detect_latest_stable_jdk_major().await)
+}
+
+#[tauri::command]
+pub async fn get_java_runtime_options() -> Result<Vec<JavaRuntimeOption>, String> {
+    let latest_stable = detect_latest_stable_jdk_major().await;
+    let mut majors = BTreeSet::new();
+    majors.insert(8);
+    majors.insert(11);
+    majors.insert(17);
+    majors.insert(21);
+    majors.insert(latest_stable);
+
+    let mut options = Vec::new();
+    options.push(JavaRuntimeOption {
+        value: "auto".to_string(),
+        label: format!("Latest stable JDK ({}) - automatic", latest_stable),
+        major: latest_stable,
+        installed: managed_java_bin_for_major(latest_stable).exists(),
+        path: None,
+    });
+
+    for major in majors.into_iter().rev() {
+        let managed = managed_java_bin_for_major(major);
+        let installed = managed.exists();
+        options.push(JavaRuntimeOption {
+            value: major.to_string(),
+            label: if installed {
+                format!("Java {} (installed)", major)
+            } else {
+                format!("Java {} (download on save)", major)
+            },
+            major,
+            installed,
+            path: installed.then(|| managed.display().to_string()),
+        });
+    }
+
+    // Add current PATH java (if any) as extra selectable runtime.
+    let path_java = if cfg!(windows) { "java.exe" } else { "java" };
+    if tokio::process::Command::new(path_java)
+        .arg("-version")
+        .output()
+        .await
+        .is_ok()
+    {
+        let major = crate::core::minecraft::detect_java_runtime_major(path_java).await;
+        if major > 0 {
+            options.push(JavaRuntimeOption {
+                value: format!("system-{}", major),
+                label: format!("System Java {} (PATH)", major),
+                major,
+                installed: true,
+                path: Some(path_java.to_string()),
+            });
+        }
+    }
+
+    Ok(options)
+}
+
+#[tauri::command]
+pub async fn ensure_java_runtime_for_settings(major: u32) -> Result<String, String> {
+    let required = major.max(8);
+    crate::core::minecraft::ensure_java_runtime(required, None).await
+}
 
 #[tauri::command]
 pub async fn get_config() -> Result<LauncherConfig, String> {

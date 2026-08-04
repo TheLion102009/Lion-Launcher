@@ -7,6 +7,7 @@ pub async fn ensure_launcher_dirs() -> Result<()> {
     let dirs = [
         crate::config::defaults::launcher_dir(),
         crate::config::defaults::profiles_dir(),
+        crate::config::defaults::servers_dir(),
         crate::config::defaults::libraries_dir(),
         crate::config::defaults::assets_dir(),
         crate::config::defaults::versions_dir(),

@@ -176,6 +176,21 @@ pub fn take_launch_warnings() -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Ensures a Java runtime with at least `required_major` is available.
+/// Reuses the same resolver/downloader as the game launcher pipeline.
+pub async fn ensure_java_runtime(required_major: u32, max_major: Option<u32>) -> Result<String, String> {
+    let launcher = MinecraftLauncher::new().map_err(|e| e.to_string())?;
+    launcher
+        .ensure_java_installed(required_major, max_major)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Returns the major version of the provided Java binary, or 0 on failure.
+pub async fn detect_java_runtime_major(java_bin: &str) -> u32 {
+    MinecraftLauncher::java_major_version(java_bin).await
+}
+
 pub struct MinecraftLauncher {
     download_manager: DownloadManager,
 }

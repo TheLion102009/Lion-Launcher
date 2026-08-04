@@ -291,6 +291,264 @@ body {
     font-weight: 700;
 }
 
+.server-card-rich {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.server-card-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.server-card-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background: var(--bg-dark);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--gold);
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.server-card-title {
+    margin: 0;
+    color: var(--gold);
+    font-size: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.server-card-subtitle {
+    margin-top: 3px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.server-runtime-badge {
+    border-radius: 999px;
+    border: 1px solid var(--bg-light);
+    background: var(--bg-dark);
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.server-load-row {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.server-card-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.server-card-actions .btn {
+    flex: 1;
+}
+
+.server-tab-shell {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 14px;
+}
+
+.server-tab-inner {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    background: var(--bg-medium);
+    border: 1px solid var(--bg-light);
+    border-radius: 999px;
+    padding: 8px;
+}
+
+.server-address-badge {
+    background: var(--bg-dark);
+    border: 1px solid var(--bg-light);
+    border-radius: 8px;
+    padding: 5px 10px;
+    font-size: 12px;
+    color: var(--gold);
+    font-weight: 700;
+}
+
+.server-tab-inner .server-detail-tab {
+    border-radius: 999px;
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    font-size: 14px;
+    transition: all 0.24s ease;
+    transform: scale(1);
+}
+
+.server-tab-inner .server-detail-tab:hover {
+    color: #ffffff;
+    border-color: rgba(255, 215, 0, 0.35);
+}
+
+.server-tab-inner .server-detail-tab.active {
+    color: #ffffff;
+    font-size: 15px;
+    transform: scale(1.05);
+    border-color: rgba(255, 215, 0, 0.8);
+    background: rgba(255, 215, 0, 0.18);
+    box-shadow:
+        0 0 0 1px rgba(255, 215, 0, 0.28),
+        0 8px 22px rgba(255, 215, 0, 0.2),
+        inset 0 0 18px rgba(255, 215, 0, 0.2);
+    backdrop-filter: blur(8px);
+}
+
+.server-tab-inner .server-detail-tab.active:hover {
+    color: #ffffff;
+    transform: scale(1.06);
+    background: rgba(255, 215, 0, 0.2);
+}
+
+#server-detail-content.server-tab-enter {
+    animation: serverTabIn 0.2s ease;
+}
+
+@keyframes serverTabIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.server-settings-panel {
+    background: linear-gradient(160deg, var(--bg-medium), rgba(255, 255, 255, 0.01));
+    border: 1px solid var(--bg-light);
+    border-radius: 12px;
+    padding: 14px;
+}
+
+.server-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 12px;
+}
+
+.server-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.server-field-wide {
+    grid-column: 1 / -1;
+}
+
+.server-input,
+.server-select,
+.server-textarea {
+    width: 100%;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(18, 21, 27, 0.9);
+    color: #ffffff;
+    padding: 10px 12px;
+    transition: all 0.2s ease;
+    outline: none;
+}
+
+.server-select {
+    appearance: none;
+    background-image:
+        linear-gradient(45deg, transparent 50%, rgba(255, 215, 0, 0.8) 50%),
+        linear-gradient(135deg, rgba(255, 215, 0, 0.8) 50%, transparent 50%);
+    background-position:
+        calc(100% - 20px) calc(50% + 1px),
+        calc(100% - 14px) calc(50% + 1px);
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+}
+
+.server-textarea {
+    min-height: 94px;
+    resize: vertical;
+    font-family: Consolas, monospace;
+}
+
+.server-input:focus,
+.server-select:focus,
+.server-textarea:focus {
+    border-color: rgba(255, 215, 0, 0.85);
+    box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.24);
+}
+
+.server-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(18, 21, 27, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 46px;
+    height: 26px;
+    flex-shrink: 0;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.switch-slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.22);
+    border-radius: 999px;
+    transition: all 0.2s ease;
+}
+
+.switch-slider:before {
+    content: "";
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    left: 3px;
+    top: 3px;
+    background: #ffffff;
+    border-radius: 50%;
+    transition: transform 0.2s ease;
+}
+
+.switch input:checked + .switch-slider {
+    background: linear-gradient(135deg, #ffd64a, #f7b500);
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.45);
+}
+
+.switch input:checked + .switch-slider:before {
+    transform: translateX(20px);
+}
+
 /* Profil-Detailbox: bessere visuelle Abgrenzung von Controls */
 #main-category-shell button,
 #main-category-shell .btn {
@@ -550,6 +808,34 @@ body {
     outline: none;
     border-color: var(--gold);
     background-color: var(--bg-dark);
+}
+
+#page-settings .form-group input,
+#page-settings .form-group select {
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(18, 21, 27, 0.92);
+    padding: 11px 12px;
+    transition: all 0.22s ease;
+}
+
+#page-settings .form-group select {
+    appearance: none;
+    background-image:
+        linear-gradient(45deg, transparent 50%, rgba(255, 215, 0, 0.88) 50%),
+        linear-gradient(135deg, rgba(255, 215, 0, 0.88) 50%, transparent 50%);
+    background-position:
+        calc(100% - 19px) calc(50% + 1px),
+        calc(100% - 13px) calc(50% + 1px);
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+}
+
+#page-settings .form-group input:focus,
+#page-settings .form-group select:focus {
+    border-color: rgba(255, 215, 0, 0.86);
+    background: rgba(18, 21, 27, 1);
+    box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.2);
 }
 
 .modal-actions {
