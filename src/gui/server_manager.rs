@@ -525,7 +525,7 @@ async fn resolve_mojang_java_requirement(minecraft_version: &str) -> Result<u32,
         .url
         .ok_or_else(|| "Versionseintrag ohne Detail-URL".to_string())?;
 
-    let value: serde_json::Value = reqwest::Client::new()
+    let value: serde_json::Value = crate::core::http::HTTP_CLIENT.clone()
         .get(&url)
         .send()
         .await
@@ -560,7 +560,7 @@ async fn resolve_required_java_for_profile(profile: &ServerProfile) -> Result<u3
 
     // Paper liefert die exakte Mindest-Java-Version in Fill v3 Metadaten.
     if profile.software.eq_ignore_ascii_case("paper") {
-        let client = reqwest::Client::new();
+        let client = crate::core::http::HTTP_CLIENT.clone();
         let paper_version = resolve_paper_version_for_profile(&client, profile).await?;
         let meta_url = format!(
             "https://fill.papermc.io/v3/projects/paper/versions/{}",
@@ -586,7 +586,7 @@ async fn resolve_required_java_for_profile(profile: &ServerProfile) -> Result<u3
 }
 
 async fn download_to_path(url: &str, output_path: &Path) -> Result<(), String> {
-    let response = reqwest::Client::new()
+    let response = crate::core::http::HTTP_CLIENT.clone()
         .get(url)
         .send()
         .await
@@ -645,7 +645,7 @@ async fn download_vanilla_server_jar(profile: &ServerProfile, output_path: &Path
 }
 
 async fn download_paper_server_jar(profile: &ServerProfile, output_path: &Path) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = crate::core::http::HTTP_CLIENT.clone();
     let paper_version = resolve_paper_version_for_profile(&client, profile).await?;
 
     let builds_url = format!(
@@ -707,7 +707,7 @@ async fn download_paper_server_jar(profile: &ServerProfile, output_path: &Path) 
 }
 
 async fn download_purpur_server_jar(profile: &ServerProfile, output_path: &Path) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = crate::core::http::HTTP_CLIENT.clone();
     let build = if profile.software_version == "latest" {
         let meta_url = format!(
             "https://api.purpurmc.org/v2/purpur/{}",
@@ -743,7 +743,7 @@ async fn download_purpur_server_jar(profile: &ServerProfile, output_path: &Path)
 }
 
 async fn download_fabric_server_jar(profile: &ServerProfile, output_path: &Path) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = crate::core::http::HTTP_CLIENT.clone();
     let loader_version = if profile.software_version == "latest" {
         let url = format!(
             "https://meta.fabricmc.net/v2/versions/loader/{}",
@@ -1029,7 +1029,7 @@ pub async fn start_server_profile(server_id: String) -> Result<(), String> {
         &console_lines,
         format!("[Lion] Server gestartet (PID {})", pid),
     )
-    .await;
+        .await;
 
     let state = RunningServerState {
         pid,
@@ -1070,14 +1070,14 @@ pub async fn start_server_profile(server_id: String) -> Result<(), String> {
                     &wait_buffer,
                     format!("[Lion] Server beendet: {}", exit_status),
                 )
-                .await;
+                    .await;
             }
             Err(err) => {
                 append_console_line(
                     &wait_buffer,
                     format!("[Lion] Fehler beim Beenden des Server-Prozesses: {}", err),
                 )
-                .await;
+                    .await;
             }
         }
         remove_running_state(&server_id_wait);
@@ -1584,5 +1584,3 @@ pub async fn upload_server_file(
         .await
         .map_err(|e| e.to_string())
 }
-
-

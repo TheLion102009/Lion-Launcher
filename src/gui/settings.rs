@@ -33,7 +33,7 @@ async fn detect_latest_stable_jdk_major() -> u32 {
         available_releases: Option<Vec<u32>>,
     }
 
-    let response = reqwest::Client::new()
+    let response = crate::core::http::HTTP_CLIENT.clone()
         .get("https://api.adoptium.net/v3/info/available_releases")
         .send()
         .await;

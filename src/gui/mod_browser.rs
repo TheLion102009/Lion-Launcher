@@ -359,7 +359,7 @@ pub async fn search_resourcepacks(
     limit: Option<u32>,
 ) -> Result<Vec<ModInfo>, String> {
     // Modrinth API: Resource Packs haben project_type=resourcepack
-    let client = reqwest::Client::new();
+    let client = crate::core::http::HTTP_CLIENT.clone();
     let url = "https://api.modrinth.com/v2/search";
 
     let sort = match sort_by.as_deref() {
@@ -487,7 +487,7 @@ pub async fn install_resourcepack(
     );
 
     // Hole Versionen von Modrinth
-    let client = reqwest::Client::new();
+    let client = crate::core::http::HTTP_CLIENT.clone();
     let url = format!("https://api.modrinth.com/v2/project/{}/version", pack_id);
 
     let response = client.get(&url).send().await.map_err(|e| e.to_string())?;
@@ -521,12 +521,12 @@ pub async fn install_resourcepack(
             .iter()
             .find(|v| v.game_versions.iter().any(|gv| gv == &mc_version))
     }
-    .ok_or_else(|| {
-        format!(
-            "Keine passende Resource Pack Version für MC {} gefunden",
-            mc_version
-        )
-    })?;
+        .ok_or_else(|| {
+            format!(
+                "Keine passende Resource Pack Version für MC {} gefunden",
+                mc_version
+            )
+        })?;
 
     tracing::info!(
         "Installing version: {} ({})",
@@ -580,7 +580,7 @@ pub async fn search_shaderpacks(
     offset: Option<u32>,
     limit: Option<u32>,
 ) -> Result<Vec<ModInfo>, String> {
-    let client = reqwest::Client::new();
+    let client = crate::core::http::HTTP_CLIENT.clone();
     let url = "https://api.modrinth.com/v2/search";
 
     let sort = match sort_by.as_deref() {
@@ -707,7 +707,7 @@ pub async fn install_shaderpack(
         shader_dir
     );
 
-    let client = reqwest::Client::new();
+    let client = crate::core::http::HTTP_CLIENT.clone();
     let url = format!("https://api.modrinth.com/v2/project/{}/version", pack_id);
 
     let response = client.get(&url).send().await.map_err(|e| e.to_string())?;
@@ -738,7 +738,7 @@ pub async fn install_shaderpack(
             .find(|v| v.game_versions.iter().any(|gv| gv == &mc_version))
             .or_else(|| versions.first()) // Shader sind oft version-unabhängig
     }
-    .ok_or_else(|| "Keine passende Shader Version gefunden".to_string())?;
+        .ok_or_else(|| "Keine passende Shader Version gefunden".to_string())?;
 
     let file = version
         .files
@@ -896,7 +896,7 @@ pub async fn install_modpack(
     } else {
         versions.first()
     }
-    .ok_or_else(|| "Keine Modpack-Version gefunden".to_string())?;
+        .ok_or_else(|| "Keine Modpack-Version gefunden".to_string())?;
 
     let mrpack_file = version
         .files
@@ -1176,7 +1176,7 @@ pub async fn search_modpacks(
     offset: Option<u32>,
     limit: Option<u32>,
 ) -> Result<Vec<ModInfo>, String> {
-    let client = reqwest::Client::new();
+    let client = crate::core::http::HTTP_CLIENT.clone();
     let url = "https://api.modrinth.com/v2/search";
 
     let sort = match sort_by.as_deref() {
@@ -1301,12 +1301,12 @@ async fn remove_meta_inf_from_zip(zip_path: &std::path::Path) -> Result<(), Stri
         // Behalte aber andere META-INF Dateien (z.B. MANIFEST.MF, nested JARs)
         let should_skip = name.starts_with("META-INF/")
             && (
-                name.ends_with(".SF") ||   // Signature File
-            name.ends_with(".DSA") ||  // Digital Signature
-            name.ends_with(".RSA") ||  // RSA Signature
-            name.ends_with(".EC")
-                // Elliptic Curve Signature
-            );
+            name.ends_with(".SF") ||   // Signature File
+                name.ends_with(".DSA") ||  // Digital Signature
+                name.ends_with(".RSA") ||  // RSA Signature
+                name.ends_with(".EC")
+            // Elliptic Curve Signature
+        );
 
         if should_skip {
             tracing::debug!("Removing signature file: {}", name);

@@ -753,7 +753,7 @@ pub async fn check_mod_updates(profile_id: String, mc_version: String, loader: S
 
     let mods = get_installed_mods(profile_id.clone()).await?;
     let mut updates = Vec::new();
-    let client = reqwest::Client::new();
+    let client = crate::core::http::HTTP_CLIENT.clone();
 
     // Für jede installierte Mod: finde kompatible Updates oder inkompatible neuere Releases
     for mod_info in mods {

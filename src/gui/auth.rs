@@ -255,7 +255,7 @@ pub async fn upload_skin_file(skin_data: String, variant: String) -> Result<(), 
 
     let skin_variant = if variant == "slim" { "slim" } else { "classic" };
 
-    let client = reqwest::Client::new();
+    let client = crate::core::http::HTTP_CLIENT.clone();
     let part = reqwest::multipart::Part::bytes(skin_bytes)
         .file_name("skin.png")
         .mime_str("image/png")
