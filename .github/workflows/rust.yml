@@ -374,7 +374,7 @@ jobs:
           sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
           noextract=('lion-launcher-bin' 'icon-32.png' 'icon-128.png' 'icon-256.png' 'lion-launcher.desktop')
 
-          build() { true }
+          build() { true; }
 
           package() {
               install -Dm755 "$srcdir/lion-launcher-bin" "$pkgdir/usr/bin/lion-launcher"
@@ -490,6 +490,10 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ""
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          # .cargo/config.toml erzwingt osxcross-Linker-Namen (für Cross-Build von Linux aus).
+          # Auf dem nativen macOS-Runner gibt es die nicht -> hier auf plain clang zurücksetzen.
+          CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER: clang
+          CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER: clang
         run: cargo tauri build --bundles dmg --target universal-apple-darwin
 
       - name: DMG sammeln
