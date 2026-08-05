@@ -575,11 +575,9 @@ fn extract_game_arg_value(version: &NeoForgeVersion, key: &str) -> Option<String
         if let Some(game) = &args.game {
             for i in 0..game.len() {
                 if let Some(arg_str) = game[i].as_str() {
-                    if arg_str == key {
-                        if i + 1 < game.len() {
-                            if let Some(version_str) = game[i + 1].as_str() {
-                                return Some(version_str.to_string());
-                            }
+                    if arg_str == key && i + 1 < game.len() {
+                        if let Some(version_str) = game[i + 1].as_str() {
+                            return Some(version_str.to_string());
                         }
                     }
                 }

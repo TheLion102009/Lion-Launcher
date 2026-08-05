@@ -352,8 +352,8 @@ fn sample_network_kbps() -> f32 {
     networks.refresh();
 
     let total_now = networks
-        .iter()
-        .map(|(_, data)| data.total_received() + data.total_transmitted())
+        .values()
+        .map(|data| data.total_received() + data.total_transmitted())
         .sum::<u64>();
     let now = std::time::Instant::now();
 

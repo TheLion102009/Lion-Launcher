@@ -75,8 +75,7 @@ pub async fn get_worlds(game_dir: &Path) -> Result<Vec<WorldInfo>> {
     }
 
     // Sortiere nach letzter Spielzeit (neueste zuerst)
-    worlds.sort_by(|a, b| b.last_played.cmp(&a.last_played));
-
+    worlds.sort_by_key(|w| std::cmp::Reverse(w.last_played));
     Ok(worlds)
 }
 
@@ -241,7 +240,7 @@ pub async fn get_servers(game_dir: &Path) -> Result<Vec<ServerInfo>> {
 
     let results = futures_util::future::join_all(status_futures).await;
 
-    for (server, result) in servers.iter_mut().zip(results.into_iter()) {
+    for (server, result) in servers.iter_mut().zip(results) {
         match result {
             Ok(status) => {
                 if server.icon_base64.is_none() {

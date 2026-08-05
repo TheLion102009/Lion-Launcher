@@ -1287,7 +1287,7 @@ impl ForgeInstaller {
             // Überprüfe ob die aktuelle gepatchte JAR bereits existiert und gültig ist
             let patched_jar = libraries_dir.join(format!(
                 "net/minecraftforge/forge/{tf}/forge-{tf}-client.jar",
-                tf = &target_suffix
+                tf = target_suffix
             ));
             let patched_mc_jar = libraries_dir.join(format!(
                 "net/minecraft/client/{mc}/client-{mc}.jar",

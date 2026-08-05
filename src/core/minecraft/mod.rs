@@ -1661,8 +1661,7 @@ maxThreads = -1
             use std::io::{BufRead, BufReader};
             tokio::task::spawn_blocking(move || {
                 let reader = BufReader::new(stdout);
-                for line in reader.lines().flatten() {
-                    tracing::info!("[MC stdout] {}", line);
+                for line in reader.lines().map_while(Result::ok) {                    tracing::info!("[MC stdout] {}", line);
                 }
             });
         }
@@ -1670,8 +1669,7 @@ maxThreads = -1
             use std::io::{BufRead, BufReader};
             tokio::task::spawn_blocking(move || {
                 let reader = BufReader::new(stderr);
-                for line in reader.lines().flatten() {
-                    tracing::warn!("[MC stderr] {}", line);
+                for line in reader.lines().map_while(Result::ok) {                    tracing::warn!("[MC stderr] {}", line);
                 }
             });
         }
@@ -2725,11 +2723,9 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         let java_bin_name = if cfg!(windows) { "java.exe" } else { "java" };
 
         let version_ok =
-            |v: u32| -> bool { v >= required_major && max_major.map_or(true, |max| v <= max) };
+            |v: u32| -> bool { v >= required_major && max_major.is_none_or(|max| v <= max) };
 
-        // Auf Windows: prüft ob javaw.exe im gleichen bin/-Verzeichnis wie java.exe vorhanden ist.
-        // Einige minimale JDKs liefern nur java.exe ohne javaw.exe – solche Installationen
-        // können wir nicht für den Spielstart verwenden (Tauri nutzt javaw.exe für kein CMD-Fenster).
+
         let javaw_ok = |java_path: &str| -> bool {
             #[cfg(windows)]
             {

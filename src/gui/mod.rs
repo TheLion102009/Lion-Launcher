@@ -240,7 +240,7 @@ pub async fn get_log_files(profile_id: String) -> Result<Vec<String>, String> {
         .collect();
 
     // Neueste zuerst
-    files.sort_by(|a, b| b.1.cmp(&a.1));
+    files.sort_by_key(|f| std::cmp::Reverse(f.1));
     Ok(files.into_iter().map(|(name, _)| name).collect())
 }
 
@@ -1007,8 +1007,7 @@ pub async fn get_installed_resourcepacks(profile_id: String) -> Result<Vec<Insta
     }
 
     // Sortiere alphabetisch
-    packs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-
+    packs.sort_by_key(|p| p.name.to_lowercase());
     Ok(packs)
 }
 
@@ -1059,8 +1058,7 @@ pub async fn get_installed_shaderpacks(profile_id: String) -> Result<Vec<Install
         });
     }
 
-    packs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-
+    packs.sort_by_key(|a| a.name.to_lowercase());
     Ok(packs)
 }
 

@@ -24,7 +24,7 @@ fn push_live_log_line(line: impl Into<String>) {
 }
 
 pub fn get_recent_live_logs(limit: usize) -> String {
-    let requested = limit.max(1).min(MAX_LIVE_LOG_LINES);
+    let requested = limit.clamp(1, MAX_LIVE_LOG_LINES);
     if let Ok(buf) = live_log_buffer().lock() {
         let start = buf.len().saturating_sub(requested);
         return buf
