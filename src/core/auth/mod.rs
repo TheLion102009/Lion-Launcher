@@ -331,11 +331,30 @@ impl MinecraftAuth {
             .get("https://api.minecraftservices.com/minecraft/profile")
             .header("Authorization", format!("Bearer {}", access_token))
             .send()
-            .await?
-            .json()
             .await?;
 
-        Ok(response)
+        let status = response.status();
+        let text = response.text().await?;
+        tracing::info!("Minecraft profile response (status {}): {}", status, text);
+
+        if !status.is_success() {
+            if text.contains("NOT_FOUND") {
+                return Err(anyhow::anyhow!(
+                    "Dieser Microsoft-Account besitzt kein Minecraft: Java Edition (oder es wurde noch kein Profil/Username erstellt). Bitte auf minecraft.net prüfen."
+                ));
+            }
+            return Err(anyhow::anyhow!(
+                "Fehler beim Abrufen des Minecraft-Profils (Status {}): {}",
+                status,
+                text
+            ));
+        }
+
+        let profile: MinecraftProfileResponse = serde_json::from_str(&text).map_err(|e| {
+            anyhow::anyhow!("Fehler beim Parsen des Profils: {} - Raw: {}", e, text)
+        })?;
+
+        Ok(profile)
     }
 
     /// Refresh Token verwenden um neuen Access Token zu bekommen
