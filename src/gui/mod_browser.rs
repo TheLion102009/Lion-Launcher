@@ -1,12 +1,73 @@
 use crate::core::mods::ModManager;
 use crate::types::mod_info::{ModInfo, ModSearchQuery, ModVersion, SortOption};
 use serde::Deserialize;
+use std::path::Path;
 
 // Re-export ModrinthCategory für Frontend
 pub use crate::api::modrinth::ModrinthCategory;
 
 // Import für get_modrinth_categories
 use crate::api::modrinth::ModrinthClient;
+
+#[derive(Deserialize)]
+struct ModrinthProjectMetadataResponse {
+    slug: String,
+    title: String,
+    #[serde(default)]
+    icon_url: Option<String>,
+}
+
+#[derive(Clone)]
+struct InstalledContentMetadata {
+    project_id: String,
+    slug: Option<String>,
+    title: Option<String>,
+    icon_url: Option<String>,
+}
+
+async fn fetch_modrinth_project_metadata(
+    client: &reqwest::Client,
+    project_id: &str,
+) -> Option<InstalledContentMetadata> {
+    let url = format!("https://api.modrinth.com/v2/project/{}", project_id);
+    let response = client.get(url).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let data: ModrinthProjectMetadataResponse = response.json().await.ok()?;
+    Some(InstalledContentMetadata {
+        project_id: project_id.to_string(),
+        slug: Some(data.slug),
+        title: Some(data.title),
+        icon_url: data.icon_url,
+    })
+}
+
+async fn write_installed_content_metadata(
+    game_dir: &Path,
+    metadata_dir_name: &str,
+    content_filename: &str,
+    metadata: &InstalledContentMetadata,
+) -> Result<(), String> {
+    let metadata_dir = game_dir.join(metadata_dir_name);
+    tokio::fs::create_dir_all(&metadata_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let metadata_path = metadata_dir.join(format!("{}.json", content_filename));
+    let payload = serde_json::json!({
+        "project_id": metadata.project_id,
+        "slug": metadata.slug,
+        "title": metadata.title,
+        "icon_url": metadata.icon_url,
+        "filename": content_filename
+    });
+    let content = serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?;
+
+    tokio::fs::write(metadata_path, content)
+        .await
+        .map_err(|e| e.to_string())
+}
 
 // ==================== CATEGORIES ====================
 
@@ -486,8 +547,10 @@ pub async fn install_resourcepack(
         rp_dir
     );
 
-    // Hole Versionen von Modrinth
     let client = crate::core::http::HTTP_CLIENT.clone();
+    let project_metadata = fetch_modrinth_project_metadata(&client, &pack_id).await;
+
+    // Hole Versionen von Modrinth
     let url = format!("https://api.modrinth.com/v2/project/{}/version", pack_id);
 
     let response = client.get(&url).send().await.map_err(|e| e.to_string())?;
@@ -521,12 +584,12 @@ pub async fn install_resourcepack(
             .iter()
             .find(|v| v.game_versions.iter().any(|gv| gv == &mc_version))
     }
-        .ok_or_else(|| {
-            format!(
-                "Keine passende Resource Pack Version für MC {} gefunden",
-                mc_version
-            )
-        })?;
+    .ok_or_else(|| {
+        format!(
+            "Keine passende Resource Pack Version für MC {} gefunden",
+            mc_version
+        )
+    })?;
 
     tracing::info!(
         "Installing version: {} ({})",
@@ -556,6 +619,19 @@ pub async fn install_resourcepack(
     tokio::fs::write(&target_path, &bytes)
         .await
         .map_err(|e| e.to_string())?;
+
+    if let Some(metadata) = project_metadata {
+        if let Err(e) = write_installed_content_metadata(
+            &profile.game_dir,
+            "resourcepackinfos",
+            &file.filename,
+            &metadata,
+        )
+        .await
+        {
+            tracing::warn!("Failed to write resource pack metadata: {}", e);
+        }
+    }
 
     tracing::info!("Resource pack installed successfully to {:?}", target_path);
 
@@ -708,6 +784,7 @@ pub async fn install_shaderpack(
     );
 
     let client = crate::core::http::HTTP_CLIENT.clone();
+    let project_metadata = fetch_modrinth_project_metadata(&client, &pack_id).await;
     let url = format!("https://api.modrinth.com/v2/project/{}/version", pack_id);
 
     let response = client.get(&url).send().await.map_err(|e| e.to_string())?;
@@ -738,7 +815,7 @@ pub async fn install_shaderpack(
             .find(|v| v.game_versions.iter().any(|gv| gv == &mc_version))
             .or_else(|| versions.first()) // Shader sind oft version-unabhängig
     }
-        .ok_or_else(|| "Keine passende Shader Version gefunden".to_string())?;
+    .ok_or_else(|| "Keine passende Shader Version gefunden".to_string())?;
 
     let file = version
         .files
@@ -759,6 +836,19 @@ pub async fn install_shaderpack(
     tokio::fs::write(&target_path, &bytes)
         .await
         .map_err(|e| e.to_string())?;
+
+    if let Some(metadata) = project_metadata {
+        if let Err(e) = write_installed_content_metadata(
+            &profile.game_dir,
+            "shaderpackinfos",
+            &file.filename,
+            &metadata,
+        )
+        .await
+        {
+            tracing::warn!("Failed to write shader pack metadata: {}", e);
+        }
+    }
 
     tracing::info!("Shader pack installed successfully to {:?}", target_path);
 
@@ -896,7 +986,7 @@ pub async fn install_modpack(
     } else {
         versions.first()
     }
-        .ok_or_else(|| "Keine Modpack-Version gefunden".to_string())?;
+    .ok_or_else(|| "Keine Modpack-Version gefunden".to_string())?;
 
     let mrpack_file = version
         .files
@@ -1301,12 +1391,12 @@ async fn remove_meta_inf_from_zip(zip_path: &std::path::Path) -> Result<(), Stri
         // Behalte aber andere META-INF Dateien (z.B. MANIFEST.MF, nested JARs)
         let should_skip = name.starts_with("META-INF/")
             && (
-            name.ends_with(".SF") ||   // Signature File
+                name.ends_with(".SF") ||   // Signature File
                 name.ends_with(".DSA") ||  // Digital Signature
                 name.ends_with(".RSA") ||  // RSA Signature
                 name.ends_with(".EC")
-            // Elliptic Curve Signature
-        );
+                // Elliptic Curve Signature
+            );
 
         if should_skip {
             tracing::debug!("Removing signature file: {}", name);

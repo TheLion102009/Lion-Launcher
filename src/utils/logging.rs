@@ -49,6 +49,16 @@ impl Write for TeeWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         std::io::stdout().write_all(buf)?;
         self.pending.extend_from_slice(buf);
+
+        while let Some(pos) = self.pending.iter().position(|b| *b == b'\n') {
+            let line_bytes: Vec<u8> = self.pending.drain(..=pos).collect();
+            let line = String::from_utf8_lossy(&line_bytes);
+            let line = line.trim_end_matches(['\r', '\n']);
+            if !line.trim().is_empty() {
+                push_live_log_line(line.to_string());
+            }
+        }
+
         Ok(buf.len())
     }
 

@@ -13,6 +13,40 @@ function handleIconErrorMedium(el) {
     el.parentElement.innerHTML = '<div style="font-size: 32px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;"><i class="bi ' + iconClass + '"></i></div>';
 }
 
+function handleGalleryImageError(el) {
+    el.onerror = null;
+    const wrapper = el.parentElement;
+    if (!wrapper) return;
+    wrapper.innerHTML = `
+        <div style="height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--bg-dark); color: var(--text-secondary);">
+            <i class="bi bi-image" style="font-size: 28px;"></i>
+            <span style="font-size: 12px;">Bild konnte nicht geladen werden</span>
+        </div>
+    `;
+}
+
+function handleFullscreenImageError(el) {
+    el.onerror = null;
+    const container = el.parentElement;
+    if (!container) return;
+    container.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text-secondary);padding:40px;text-align:center;">
+            <i class="bi bi-image" style="font-size:42px;margin-bottom:10px;"></i>
+            <span>Das Bild konnte nicht geladen werden.</span>
+        </div>
+    `;
+}
+
+function normalizeMediaUrl(url) {
+    if (!url) return '';
+    const value = String(url).trim();
+    if (!value) return '';
+    if (value.startsWith('data:image/')) return value;
+    if (/^https?:\/\//i.test(value)) return value;
+    if (value.startsWith('//')) return 'https:' + value;
+    return value;
+}
+
 /**
  * Escaped HTML-Sonderzeichen für den Einsatz in HTML-Attributen.
  * Verhindert den ';">' Bug wenn Mod-Namen Anführungszeichen enthalten.
@@ -25,19 +59,6 @@ function escapeAttr(str) {
         .replace(/'/g, '&#39;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
-}
-
-/**
- * Escaped HTML für den Einsatz als Text-Inhalt (nicht in Attributen).
- */
-function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
 }
 
 function resolveUiAssetUrl(fileName) {
@@ -113,6 +134,7 @@ try {
 let currentPage = 'profiles';
 let currentProfile = null;
 let profiles = [];
+let galleryModalKeyHandler = null;
 let currentUsername = 'Guest';
 let openedFromProfile = false;
 let skipLoadProfiles = false;
@@ -165,6 +187,8 @@ const runningProfiles = new Set();
 let liveLogInterval = null;
 /** Welches Profil gerade im Live-Log angezeigt wird */
 let liveLogProfileId = null;
+/** Letzter bekannter Live-Log-Inhalt (für Delta-Rendering) */
+let liveLogLastSnapshot = '';
 
 /** Lädt laufende Instanzen vom Backend, erkennt gestoppte und aktualisiert Buttons + Live-Log */
 async function syncRunningProfiles() {
@@ -1639,6 +1663,10 @@ function renderMainCategoryContent(categoryName, profile) {
 function switchContentSubTab(subtabName) {
     debugLog('Switching to content sub-tab: ' + subtabName, 'info');
 
+    if (currentProfileSubTab === subtabName && document.querySelector('.content-sub-tab.active')?.dataset.subtab === subtabName) {
+        return;
+    }
+
     // Speichere aktuellen Sub-Tab
     currentProfileSubTab = subtabName;
 
@@ -2273,18 +2301,20 @@ function stopLiveLog() {
         liveLogInterval = null;
     }
     liveLogProfileId = null;
+    liveLogLastSnapshot = '';
     // Dropdown-Rand zurücksetzen
     const sel = document.getElementById('log-source-select');
     if (sel) sel.style.borderColor = '';
 }
 
-/** Startet den Live-Log-Refresh (alle 1,5 s) */
+/** Startet den Live-Log-Refresh (schnell, mit Delta-Rendering) */
 async function startLiveLog(profileId) {
     if (!profileId) return;
     const el = getLogContentElement();
     if (!el) return;
 
     liveLogProfileId = profileId;
+    liveLogLastSnapshot = '';
 
     // Dropdown-Rand rot markieren
     const sel = document.getElementById('log-source-select');
@@ -2301,7 +2331,7 @@ async function startLiveLog(profileId) {
         const container = getLogContentElement();
         if (!container) { stopLiveLog(); return; }
         refreshLiveLog(profileId, container);
-    }, 1500);
+    }, 500);
 }
 
 async function refreshLiveLog(profileId, el) {
@@ -2310,6 +2340,7 @@ async function refreshLiveLog(profileId, el) {
     const isRunning = runningProfiles.has(profileId);
 
     if (!isRunning) {
+        liveLogLastSnapshot = '';
         el.innerHTML = `
             <div style="color:var(--text-secondary);text-align:center;padding:40px;">
                 <i class="bi bi-stop-circle" style="font-size:32px;color:#f44336;display:block;margin-bottom:10px;"></i>
@@ -2322,11 +2353,12 @@ async function refreshLiveLog(profileId, el) {
     }
 
     try {
-        const content = await invoke('get_live_launcher_logs', { limit: 2500 });
+        const content = await invoke('get_live_launcher_logs', { limit: 800 });
 
         const noContent = !content || !content.trim();
 
         if (noContent) {
+            liveLogLastSnapshot = '';
             el.innerHTML = `
                 <div style="color:var(--text-secondary);text-align:center;padding:40px;">
                     <i class="bi bi-broadcast" style="font-size:32px;color:#4caf50;display:block;
@@ -2346,6 +2378,11 @@ async function refreshLiveLog(profileId, el) {
                     animation:livePulse 1s infinite;"></span>
                 LIVE – Instanz läuft
            </div>`;
+
+        if (content === liveLogLastSnapshot) {
+            return;
+        }
+        liveLogLastSnapshot = content;
 
         const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 
@@ -2536,7 +2573,8 @@ function startModsWatcher(profileId) {
 
             if (lastModsHash && newHash !== lastModsHash) {
                 debugLog('Mods folder changed, reloading...', 'info');
-                loadInstalledMods(profileId);
+                invalidateProfileContentCaches(profileId);
+                loadInstalledMods(profileId, { force: true });
             }
             lastModsHash = newHash;
         } catch (e) {
@@ -2559,14 +2597,45 @@ function generateModsHash(mods) {
     return mods.map(m => `${m.filename}:${m.disabled}`).sort().join('|');
 }
 
-async function loadInstalledMods(profileId) {
+async function loadInstalledMods(profileId, options = {}) {
     debugLog('Loading installed mods for profile: ' + profileId, 'info');
 
     const modsList = document.getElementById('profile-mods-list');
     if (!modsList) return;
 
+    const forceReload = !!options.force;
     selectedMods.clear();
     updateBulkActionsBar();
+
+    const cached = profileModsCache.get(profileId);
+    if (!forceReload && Array.isArray(cached)) {
+        installedModsCache = cached;
+        cachedModsProfileId = profileId;
+
+        const searchInput = document.getElementById('installed-mods-search');
+        if (searchInput) searchInput.value = '';
+
+        if (cached.length === 0) {
+            modsList.innerHTML = `
+                <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
+                    <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-box"></i></div>
+                    <p>${t('no_mods_installed')}</p>
+                    <p style="font-size: 14px; margin-top: 10px;">
+                        Gehe zum <a href="#" onclick="switchPage('mods'); return false;" style="color: var(--gold);">Mod Browser</a> um Mods zu installieren
+                    </p>
+                </div>
+            `;
+            document.getElementById('bulk-actions-bar').style.display = 'none';
+            updateProfileScrollableBoxes();
+            return;
+        }
+
+        document.getElementById('bulk-actions-bar').style.display = 'flex';
+        renderInstalledModsList(cached, profileId);
+        updateProfileScrollableBoxes();
+        loadModIcons(cached);
+        return;
+    }
 
     try {
         const mods = await invoke('get_installed_mods', { profileId });
@@ -2574,6 +2643,9 @@ async function loadInstalledMods(profileId) {
         // Cache für Suchfilter speichern
         installedModsCache = mods || [];
         cachedModsProfileId = profileId;
+        profileModsCache.set(profileId, installedModsCache);
+        installedModIdsProfileId = null;
+        installedModIds.clear();
 
         // Suchfeld zurücksetzen beim Neuladen
         const searchInput = document.getElementById('installed-mods-search');
@@ -2613,7 +2685,7 @@ async function loadInstalledMods(profileId) {
                 <div style="font-size: 48px; margin-bottom: 15px; color: #f44336;"><i class="bi bi-x-circle-fill"></i></div>
                 <p>Fehler beim Laden der Mods</p>
                 <p style="font-size: 12px; color: var(--text-secondary);">${error}</p>
-                <button class="btn btn-secondary" onclick="loadInstalledMods('${profileId}')" style="margin-top: 15px;">
+                <button class="btn btn-secondary" onclick="loadInstalledMods('${profileId}', { force: true })" style="margin-top: 15px;">
                     <i class="bi bi-arrow-clockwise"></i> Erneut versuchen
                 </button>
             </div>
@@ -2710,7 +2782,8 @@ function renderInstalledModsList(mods, profileId) {
 }
 
 function refreshInstalledMods(profileId) {
-    loadInstalledMods(profileId);
+    invalidateProfileContentCaches(profileId);
+    loadInstalledMods(profileId, { force: true });
 }
 
 // Mod-Auswahl für Bulk-Operationen
@@ -2765,7 +2838,8 @@ async function bulkActivateMods(profileId) {
         });
         debugLog('Mods activated', 'success');
         selectedMods.clear();
-        loadInstalledMods(profileId);
+        invalidateProfileContentCaches(profileId);
+        loadInstalledMods(profileId, { force: true });
         showToast(`${count} Mods aktiviert!`, 'success', 3000);
     } catch (error) {
         debugLog('Failed to activate mods: ' + error, 'error');
@@ -2790,7 +2864,8 @@ async function bulkDeactivateMods(profileId) {
         });
         debugLog('Mods deactivated', 'success');
         selectedMods.clear();
-        loadInstalledMods(profileId);
+        invalidateProfileContentCaches(profileId);
+        loadInstalledMods(profileId, { force: true });
         showToast(`${count} Mods deaktiviert!`, 'success', 3000);
     } catch (error) {
         debugLog('Failed to deactivate mods: ' + error, 'error');
@@ -2814,9 +2889,10 @@ async function bulkDeleteMods(profileId) {
             filenames: Array.from(selectedMods)
         });
         debugLog('Mods deleted', 'success');
-        await loadInstalledModIds(); // Cache aktualisieren
+        await loadInstalledModIds(true); // Cache aktualisieren
         selectedMods.clear();
-        loadInstalledMods(profileId);
+        invalidateProfileContentCaches(profileId);
+        loadInstalledMods(profileId, { force: true });
         showToast(`${count} Mods gelöscht!`, 'success', 3000);
     } catch (error) {
         debugLog('Failed to delete mods: ' + error, 'error');
@@ -3064,8 +3140,9 @@ async function applySelectedModUpdates() {
         }
     }
 
-    await loadInstalledModIds();
-    loadInstalledMods(currentModUpdateProfileId);
+    await loadInstalledModIds(true);
+    invalidateProfileContentCaches(currentModUpdateProfileId);
+    loadInstalledMods(currentModUpdateProfileId, { force: true });
 
     document.getElementById('updates-modal')?.remove();
     selectedModUpdates.clear();
@@ -3090,7 +3167,8 @@ async function toggleMod(profileId, filename, isCurrentlyDisabled) {
         });
 
         debugLog('Mod toggled successfully', 'success');
-        loadInstalledMods(profileId);
+        invalidateProfileContentCaches(profileId);
+        loadInstalledMods(profileId, { force: true });
 
         // Toast-Benachrichtigung
         showToast(`Mod ${isCurrentlyDisabled ? 'aktiviert' : 'deaktiviert'}!`, 'success', 3000);
@@ -3109,8 +3187,9 @@ async function deleteMod(profileId, filename) {
         await invoke('delete_mod', { profileId, filename });
 
         debugLog('Mod deleted successfully', 'success');
-        await loadInstalledModIds(); // Cache aktualisieren
-        loadInstalledMods(profileId);
+        await loadInstalledModIds(true); // Cache aktualisieren
+        invalidateProfileContentCaches(profileId);
+        loadInstalledMods(profileId, { force: true });
 
         // Toast-Benachrichtigung
         showToast(`Mod "${filename}" wurde gelöscht!`, 'success', 3000);
@@ -3151,56 +3230,24 @@ async function openShaderPacksFolder(profileId) {
 
 // ==================== RESOURCE PACKS ====================
 
-async function loadInstalledResourcePacks(profileId) {
+async function loadInstalledResourcePacks(profileId, options = {}) {
     const list = document.getElementById('profile-resourcepacks-list');
     if (!list) return;
 
+    const forceReload = !!options.force;
+    const cached = profileResourcePacksCache.get(profileId);
+    if (!forceReload && Array.isArray(cached)) {
+        renderInstalledResourcePacks(cached, profileId);
+        return;
+    }
+
     try {
         const packs = await invoke('get_installed_resourcepacks', { profileId });
-
-        if (packs.length === 0) {
-            list.innerHTML = `
-                <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
-                    <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-palette"></i></div>
-                    <p>Keine Resource Packs installiert</p>
-                    <p style="font-size: 14px; margin-top: 10px;">
-                        Klicke auf "+ Resource Pack" um Packs zu durchsuchen
-                    </p>
-                </div>
-            `;
-            return;
-        }
-
-        const packsHTML = packs.map(pack => {
-            const sizeStr = pack.size > 0 ? `${(pack.size / 1024 / 1024).toFixed(2)} MB` : '';
-            const iconHTML = pack.icon_path
-                ? `<img src="file://${pack.icon_path}" style="width: 48px; height: 48px; border-radius: 4px;" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                   <div style="display: none; font-size: 32px;"><i class="bi bi-palette"></i></div>`
-                : `<div style="font-size: 32px;"><i class="bi bi-palette"></i></div>`;
-
-            return `
-                <div style="background: var(--bg-light); padding: 12px; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
-                    <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                        ${iconHTML}
-                    </div>
-                    <div style="flex: 1; min-width: 0;">
-                        <div style="color: var(--text-primary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            ${pack.name}
-                        </div>
-                        <div style="color: var(--text-secondary); font-size: 11px;">
-                            ${pack.is_folder ? '<i class="bi bi-folder"></i> Ordner' : '· ' + sizeStr}
-                        </div>
-                    </div>
-                    <button class="btn btn-secondary" onclick="deleteResourcePack('${profileId}', '${pack.name.replace(/'/g, "\\'")}', ${pack.is_folder})" 
-                            style="padding: 6px 12px; font-size: 11px; color: #f44336;">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                </div>
-            `;
-        }).join('');
-
-        list.innerHTML = packsHTML;
-
+        const normalized = packs || [];
+        profileResourcePacksCache.set(profileId, normalized);
+        installedResourcePackNamesProfileId = null;
+        installedResourcePackNames.clear();
+        renderInstalledResourcePacks(normalized, profileId);
     } catch (error) {
         debugLog('Failed to load resource packs: ' + error, 'error');
         list.innerHTML = `
@@ -3211,8 +3258,58 @@ async function loadInstalledResourcePacks(profileId) {
     }
 }
 
+function renderInstalledResourcePacks(packs, profileId) {
+    const list = document.getElementById('profile-resourcepacks-list');
+    if (!list) return;
+
+    if (!packs || packs.length === 0) {
+        list.innerHTML = `
+            <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
+                <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-palette"></i></div>
+                <p>Keine Resource Packs installiert</p>
+                <p style="font-size: 14px; margin-top: 10px;">
+                    Klicke auf "+ Resource Pack" um Packs zu durchsuchen
+                </p>
+            </div>
+        `;
+        return;
+    }
+
+    const packsHTML = packs.map(pack => {
+        const sizeStr = pack.size > 0 ? `${(pack.size / 1024 / 1024).toFixed(2)} MB` : '';
+        const iconSrc = resolvePackIconSrc(pack);
+        const iconHTML = iconSrc
+            ? `<img src="${escapeAttr(iconSrc)}" style="width: 48px; height: 48px; border-radius: 4px; object-fit: cover;" onerror="this.onerror=null; this.style.display='none'; this.nextElementSibling.style.display='flex';">
+               <div style="display: none; width: 48px; height: 48px; font-size: 32px; align-items: center; justify-content: center;"><i class="bi bi-palette"></i></div>`
+            : `<div style="font-size: 32px;"><i class="bi bi-palette"></i></div>`;
+
+        return `
+            <div style="background: var(--bg-light); padding: 12px; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
+                <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; border-radius: 4px; background: var(--bg-dark);">
+                    ${iconHTML}
+                </div>
+                <div style="flex: 1; min-width: 0;">
+                    <div style="color: var(--text-primary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        ${pack.name}
+                    </div>
+                    <div style="color: var(--text-secondary); font-size: 11px;">
+                        ${pack.is_folder ? '<i class="bi bi-folder"></i> Ordner' : '· ' + sizeStr}
+                    </div>
+                </div>
+                <button class="btn btn-secondary" onclick="deleteResourcePack('${profileId}', '${pack.name.replace(/'/g, "\\'")}', ${pack.is_folder})" 
+                        style="padding: 6px 12px; font-size: 11px; color: #f44336;">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+        `;
+    }).join('');
+
+    list.innerHTML = packsHTML;
+}
+
 async function refreshResourcePacks(profileId) {
-    await loadInstalledResourcePacks(profileId);
+    invalidateProfileContentCaches(profileId);
+    await loadInstalledResourcePacks(profileId, { force: true });
     showToast('Resource Packs aktualisiert', 'success', 2000);
 }
 
@@ -3223,7 +3320,9 @@ async function deleteResourcePack(profileId, name, isFolder) {
         await invoke('delete_resourcepack', { profileId, name });
 
         debugLog('Resource Pack deleted successfully', 'success');
-        loadInstalledResourcePacks(profileId);
+        invalidateProfileContentCaches(profileId);
+        await loadInstalledResourcePackNames(true);
+        await loadInstalledResourcePacks(profileId, { force: true });
 
         showToast(`Resource Pack "${name}" wurde gelöscht!`, 'success', 3000);
 
@@ -3243,7 +3342,7 @@ function browseResourcePacks(profileId) {
 
     // Wechsle zu Resource Packs
     switchPage('mods');
-    switchContentType('resourcepacks');
+    switchContentType('resourcepacks', { force: true });
 }
 
 function openContentBrowser(profileId) {
@@ -3279,7 +3378,7 @@ function openContentBrowser(profileId) {
     }
 
     // JETZT wechsle zum richtigen Content Type (mit bereits gesetzten Filtern!)
-    switchContentType(currentProfileSubTab);
+    switchContentType(currentProfileSubTab, { force: true });
 
     debugLog('Content Browser opened: currentContentType = ' + currentContentType, 'info');
 
@@ -3314,53 +3413,24 @@ function openContentBrowser(profileId) {
 
 // ==================== SHADER PACKS (Profil) ====================
 
-async function loadInstalledShaderPacks(profileId) {
+async function loadInstalledShaderPacks(profileId, options = {}) {
     const list = document.getElementById('profile-shaderpacks-list');
     if (!list) return;
 
+    const forceReload = !!options.force;
+    const cached = profileShaderPacksCache.get(profileId);
+    if (!forceReload && Array.isArray(cached)) {
+        renderInstalledShaderPacks(cached, profileId);
+        return;
+    }
+
     try {
         const packs = await invoke('get_installed_shaderpacks', { profileId });
-
-        if (packs.length === 0) {
-            list.innerHTML = `
-                <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
-                    <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-stars"></i></div>
-                    <p>Keine Shader Packs installiert</p>
-                    <p style="font-size: 14px; margin-top: 10px;">
-                        Benötigt Iris oder OptiFine<br>
-                        Klicke auf "+ Add Content" um Shader zu durchsuchen
-                    </p>
-                </div>
-            `;
-            return;
-        }
-
-        const packsHTML = packs.map(pack => {
-            const sizeStr = pack.size > 0 ? `${(pack.size / 1024 / 1024).toFixed(2)} MB` : '';
-
-            return `
-                <div style="background: var(--bg-light); padding: 12px; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
-                    <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 32px;">
-                        <i class="bi bi-stars"></i>
-                    </div>
-                    <div style="flex: 1; min-width: 0;">
-                        <div style="color: var(--text-primary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            ${pack.name}
-                        </div>
-                        <div style="color: var(--text-secondary); font-size: 11px;">
-                            ${pack.is_folder ? '<i class="bi bi-folder"></i> Ordner' : '· ' + sizeStr}
-                        </div>
-                    </div>
-                    <button class="btn btn-secondary" onclick="deleteShaderPack('${profileId}', '${pack.name}')" 
-                            style="padding: 6px 12px; font-size: 11px; color: #f44336;">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                </div>
-            `;
-        }).join('');
-
-        list.innerHTML = packsHTML;
-
+        const normalized = packs || [];
+        profileShaderPacksCache.set(profileId, normalized);
+        installedShaderPackNamesProfileId = null;
+        installedShaderPackNames.clear();
+        renderInstalledShaderPacks(normalized, profileId);
     } catch (error) {
         debugLog('Failed to load shader packs: ' + error, 'error');
         list.innerHTML = `
@@ -3371,8 +3441,59 @@ async function loadInstalledShaderPacks(profileId) {
     }
 }
 
+function renderInstalledShaderPacks(packs, profileId) {
+    const list = document.getElementById('profile-shaderpacks-list');
+    if (!list) return;
+
+    if (!packs || packs.length === 0) {
+        list.innerHTML = `
+            <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
+                <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-stars"></i></div>
+                <p>Keine Shader Packs installiert</p>
+                <p style="font-size: 14px; margin-top: 10px;">
+                    Benötigt Iris oder OptiFine<br>
+                    Klicke auf "+ Add Content" um Shader zu durchsuchen
+                </p>
+            </div>
+        `;
+        return;
+    }
+
+    const packsHTML = packs.map(pack => {
+        const sizeStr = pack.size > 0 ? `${(pack.size / 1024 / 1024).toFixed(2)} MB` : '';
+        const iconSrc = resolvePackIconSrc(pack);
+        const iconHTML = iconSrc
+            ? `<img src="${escapeAttr(iconSrc)}" style="width: 48px; height: 48px; border-radius: 4px; object-fit: cover;" onerror="this.onerror=null; this.style.display='none'; this.nextElementSibling.style.display='flex';">
+               <div style="display: none; width: 48px; height: 48px; font-size: 32px; align-items: center; justify-content: center;"><i class="bi bi-stars"></i></div>`
+            : `<i class="bi bi-stars"></i>`;
+
+        return `
+            <div style="background: var(--bg-light); padding: 12px; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
+                <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 32px; border-radius: 4px; overflow: hidden; background: var(--bg-dark);">
+                    ${iconHTML}
+                </div>
+                <div style="flex: 1; min-width: 0;">
+                    <div style="color: var(--text-primary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        ${pack.name}
+                    </div>
+                    <div style="color: var(--text-secondary); font-size: 11px;">
+                        ${pack.is_folder ? '<i class="bi bi-folder"></i> Ordner' : '· ' + sizeStr}
+                    </div>
+                </div>
+                <button class="btn btn-secondary" onclick="deleteShaderPack('${profileId}', '${pack.name.replace(/'/g, "\\'")}')" 
+                        style="padding: 6px 12px; font-size: 11px; color: #f44336;">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+        `;
+    }).join('');
+
+    list.innerHTML = packsHTML;
+}
+
 async function refreshShaderPacks(profileId) {
-    await loadInstalledShaderPacks(profileId);
+    invalidateProfileContentCaches(profileId);
+    await loadInstalledShaderPacks(profileId, { force: true });
     showToast('Shader Packs aktualisiert', 'success', 2000);
 }
 
@@ -3383,7 +3504,9 @@ async function deleteShaderPack(profileId, name) {
         await invoke('delete_shaderpack', { profileId, name });
 
         debugLog('Shader Pack deleted successfully', 'success');
-        loadInstalledShaderPacks(profileId);
+        invalidateProfileContentCaches(profileId);
+        await loadInstalledShaderPackNames(true);
+        await loadInstalledShaderPacks(profileId, { force: true });
 
         showToast(`Shader Pack "${name}" wurde gelöscht!`, 'success', 3000);
 
@@ -5405,6 +5528,111 @@ let installedModsCache = []; // Cache der geladenen installierten Mods (für Suc
 let cachedModsProfileId = null; // Profil-ID zu der der Cache gehört
 let installedResourcePackNames = new Set(); // Cache für installierte Resource Packs
 let installedShaderPackNames = new Set(); // Cache für installierte Shader Packs
+let installedModIdsProfileId = null;
+let installedResourcePackNamesProfileId = null;
+let installedShaderPackNamesProfileId = null;
+
+const profileModsCache = new Map();
+const profileResourcePacksCache = new Map();
+const profileShaderPacksCache = new Map();
+const browserResultsCache = new Map();
+const modrinthCategoriesCache = new Map();
+const BROWSER_RESULTS_CACHE_TTL_MS = 2 * 60 * 1000;
+
+function normalizePackKey(value) {
+    if (value == null) return '';
+    return String(value)
+        .toLowerCase()
+        .trim()
+        .replace(/\.(zip|jar)$/i, '')
+        .replace(/[_\s]+/g, '-')
+        .replace(/[^a-z0-9.-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+}
+
+function addInstalledPackKeys(setRef, pack) {
+    const add = (value) => {
+        const key = normalizePackKey(value);
+        if (key) setRef.add(key);
+    };
+
+    add(pack.name);
+    add(pack.project_id);
+    add(pack.slug);
+    add(pack.title);
+
+    const noExt = String(pack.name || '').replace(/\.(zip|jar)$/i, '');
+    add(noExt);
+    const firstPart = noExt.split('-')[0];
+    if (firstPart && firstPart.length > 2) add(firstPart);
+}
+
+function buildBrowserCacheKey(contentType, query, page) {
+    return JSON.stringify({
+        contentType,
+        query: (query || '').trim().toLowerCase(),
+        page,
+        version: selectedFilters.version || '',
+        loader: selectedFilters.loader || '',
+        sort: selectedFilters.sort || '',
+        categories: [...(selectedFilters.categories || [])].sort(),
+        profileId: currentProfile ? currentProfile.id : null
+    });
+}
+
+function getCachedBrowserResults(cacheKey) {
+    const entry = browserResultsCache.get(cacheKey);
+    if (!entry) return null;
+    if (Date.now() - entry.ts > BROWSER_RESULTS_CACHE_TTL_MS) {
+        browserResultsCache.delete(cacheKey);
+        return null;
+    }
+    return Array.isArray(entry.items) ? entry.items : null;
+}
+
+function setCachedBrowserResults(cacheKey, items) {
+    browserResultsCache.set(cacheKey, {
+        ts: Date.now(),
+        items: Array.isArray(items) ? items : []
+    });
+}
+
+function invalidateProfileContentCaches(profileId) {
+    if (!profileId) return;
+    profileModsCache.delete(profileId);
+    profileResourcePacksCache.delete(profileId);
+    profileShaderPacksCache.delete(profileId);
+
+    if (cachedModsProfileId === profileId) {
+        cachedModsProfileId = null;
+        installedModsCache = [];
+    }
+    if (installedModIdsProfileId === profileId) {
+        installedModIdsProfileId = null;
+        installedModIds.clear();
+    }
+    if (installedResourcePackNamesProfileId === profileId) {
+        installedResourcePackNamesProfileId = null;
+        installedResourcePackNames.clear();
+    }
+    if (installedShaderPackNamesProfileId === profileId) {
+        installedShaderPackNamesProfileId = null;
+        installedShaderPackNames.clear();
+    }
+}
+
+function resolvePackIconSrc(pack) {
+    if (!pack) return '';
+    if (pack.icon_path) {
+        if (typeof pack.icon_path === 'string' && pack.icon_path.startsWith('data:image/')) {
+            return pack.icon_path;
+        }
+        return `file://${encodeURI(pack.icon_path)}`;
+    }
+    const iconUrl = normalizeMediaUrl(pack.icon_url);
+    return iconUrl || '';
+}
 
 function setupSearch() {
     const searchInput = document.getElementById('mod-search');
@@ -5489,9 +5717,14 @@ function setupSearch() {
 }
 
 // Content Type Switching
-function switchContentType(type) {
+function switchContentType(type, options = {}) {
     debugLog('switchContentType called with type: ' + type, 'warn');
     debugLog('currentContentType BEFORE: ' + currentContentType, 'warn');
+
+    const forceReload = !!options.force;
+    if (!forceReload && currentContentType === type) {
+        return;
+    }
 
     currentContentType = type;
 
@@ -5566,8 +5799,12 @@ async function loadModrinthCategories() {
     categoriesContainer.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px; padding: 10px;">Loading categories...</div>';
 
     try {
-        // Lade Kategorien über Backend (kein CORS-Problem!)
-        const allCategories = await invoke('get_modrinth_categories');
+        // Lade Kategorien über Backend (kein CORS-Problem!) + Cache
+        let allCategories = modrinthCategoriesCache.get('all');
+        if (!allCategories) {
+            allCategories = await invoke('get_modrinth_categories');
+            modrinthCategoriesCache.set('all', allCategories || []);
+        }
 
         // Filtern nach Content-Type
         const projectType = currentContentType === 'mods' ? 'mod' :
@@ -5800,6 +6037,13 @@ async function loadPopularResourcePacks(page = 0) {
     // Lade auch installierte Mods für den Fall dass User zu Mods wechselt
     await loadInstalledModIds();
 
+    const cacheKey = buildBrowserCacheKey('resourcepacks', '', page);
+    const cached = getCachedBrowserResults(cacheKey);
+    if (cached) {
+        renderMods(cached, page);
+        return;
+    }
+
     try {
         const packs = await invoke('search_resourcepacks', {
             query: '',
@@ -5810,6 +6054,7 @@ async function loadPopularResourcePacks(page = 0) {
             limit: getEffectiveLimit()
         });
 
+        setCachedBrowserResults(cacheKey, packs);
         renderMods(packs, page);
     } catch (error) {
         debugLog('Failed to load resource packs: ' + error, 'error');
@@ -5840,6 +6085,13 @@ async function searchResourcePacks(query, page = 0) {
     // Lade installierte Resource Packs für Markierung
     await loadInstalledResourcePackNames();
 
+    const cacheKey = buildBrowserCacheKey('resourcepacks', query, page);
+    const cached = getCachedBrowserResults(cacheKey);
+    if (cached) {
+        renderMods(cached, page);
+        return;
+    }
+
     try {
         const packs = await invoke('search_resourcepacks', {
             query,
@@ -5850,6 +6102,7 @@ async function searchResourcePacks(query, page = 0) {
             limit: getEffectiveLimit()
         });
 
+        setCachedBrowserResults(cacheKey, packs);
         renderMods(packs, page);
     } catch (error) {
         debugLog('Search failed: ' + error, 'error');
@@ -5892,7 +6145,8 @@ async function installResourcePack(packId, source) {
         btn.style.cursor = 'not-allowed';
 
         // Cache aktualisieren
-        await loadInstalledResourcePackNames();
+        invalidateProfileContentCaches(profile.id);
+        await loadInstalledResourcePackNames(true);
 
     } catch (error) {
         debugLog('Install failed: ' + error, 'error');
@@ -5937,7 +6191,8 @@ async function installShaderPack(packId, source) {
         btn.style.cursor = 'not-allowed';
 
         // Cache aktualisieren
-        await loadInstalledShaderPackNames();
+        invalidateProfileContentCaches(profile.id);
+        await loadInstalledShaderPackNames(true);
 
     } catch (error) {
         debugLog('Install failed: ' + error, 'error');
@@ -5964,6 +6219,13 @@ async function loadPopularShaderPacks(page = 0) {
     // Lade auch installierte Mods für den Fall dass User zu Mods wechselt
     await loadInstalledModIds();
 
+    const cacheKey = buildBrowserCacheKey('shaderpacks', '', page);
+    const cached = getCachedBrowserResults(cacheKey);
+    if (cached) {
+        renderMods(cached, page);
+        return;
+    }
+
     try {
         const packs = await invoke('search_shaderpacks', {
             query: '',
@@ -5974,6 +6236,7 @@ async function loadPopularShaderPacks(page = 0) {
             limit: getEffectiveLimit()
         });
 
+        setCachedBrowserResults(cacheKey, packs);
         renderMods(packs, page);
     } catch (error) {
         debugLog('Failed to load shader packs: ' + error, 'error');
@@ -6004,6 +6267,13 @@ async function searchShaderPacks(query, page = 0) {
     // Lade installierte Shader für Markierung
     await loadInstalledShaderPackNames();
 
+    const cacheKey = buildBrowserCacheKey('shaderpacks', query, page);
+    const cached = getCachedBrowserResults(cacheKey);
+    if (cached) {
+        renderMods(cached, page);
+        return;
+    }
+
     try {
         const packs = await invoke('search_shaderpacks', {
             query,
@@ -6014,6 +6284,7 @@ async function searchShaderPacks(query, page = 0) {
             limit: getEffectiveLimit()
         });
 
+        setCachedBrowserResults(cacheKey, packs);
         renderMods(packs, page);
     } catch (error) {
         debugLog('Search failed: ' + error, 'error');
@@ -6208,6 +6479,13 @@ async function loadPopularMods(page = 0) {
     // Zuerst installierte Mods laden um sie zu markieren
     await loadInstalledModIds();
 
+    const cacheKey = buildBrowserCacheKey('mods', '', page);
+    const cached = getCachedBrowserResults(cacheKey);
+    if (cached) {
+        renderMods(cached, page);
+        return;
+    }
+
     try {
         // Suche nach beliebten Mods (leerer Query = alle, sortiert nach Downloads)
         const mods = await invoke('search_mods', {
@@ -6220,6 +6498,7 @@ async function loadPopularMods(page = 0) {
             limit: getEffectiveLimit()
         });
 
+        setCachedBrowserResults(cacheKey, mods);
         renderMods(mods, page);
     } catch (error) {
         debugLog('Failed to load popular mods: ' + error, 'error');
@@ -6234,16 +6513,22 @@ async function loadPopularMods(page = 0) {
 }
 
 // Lädt die IDs der installierten Mods für das aktive Profil
-async function loadInstalledModIds() {
-    installedModIds.clear();
-
+async function loadInstalledModIds(force = false) {
     // NUR das aktuell ausgewählte Profil verwenden - kein Fallback!
     const profile = currentProfile;
 
     if (!profile) {
         debugLog('No profile selected - mods will not be marked as installed', 'info');
+        installedModIds.clear();
+        installedModIdsProfileId = null;
         return;
     }
+
+    if (!force && installedModIdsProfileId === profile.id && installedModIds.size > 0) {
+        return;
+    }
+
+    installedModIds.clear();
 
     try {
         const mods = await invoke('get_installed_mods', { profileId: profile.id });
@@ -6258,65 +6543,64 @@ async function loadInstalledModIds() {
             }
 
             // Den vollständigen Slug/Namen als Fallback (z.B. "sodium" oder "distant-horizons")
-            // KEIN firstName (erstes Wort) und KEIN firstPart (erster Dateinamenteil),
-            // da dies zu False Positives führt (z.B. "create" matcht "Create Additions").
             if (mod.name) {
                 const cleanName = mod.name.toLowerCase().replace(/\s+/g, '-');
                 installedModIds.add(cleanName);
             }
         });
 
+        installedModIdsProfileId = profile.id;
         debugLog('Total installed mod IDs cached: ' + installedModIds.size + ' - ' + Array.from(installedModIds).join(', '), 'info');
     } catch (e) {
         debugLog('Could not load installed mods: ' + e, 'error');
     }
 }
 
-// Lädt die Namen der installierten Resource Packs für das aktive Profil
-async function loadInstalledResourcePackNames() {
-    installedResourcePackNames.clear();
-
+// Lädt die Namen/IDs der installierten Resource Packs für das aktive Profil
+async function loadInstalledResourcePackNames(force = false) {
     const profile = currentProfile;
-    if (!profile) return;
+    if (!profile) {
+        installedResourcePackNames.clear();
+        installedResourcePackNamesProfileId = null;
+        return;
+    }
+
+    if (!force && installedResourcePackNamesProfileId === profile.id && installedResourcePackNames.size > 0) {
+        return;
+    }
+
+    installedResourcePackNames.clear();
 
     try {
         const packs = await invoke('get_installed_resourcepacks', { profileId: profile.id });
-        packs.forEach(pack => {
-            // Speichere den Namen (ohne Endung)
-            const name = pack.name.toLowerCase().replace('.zip', '');
-            installedResourcePackNames.add(name);
-            // Auch den ersten Teil vor Bindestrich
-            const firstPart = name.split('-')[0];
-            if (firstPart.length > 2) {
-                installedResourcePackNames.add(firstPart);
-            }
-        });
-        debugLog('Loaded ' + installedResourcePackNames.size + ' installed resource pack names', 'info');
+        packs.forEach(pack => addInstalledPackKeys(installedResourcePackNames, pack));
+        installedResourcePackNamesProfileId = profile.id;
+        debugLog('Loaded ' + installedResourcePackNames.size + ' installed resource pack keys', 'info');
     } catch (e) {
         debugLog('Could not load installed resource packs: ' + e, 'error');
     }
 }
 
-// Lädt die Namen der installierten Shader Packs für das aktive Profil
-async function loadInstalledShaderPackNames() {
-    installedShaderPackNames.clear();
-
+// Lädt die Namen/IDs der installierten Shader Packs für das aktive Profil
+async function loadInstalledShaderPackNames(force = false) {
     const profile = currentProfile;
-    if (!profile) return;
+    if (!profile) {
+        installedShaderPackNames.clear();
+        installedShaderPackNamesProfileId = null;
+        return;
+    }
+
+    if (!force && installedShaderPackNamesProfileId === profile.id && installedShaderPackNames.size > 0) {
+        return;
+    }
+
+    installedShaderPackNames.clear();
 
     try {
         const packs = await invoke('get_installed_shaderpacks', { profileId: profile.id });
-        packs.forEach(pack => {
-            // Speichere den Namen (ohne Endung)
-            const name = pack.name.toLowerCase().replace('.zip', '');
-            installedShaderPackNames.add(name);
-            // Auch den ersten Teil vor Bindestrich
-            const firstPart = name.split('-')[0];
-            if (firstPart.length > 2) {
-                installedShaderPackNames.add(firstPart);
-            }
-        });
-        debugLog('Loaded ' + installedShaderPackNames.size + ' installed shader pack names', 'info');
+        packs.forEach(pack => addInstalledPackKeys(installedShaderPackNames, pack));
+        installedShaderPackNamesProfileId = profile.id;
+        debugLog('Loaded ' + installedShaderPackNames.size + ' installed shader pack keys', 'info');
     } catch (e) {
         debugLog('Could not load installed shader packs: ' + e, 'error');
     }
@@ -6340,6 +6624,13 @@ async function searchMods(query, page = 0) {
     // Installierte Mods laden für Markierung
     await loadInstalledModIds();
 
+    const cacheKey = buildBrowserCacheKey('mods', query, page);
+    const cached = getCachedBrowserResults(cacheKey);
+    if (cached) {
+        renderMods(cached, page);
+        return;
+    }
+
     try {
         const mods = await invoke('search_mods', {
             query,
@@ -6351,6 +6642,7 @@ async function searchMods(query, page = 0) {
             limit: getEffectiveLimit()
         });
 
+        setCachedBrowserResults(cacheKey, mods);
         renderMods(mods, page);
     } catch (error) {
         debugLog('Search failed: ' + error, 'error');
@@ -6372,10 +6664,10 @@ function renderMods(mods, page = 0) {
     if (selectedFilters.hideInstalled && currentProfile) {
         const beforeCount = mods.length;
         mods = mods.filter(mod => {
-            const modSlug = mod.slug ? mod.slug.toLowerCase() : '';
-            const modName = mod.name ? mod.name.toLowerCase().replace(/\s+/g, '-') : '';
-            const modId = mod.id ? mod.id.toLowerCase() : '';
-            const modFirstName = mod.name ? mod.name.toLowerCase().split(' ')[0] : '';
+            const modSlug = normalizePackKey(mod.slug);
+            const modName = normalizePackKey(mod.name);
+            const modId = normalizePackKey(mod.id);
+            const modFirstName = normalizePackKey(mod.name ? mod.name.split(' ')[0] : '');
 
             let isInst = false;
             if (currentContentType === 'mods') {
@@ -6385,11 +6677,13 @@ function renderMods(mods, page = 0) {
                     installedModIds.has(modSlug) ||
                     installedModIds.has(modName);
             } else if (currentContentType === 'resourcepacks') {
-                isInst = installedResourcePackNames.has(modSlug) ||
+                isInst = installedResourcePackNames.has(modId) ||
+                    installedResourcePackNames.has(modSlug) ||
                     installedResourcePackNames.has(modName) ||
                     installedResourcePackNames.has(modFirstName);
             } else if (currentContentType === 'shaderpacks') {
-                isInst = installedShaderPackNames.has(modSlug) ||
+                isInst = installedShaderPackNames.has(modId) ||
+                    installedShaderPackNames.has(modSlug) ||
                     installedShaderPackNames.has(modName) ||
                     installedShaderPackNames.has(modFirstName);
             }
@@ -6421,10 +6715,10 @@ function renderMods(mods, page = 0) {
         // Prüfe ob bereits installiert ist - NUR wenn ein Profil ausgewählt ist
         let isInstalled = false;
         if (currentProfile) {
-            const modSlug = mod.slug ? mod.slug.toLowerCase() : '';
-            const modName = mod.name ? mod.name.toLowerCase().replace(/\s+/g, '-') : '';
-            const modId = mod.id ? mod.id.toLowerCase() : '';
-            const modFirstName = mod.name ? mod.name.toLowerCase().split(' ')[0] : '';
+            const modSlug = normalizePackKey(mod.slug);
+            const modName = normalizePackKey(mod.name);
+            const modId = normalizePackKey(mod.id);
+            const modFirstName = normalizePackKey(mod.name ? mod.name.split(' ')[0] : '');
 
             if (currentContentType === 'mods') {
                 // Nur exakte Treffer: Modrinth-Projekt-ID oder vollständiger Slug/Name
@@ -6433,11 +6727,13 @@ function renderMods(mods, page = 0) {
                     installedModIds.has(modSlug) ||
                     installedModIds.has(modName);
             } else if (currentContentType === 'resourcepacks') {
-                isInstalled = installedResourcePackNames.has(modSlug) ||
+                isInstalled = installedResourcePackNames.has(modId) ||
+                    installedResourcePackNames.has(modSlug) ||
                     installedResourcePackNames.has(modName) ||
                     installedResourcePackNames.has(modFirstName);
             } else if (currentContentType === 'shaderpacks') {
-                isInstalled = installedShaderPackNames.has(modSlug) ||
+                isInstalled = installedShaderPackNames.has(modId) ||
+                    installedShaderPackNames.has(modSlug) ||
                     installedShaderPackNames.has(modName) ||
                     installedShaderPackNames.has(modFirstName);
             }
@@ -6654,7 +6950,8 @@ async function installMod(modId, source) {
         btn.style.cursor = 'not-allowed';
 
         // Aktualisiere Cache für installierte Mods (im Hintergrund)
-        loadInstalledModIds();
+        invalidateProfileContentCaches(profile.id);
+        loadInstalledModIds(true);
 
         // Toast-Benachrichtigung
         showToast(`Mod erfolgreich zu "${profile.name}" hinzugefügt!`, 'success', 3000);
@@ -8532,21 +8829,29 @@ function renderGalleryTab(mod) {
     return `
         <div style="background: var(--bg-medium); padding: 20px; border-radius: 12px;">
             <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px;">
-                ${gallery.map((img, index) => `
-                    <div style="border-radius: 8px; overflow: hidden; cursor: pointer; position: relative;"
-                         onclick="openGalleryImage('${img.url || img}', ${index})">
-                        <img src="${img.url || img}" alt="${img.title || `Screenshot ${index + 1}`}" 
-                             style="width: 100%; height: 180px; object-fit: cover; display: block; transition: transform 0.3s;"
-                             onmouseover="this.style.transform='scale(1.05)'"
-                             onmouseout="this.style.transform='scale(1)'"
-                             onerror="this.parentElement.style.display='none'">
-                        ${img.title ? `
-                            <div style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.8)); padding: 10px;">
-                                <span style="color: white; font-size: 12px;">${img.title}</span>
-                            </div>
-                        ` : ''}
-                    </div>
-                `).join('')}
+                ${gallery.map((img, index) => {
+                    const imageUrl = normalizeMediaUrl(img.url || img);
+                    const safeUrl = escapeAttr(imageUrl);
+                    const title = img.title ? escapeHtml(img.title) : '';
+                    const alt = escapeAttr(img.title || `Screenshot ${index + 1}`);
+
+                    return `
+                        <div style="border-radius: 8px; overflow: hidden; cursor: pointer; position: relative;"
+                             data-full-url="${safeUrl}"
+                             onclick="openGalleryImage(this.dataset.fullUrl, ${index})">
+                            <img src="${safeUrl}" alt="${alt}" 
+                                 style="width: 100%; height: 180px; object-fit: cover; display: block; transition: transform 0.3s;"
+                                 onmouseover="this.style.transform='scale(1.05)'"
+                                 onmouseout="this.style.transform='scale(1)'"
+                                 onerror="handleGalleryImageError(this)">
+                            ${title ? `
+                                <div style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.8)); padding: 10px;">
+                                    <span style="color: white; font-size: 12px;">${title}</span>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                }).join('')}
             </div>
         </div>
     `;
@@ -8630,8 +8935,60 @@ function toggleSnapshotFilter() {
 }
 
 function openGalleryImage(url, index) {
-    // Öffne Bild in neuem Tab oder Modal
-    window.open(url, '_blank');
+    const normalizedUrl = normalizeMediaUrl(url);
+    if (!normalizedUrl) return;
+
+    closeGalleryImageModal();
+
+    const modal = document.createElement('div');
+    modal.id = 'gallery-image-modal';
+    modal.style.cssText = `
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.92);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 12000;
+        padding: 20px;
+    `;
+
+    const safeUrl = escapeAttr(normalizedUrl);
+    modal.innerHTML = `
+        <button onclick="closeGalleryImageModal()"
+                style="position:absolute;top:14px;right:18px;background:transparent;border:1px solid rgba(255,255,255,0.4);color:white;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:14px;">
+            <i class="bi bi-x-lg"></i> Close
+        </button>
+        <div style="max-width:min(96vw, 1800px);max-height:92vh;display:flex;align-items:center;justify-content:center;">
+            <img src="${safeUrl}"
+                 alt="Gallery image ${index + 1}"
+                 style="max-width:100%;max-height:92vh;object-fit:contain;border-radius:8px;box-shadow:0 20px 40px rgba(0,0,0,0.4);"
+                 onerror="handleFullscreenImageError(this)">
+        </div>
+    `;
+
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            closeGalleryImageModal();
+        }
+    });
+
+    galleryModalKeyHandler = (event) => {
+        if (event.key === 'Escape') {
+            closeGalleryImageModal();
+        }
+    };
+    document.addEventListener('keydown', galleryModalKeyHandler);
+    document.body.appendChild(modal);
+}
+
+function closeGalleryImageModal() {
+    const modal = document.getElementById('gallery-image-modal');
+    if (modal) modal.remove();
+    if (galleryModalKeyHandler) {
+        document.removeEventListener('keydown', galleryModalKeyHandler);
+        galleryModalKeyHandler = null;
+    }
 }
 
 // Einfacher Markdown zu HTML Konverter

@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tokio::fs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +28,21 @@ pub struct ServerInfo {
     pub online_players: Option<u32>,
     pub max_players: Option<u32>,
     pub online: Option<bool>,
+}
+
+const SERVER_STATUS_CACHE_TTL: Duration = Duration::from_secs(30);
+const SERVER_STATUS_STALE_TTL: Duration = Duration::from_secs(300);
+
+#[derive(Clone)]
+struct CachedServerStatus {
+    status: ServerStatusResponse,
+    fetched_at: Instant,
+}
+
+static SERVER_STATUS_CACHE: OnceLock<Mutex<HashMap<String, CachedServerStatus>>> = OnceLock::new();
+
+fn server_status_cache() -> &'static Mutex<HashMap<String, CachedServerStatus>> {
+    SERVER_STATUS_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// Liest alle Welten aus dem saves-Ordner eines Profils
@@ -236,22 +254,31 @@ pub async fn get_servers(game_dir: &Path) -> Result<Vec<ServerInfo>> {
 
     // Versuche live Status (Icon + MOTD) für alle Server PARALLEL zu holen
     // So dauert es max 5s statt 5s × Anzahl Server
-    let status_futures: Vec<_> = servers.iter().map(|s| query_server_status(&s.ip)).collect();
+    let status_futures: Vec<_> = servers
+        .iter()
+        .map(|s| query_server_status_with_cache(&s.ip))
+        .collect();
 
     let results = futures_util::future::join_all(status_futures).await;
 
     for (server, result) in servers.iter_mut().zip(results) {
         match result {
             Ok(status) => {
-                if server.icon_base64.is_none() {
-                    server.icon_base64 = status.icon_base64;
+                if let Some(icon) = status.icon_base64 {
+                    server.icon_base64 = Some(icon);
                 }
-                if server.motd.is_none() || server.motd.as_deref() == Some("") {
-                    server.motd = status.motd;
+                if let Some(motd) = status.motd {
+                    server.motd = Some(motd);
                 }
-                server.motd_html = status.motd_html;
-                server.online_players = status.online_players;
-                server.max_players = status.max_players;
+                if let Some(motd_html) = status.motd_html {
+                    server.motd_html = Some(motd_html);
+                }
+                if let Some(online_players) = status.online_players {
+                    server.online_players = Some(online_players);
+                }
+                if let Some(max_players) = status.max_players {
+                    server.max_players = Some(max_players);
+                }
                 server.online = Some(true);
             }
             Err(_) => {
@@ -263,6 +290,40 @@ pub async fn get_servers(game_dir: &Path) -> Result<Vec<ServerInfo>> {
     Ok(servers)
 }
 
+async fn query_server_status_with_cache(address: &str) -> Result<ServerStatusResponse> {
+    let normalized = address.trim().to_lowercase();
+
+    if let Some(status) = load_cached_server_status(&normalized, false) {
+        return Ok(status);
+    }
+
+    let status = match query_server_status(address).await {
+        Ok(status) => status,
+        Err(first_error) => {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            match query_server_status(address).await {
+                Ok(status) => status,
+                Err(second_error) => {
+                    if let Some(cached) = load_cached_server_status(&normalized, true) {
+                        tracing::warn!(
+                            "Using stale cached server status for '{}' after API errors: {} / {}",
+                            address,
+                            first_error,
+                            second_error
+                        );
+                        return Ok(cached);
+                    }
+                    return Err(second_error
+                        .context(format!("server status retry failed for '{}'", address)));
+                }
+            }
+        }
+    };
+
+    store_cached_server_status(&normalized, &status);
+    Ok(status)
+}
+
 /// Fragt den Server-Status über die mcsrvstat.us API ab
 async fn query_server_status(address: &str) -> Result<ServerStatusResponse> {
     // Adresse bereinigen: Leerzeichen entfernen
@@ -272,15 +333,17 @@ async fn query_server_status(address: &str) -> Result<ServerStatusResponse> {
     let url = format!("https://api.mcsrvstat.us/2/{}", address);
     tracing::info!("Querying server status: {}", url);
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .user_agent("Lion-Launcher/1.0")
-        .build()?;
+    let client = crate::core::http::HTTP_CLIENT.clone();
 
-    let resp = client.get(&url).send().await.map_err(|e| {
-        tracing::warn!("Server status request failed for '{}': {}", address, e);
-        e
-    })?;
+    let resp = client
+        .get(&url)
+        .timeout(Duration::from_secs(8))
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!("Server status request failed for '{}': {}", address, e);
+            e
+        })?;
 
     let status_code = resp.status();
     if !status_code.is_success() {
@@ -321,6 +384,7 @@ async fn query_server_status(address: &str) -> Result<ServerStatusResponse> {
     let icon_base64 = json
         .get("icon")
         .and_then(|v| v.as_str())
+        .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| {
             if s.starts_with("data:") {
@@ -386,12 +450,36 @@ async fn query_server_status(address: &str) -> Result<ServerStatusResponse> {
     })
 }
 
+#[derive(Clone)]
 struct ServerStatusResponse {
     icon_base64: Option<String>,
     motd: Option<String>,
     motd_html: Option<Vec<String>>,
     online_players: Option<u32>,
     max_players: Option<u32>,
+}
+
+fn load_cached_server_status(address: &str, allow_stale: bool) -> Option<ServerStatusResponse> {
+    let cache = server_status_cache().lock().ok()?;
+    let cached = cache.get(address)?;
+    let age = cached.fetched_at.elapsed();
+
+    if age <= SERVER_STATUS_CACHE_TTL || (allow_stale && age <= SERVER_STATUS_STALE_TTL) {
+        return Some(cached.status.clone());
+    }
+    None
+}
+
+fn store_cached_server_status(address: &str, status: &ServerStatusResponse) {
+    if let Ok(mut cache) = server_status_cache().lock() {
+        cache.insert(
+            address.to_string(),
+            CachedServerStatus {
+                status: status.clone(),
+                fetched_at: Instant::now(),
+            },
+        );
+    }
 }
 
 /// Fügt einen Server zur servers.dat eines Profils hinzu
@@ -489,6 +577,15 @@ fn build_servers_dat(servers: &[ServerInfo]) -> Vec<u8> {
         write_nbt_string_tag_name(&mut data, "ip");
         write_nbt_string_value(&mut data, &server.ip);
 
+        // TAG_String "icon" (optional)
+        if let Some(icon) = &server.icon_base64 {
+            if !icon.trim().is_empty() {
+                data.push(0x08); // TAG_String type
+                write_nbt_string_tag_name(&mut data, "icon");
+                write_nbt_string_value(&mut data, icon);
+            }
+        }
+
         // TAG_End (Ende des Compound)
         data.push(0x00);
     }
@@ -514,14 +611,16 @@ fn write_nbt_string_value(data: &mut Vec<u8>, s: &str) {
 /// Parst servers.dat (NBT Format)
 ///
 /// find_sequence() gibt die Position NACH dem Suchstring zurück.
-/// D.h. nach b"name" zeigt pos direkt auf die String-Länge (2 Bytes BE) des Werts.
+/// Wir suchen Tag-Namen inkl. NBT-Längenpräfix (z.B. b"\x00\x04name"), damit
+/// keine zufälligen Treffer in Servernamen/IPs entstehen.
 fn parse_servers_dat(data: &[u8]) -> Result<Vec<ServerInfo>> {
     let mut servers = Vec::new();
 
     let mut i = 0;
     while i < data.len() {
-        // Suche nach "name" Tag gefolgt von String
-        if let Some(pos) = find_sequence(data, i, b"name") {
+        // Suche nach TAG_String-Name "name" (00 04 'name'), pos zeigt dann direkt
+        // auf die String-Länge (2 Bytes) des "name"-Werts.
+        if let Some(pos) = find_sequence(data, i, b"\x00\x04name") {
             // pos zeigt direkt auf die Wert-Länge (2 Bytes) nach "name"
             if pos + 2 > data.len() {
                 i = pos;
@@ -534,42 +633,69 @@ fn parse_servers_dat(data: &[u8]) -> Result<Vec<ServerInfo>> {
             }
             let name = String::from_utf8_lossy(&data[pos + 2..pos + 2 + name_len]).to_string();
 
-            // Suche nach "ip" in der Nähe (innerhalb 200 Bytes)
             let search_start = pos + 2 + name_len;
-            let search_end = (search_start + 200).min(data.len());
+            let search_end = (search_start + 512).min(data.len());
 
-            if let Some(ip_pos) = find_sequence(data, search_start, b"ip") {
-                if ip_pos < search_end {
-                    // ip_pos zeigt direkt auf die Wert-Länge (2 Bytes) nach "ip"
-                    if ip_pos + 2 > data.len() {
-                        i = ip_pos;
-                        continue;
-                    }
-                    let ip_len = ((data[ip_pos] as usize) << 8) | (data[ip_pos + 1] as usize);
-                    if ip_pos + 2 + ip_len > data.len() {
-                        i = ip_pos;
-                        continue;
-                    }
-                    let ip =
-                        String::from_utf8_lossy(&data[ip_pos + 2..ip_pos + 2 + ip_len]).to_string();
-
-                    // Vermeide Duplikate
-                    if !servers.iter().any(|s: &ServerInfo| s.ip == ip) {
-                        servers.push(ServerInfo {
-                            name,
-                            ip,
-                            icon_base64: None,
-                            motd: None,
-                            motd_html: None,
-                            online_players: None,
-                            max_players: None,
-                            online: None,
-                        });
-                    }
-
-                    i = ip_pos + 2 + ip_len;
+            if let Some(ip_pos) =
+                find_sequence_in_range(data, search_start, search_end, b"\x00\x02ip")
+            {
+                // ip_pos zeigt direkt auf die Wert-Länge (2 Bytes) nach "ip"
+                if ip_pos + 2 > data.len() {
+                    i = ip_pos;
                     continue;
                 }
+                let ip_len = ((data[ip_pos] as usize) << 8) | (data[ip_pos + 1] as usize);
+                if ip_pos + 2 + ip_len > data.len() {
+                    i = ip_pos;
+                    continue;
+                }
+                let ip =
+                    String::from_utf8_lossy(&data[ip_pos + 2..ip_pos + 2 + ip_len]).to_string();
+
+                let icon_search_start = ip_pos + 2 + ip_len;
+                let icon_search_end = (icon_search_start + 4096).min(data.len());
+                let icon_base64 = find_sequence_in_range(
+                    data,
+                    icon_search_start,
+                    icon_search_end,
+                    b"\x00\x04icon",
+                )
+                .and_then(|icon_pos| {
+                    if icon_pos + 2 > data.len() {
+                        return None;
+                    }
+                    let icon_len = ((data[icon_pos] as usize) << 8) | (data[icon_pos + 1] as usize);
+                    if icon_pos + 2 + icon_len > data.len() {
+                        return None;
+                    }
+                    let icon_raw =
+                        String::from_utf8_lossy(&data[icon_pos + 2..icon_pos + 2 + icon_len])
+                            .trim()
+                            .to_string();
+                    if icon_raw.is_empty() {
+                        None
+                    } else if icon_raw.starts_with("data:") {
+                        Some(icon_raw)
+                    } else {
+                        Some(format!("data:image/png;base64,{}", icon_raw))
+                    }
+                });
+
+                // Vermeide Duplikate
+                if !servers.iter().any(|s: &ServerInfo| s.ip == ip) {
+                    servers.push(ServerInfo {
+                        name,
+                        ip,
+                        icon_base64,
+                        motd: None,
+                        motd_html: None,
+                        online_players: None,
+                        max_players: None,
+                        online: None,
+                    });
+                }
+                i = ip_pos + 2 + ip_len;
+                continue;
             }
             i = search_start;
         } else {
@@ -581,7 +707,19 @@ fn parse_servers_dat(data: &[u8]) -> Result<Vec<ServerInfo>> {
 }
 
 fn find_sequence(data: &[u8], start: usize, seq: &[u8]) -> Option<usize> {
-    for i in start..data.len().saturating_sub(seq.len()) {
+    find_sequence_in_range(data, start, data.len(), seq)
+}
+
+fn find_sequence_in_range(data: &[u8], start: usize, end: usize, seq: &[u8]) -> Option<usize> {
+    if seq.is_empty() || start >= end || start >= data.len() {
+        return None;
+    }
+    let bounded_end = end.min(data.len());
+    if bounded_end < seq.len() || start > bounded_end.saturating_sub(seq.len()) {
+        return None;
+    }
+
+    for i in start..=bounded_end - seq.len() {
         if &data[i..i + seq.len()] == seq {
             return Some(i + seq.len());
         }

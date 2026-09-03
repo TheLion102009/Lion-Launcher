@@ -1,10 +1,10 @@
+pub mod auth;
+pub mod components;
 pub mod mod_browser;
 pub mod profile_manager;
-pub mod settings;
-pub mod components;
-pub mod themes;
-pub mod auth;
 pub mod server_manager;
+pub mod settings;
+pub mod themes;
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {
@@ -13,7 +13,7 @@ pub fn greet(name: &str) -> String {
 
 #[tauri::command]
 pub fn get_embedded_logo_data_url() -> String {
-    use base64::{Engine as _, engine::general_purpose};
+    use base64::{engine::general_purpose, Engine as _};
 
     let logo_bytes = include_bytes!("../../icons/icon.png");
     let encoded = general_purpose::STANDARD.encode(logo_bytes);
@@ -24,7 +24,11 @@ pub fn get_embedded_logo_data_url() -> String {
 pub async fn get_profile_logs(profile_id: String, log_type: String) -> Result<String, String> {
     use crate::core::profiles::ProfileManager;
 
-    tracing::info!("get_profile_logs called: profile_id={}, log_type={}", profile_id, log_type);
+    tracing::info!(
+        "get_profile_logs called: profile_id={}, log_type={}",
+        profile_id,
+        log_type
+    );
 
     let profile_manager = ProfileManager::new().map_err(|e| {
         tracing::error!("Failed to create ProfileManager: {}", e);
@@ -36,11 +40,10 @@ pub async fn get_profile_logs(profile_id: String, log_type: String) -> Result<St
         e.to_string()
     })?;
 
-    let profile = profiles.get_profile(&profile_id)
-        .ok_or_else(|| {
-            tracing::error!("Profile not found: {}", profile_id);
-            "Profile not found".to_string()
-        })?;
+    let profile = profiles.get_profile(&profile_id).ok_or_else(|| {
+        tracing::error!("Profile not found: {}", profile_id);
+        "Profile not found".to_string()
+    })?;
 
     let logs_dir = profile.game_dir.join("logs");
     tracing::info!("Looking for logs in: {:?}", logs_dir);
@@ -64,7 +67,11 @@ pub async fn get_profile_logs(profile_id: String, log_type: String) -> Result<St
                     let mut content = String::new();
                     let _ = gz.read_to_string(&mut content);
                     let lines: Vec<&str> = content.lines().collect();
-                    let start = if lines.len() > 10000 { lines.len() - 10000 } else { 0 };
+                    let start = if lines.len() > 10000 {
+                        lines.len() - 10000
+                    } else {
+                        0
+                    };
                     return Ok(lines[start..].join("\n"));
                 }
                 return Ok("⚠️ Konnte Log-Datei nicht lesen".to_string());
@@ -81,17 +88,25 @@ pub async fn get_profile_logs(profile_id: String, log_type: String) -> Result<St
                     .filter(|e| e.path().extension().is_some_and(|ext| ext == "txt"))
                     .collect();
                 entries.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
-                entries.last()
+                entries
+                    .last()
                     .map(|e| e.path())
                     .ok_or_else(|| "Keine Crash-Reports gefunden".to_string())?
             } else {
-                return Ok("📋 Keine Crash-Reports vorhanden\n\nDer crash-reports Ordner existiert nicht.".to_string());
+                return Ok(
+                    "📋 Keine Crash-Reports vorhanden\n\nDer crash-reports Ordner existiert nicht."
+                        .to_string(),
+                );
             }
         }
         _ => return Err("Unbekannter Log-Typ".to_string()),
     };
 
-    tracing::info!("Log file path: {:?}, exists: {}", log_file, log_file.exists());
+    tracing::info!(
+        "Log file path: {:?}, exists: {}",
+        log_file,
+        log_file.exists()
+    );
 
     // Prüfe ob Log-Datei existiert
     if !log_file.exists() {
@@ -126,12 +141,18 @@ pub async fn get_profile_logs(profile_id: String, log_type: String) -> Result<St
 
     // Falls leer
     if content.is_empty() {
-        return Ok("📄 Log-Datei ist leer\n\nDie Datei existiert, enthält aber keine Daten.".to_string());
+        return Ok(
+            "📄 Log-Datei ist leer\n\nDie Datei existiert, enthält aber keine Daten.".to_string(),
+        );
     }
 
     // Nur letzte 10000 Zeilen für Performance
     let lines: Vec<&str> = content.lines().collect();
-    let start = if lines.len() > 10000 { lines.len() - 10000 } else { 0 };
+    let start = if lines.len() > 10000 {
+        lines.len() - 10000
+    } else {
+        0
+    };
     let truncated: String = lines[start..].join("\n");
 
     tracing::info!("Returning {} lines of logs", lines.len() - start);
@@ -145,13 +166,20 @@ pub async fn get_live_launcher_logs(limit: Option<usize>) -> Result<String, Stri
 }
 
 #[tauri::command]
-pub async fn open_profile_folder(profile_id: String, subfolder: Option<String>) -> Result<(), String> {
+pub async fn open_profile_folder(
+    profile_id: String,
+    subfolder: Option<String>,
+) -> Result<(), String> {
     use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     let path = if let Some(sub) = subfolder {
@@ -161,7 +189,9 @@ pub async fn open_profile_folder(profile_id: String, subfolder: Option<String>) 
     };
 
     // Erstelle Ordner falls nicht vorhanden
-    tokio::fs::create_dir_all(&path).await.map_err(|e| e.to_string())?;
+    tokio::fs::create_dir_all(&path)
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Öffne Ordner
     #[cfg(target_os = "linux")]
@@ -198,7 +228,10 @@ pub async fn stop_profile(profile_id: String) -> Result<bool, String> {
     if stopped {
         tracing::info!("Stopped Minecraft instance for profile: {}", profile_id);
     } else {
-        tracing::warn!("No running Minecraft instance found for profile: {}", profile_id);
+        tracing::warn!(
+            "No running Minecraft instance found for profile: {}",
+            profile_id
+        );
     }
     Ok(stopped)
 }
@@ -213,8 +246,12 @@ pub async fn get_log_files(profile_id: String) -> Result<Vec<String>, String> {
     use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
-    let profile = profiles.get_profile(&profile_id)
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     let logs_dir = profile.game_dir.join("logs");
@@ -234,7 +271,10 @@ pub async fn get_log_files(profile_id: String) -> Result<Vec<String>, String> {
         })
         .map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            let modified = e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let modified = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
             (name, modified)
         })
         .collect();
@@ -246,21 +286,30 @@ pub async fn get_log_files(profile_id: String) -> Result<Vec<String>, String> {
 
 #[tauri::command]
 pub async fn repair_profile(profile_id: String) -> Result<(), String> {
-    use crate::core::profiles::ProfileManager;
     use crate::config::defaults;
+    use crate::core::profiles::ProfileManager;
 
     tracing::info!("Repairing profile: {}", profile_id);
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     let mc_version = &profile.minecraft_version;
     let loader = &profile.loader.loader;
 
-    tracing::info!("Profile: {} - MC {} with {:?}", profile.name, mc_version, loader);
+    tracing::info!(
+        "Profile: {} - MC {} with {:?}",
+        profile.name,
+        mc_version,
+        loader
+    );
 
     // Lösche Version-spezifische Dateien
     let versions_dir = defaults::launcher_dir().join("versions").join(mc_version);
@@ -345,9 +394,13 @@ pub async fn clear_profile_cache(profile_id: String) -> Result<(), String> {
     tracing::info!("Clearing cache for profile: {}", profile_id);
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     let game_dir = &profile.game_dir;
@@ -429,9 +482,13 @@ pub async fn get_installed_mods(profile_id: String) -> Result<Vec<InstalledMod>,
     use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     let mods_dir = profile.game_dir.join("mods");
@@ -464,7 +521,8 @@ pub async fn get_installed_mods(profile_id: String) -> Result<Vec<InstalledMod>,
 
             // .jar = aktiv, .jar.disabled = deaktiviert
             if ext_str == "jar" || ext_str == "disabled" {
-                let filename = path.file_name()
+                let filename = path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
 
@@ -473,7 +531,9 @@ pub async fn get_installed_mods(profile_id: String) -> Result<Vec<InstalledMod>,
                 // Suche Metadaten im modinfos/ Ordner
                 let meta_filename = if disabled {
                     // Für .disabled Dateien: filename.disabled -> filename.json
-                    let base = filename.trim_end_matches(".disabled").trim_end_matches(".jar");
+                    let base = filename
+                        .trim_end_matches(".disabled")
+                        .trim_end_matches(".jar");
                     format!("{}.json", base)
                 } else {
                     // Für normale JARs: filename.jar -> filename.json
@@ -488,10 +548,22 @@ pub async fn get_installed_mods(profile_id: String) -> Result<Vec<InstalledMod>,
                 if meta_path.exists() {
                     if let Ok(meta_content) = std::fs::read_to_string(&meta_path) {
                         if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&meta_content) {
-                            name = meta.get("mod_name").and_then(|v| v.as_str()).map(|s| s.to_string());
-                            version = meta.get("version").and_then(|v| v.as_str()).map(|s| s.to_string());
-                            mod_id = meta.get("mod_id").and_then(|v| v.as_str()).map(|s| s.to_string());
-                            icon_url = meta.get("icon_url").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            name = meta
+                                .get("mod_name")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+                            version = meta
+                                .get("version")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+                            mod_id = meta
+                                .get("mod_id")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+                            icon_url = meta
+                                .get("icon_url")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
                         }
                     }
                 }
@@ -501,7 +573,8 @@ pub async fn get_installed_mods(profile_id: String) -> Result<Vec<InstalledMod>,
                     let clean_name = filename
                         .trim_end_matches(".disabled")
                         .trim_end_matches(".jar");
-                    let (extracted_name, extracted_version, extracted_mod_id) = extract_mod_info(clean_name);
+                    let (extracted_name, extracted_version, extracted_mod_id) =
+                        extract_mod_info(clean_name);
 
                     if name.is_none() {
                         name = extracted_name;
@@ -530,7 +603,9 @@ pub async fn get_installed_mods(profile_id: String) -> Result<Vec<InstalledMod>,
 
     // Sortiere nach Name
     installed_mods.sort_by(|a, b| {
-        a.name.as_deref().unwrap_or(&a.filename)
+        a.name
+            .as_deref()
+            .unwrap_or(&a.filename)
             .to_lowercase()
             .cmp(&b.name.as_deref().unwrap_or(&b.filename).to_lowercase())
     });
@@ -555,7 +630,12 @@ fn extract_mod_info(clean_name: &str) -> (Option<String>, Option<String>, Option
             let version_part = &before_mc[ver_idx + 1..];
 
             // Prüfe ob version_part mit Zahl beginnt
-            if version_part.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+            if version_part
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+            {
                 let mod_id = name_part.split('-').next().map(|s| s.to_lowercase());
                 return (
                     Some(name_part.replace(['-', '_'], " ")),
@@ -569,7 +649,12 @@ fn extract_mod_info(clean_name: &str) -> (Option<String>, Option<String>, Option
     // Fallback: Einfaches Muster name-version
     if let Some(idx) = clean_name.rfind('-') {
         let potential_version = &clean_name[idx + 1..];
-        if potential_version.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        if potential_version
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+        {
             let name_part = &clean_name[..idx];
             let mod_id = name_part.split('-').next().map(|s| s.to_lowercase());
             return (
@@ -590,9 +675,13 @@ pub async fn toggle_mod(profile_id: String, filename: String, enable: bool) -> R
     use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     let mods_dir = profile.game_dir.join("mods");
@@ -629,9 +718,13 @@ pub async fn delete_mod(profile_id: String, filename: String) -> Result<(), Stri
     use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     let mod_path = profile.game_dir.join("mods").join(&filename);
@@ -663,9 +756,13 @@ pub async fn delete_resourcepack(profile_id: String, name: String) -> Result<(),
     use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     let rp_path = profile.game_dir.join("resourcepacks").join(&name);
@@ -683,6 +780,17 @@ pub async fn delete_resourcepack(profile_id: String, name: String) -> Result<(),
 
     tracing::info!("Resource Pack deleted: {}", name);
 
+    let meta_path = installed_content_metadata_path(&profile.game_dir, "resourcepackinfos", &name);
+    if meta_path.exists() {
+        if let Err(e) = std::fs::remove_file(&meta_path) {
+            tracing::warn!(
+                "Failed to remove resource pack metadata {:?}: {}",
+                meta_path,
+                e
+            );
+        }
+    }
+
     Ok(())
 }
 
@@ -691,9 +799,13 @@ pub async fn delete_shaderpack(profile_id: String, name: String) -> Result<(), S
     use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     let sp_path = profile.game_dir.join("shaderpacks").join(&name);
@@ -711,11 +823,26 @@ pub async fn delete_shaderpack(profile_id: String, name: String) -> Result<(), S
 
     tracing::info!("Shader Pack deleted: {}", name);
 
+    let meta_path = installed_content_metadata_path(&profile.game_dir, "shaderpackinfos", &name);
+    if meta_path.exists() {
+        if let Err(e) = std::fs::remove_file(&meta_path) {
+            tracing::warn!(
+                "Failed to remove shader pack metadata {:?}: {}",
+                meta_path,
+                e
+            );
+        }
+    }
+
     Ok(())
 }
 
 #[tauri::command]
-pub async fn bulk_toggle_mods(profile_id: String, filenames: Vec<String>, enable: bool) -> Result<(), String> {
+pub async fn bulk_toggle_mods(
+    profile_id: String,
+    filenames: Vec<String>,
+    enable: bool,
+) -> Result<(), String> {
     for filename in filenames {
         toggle_mod(profile_id.clone(), filename, enable).await?;
     }
@@ -731,13 +858,21 @@ pub async fn bulk_delete_mods(profile_id: String, filenames: Vec<String>) -> Res
 }
 
 #[tauri::command]
-pub async fn check_mod_updates(profile_id: String, mc_version: String, loader: String) -> Result<Vec<ModUpdateInfo>, String> {
+pub async fn check_mod_updates(
+    profile_id: String,
+    mc_version: String,
+    loader: String,
+) -> Result<Vec<ModUpdateInfo>, String> {
     use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     let profile_mc_version = if mc_version.is_empty() {
@@ -762,7 +897,9 @@ pub async fn check_mod_updates(profile_id: String, mc_version: String, loader: S
             let mut resolved_name = mod_info.name.clone();
             let mut resolved_icon = mod_info.icon_url.clone();
 
-            let mut versions = fetch_modrinth_versions(&client, &resolved_mod_id).await.unwrap_or_default();
+            let mut versions = fetch_modrinth_versions(&client, &resolved_mod_id)
+                .await
+                .unwrap_or_default();
 
             if versions.is_empty() {
                 if let Ok(Some(found)) = search_modrinth_by_name(&client, mod_id).await {
@@ -773,7 +910,9 @@ pub async fn check_mod_updates(profile_id: String, mc_version: String, loader: S
                     if resolved_icon.is_none() {
                         resolved_icon = found.icon_url;
                     }
-                    versions = fetch_modrinth_versions(&client, &resolved_mod_id).await.unwrap_or_default();
+                    versions = fetch_modrinth_versions(&client, &resolved_mod_id)
+                        .await
+                        .unwrap_or_default();
                 }
             }
 
@@ -790,13 +929,15 @@ pub async fn check_mod_updates(profile_id: String, mc_version: String, loader: S
                 .map(|v| mod_info.version.as_deref() != Some(v.version_number.as_str()))
                 .unwrap_or(false);
 
-            let latest_is_compatible = is_version_compatible(newest, &profile_mc_version, &profile_loader);
+            let latest_is_compatible =
+                is_version_compatible(newest, &profile_mc_version, &profile_loader);
             let newest_differs_from_current = mod_info
                 .version
                 .as_deref()
                 .map(|v| v != newest.version_number.as_str())
                 .unwrap_or(true);
-            let should_show_incompatible_notice = !latest_is_compatible && newest_differs_from_current;
+            let should_show_incompatible_notice =
+                !latest_is_compatible && newest_differs_from_current;
 
             if can_update || should_show_incompatible_notice {
                 updates.push(ModUpdateInfo {
@@ -864,7 +1005,10 @@ struct ModrinthVersionInfo {
     loaders: Vec<String>,
 }
 
-async fn fetch_modrinth_versions(client: &reqwest::Client, mod_id: &str) -> Result<Vec<ModrinthVersionInfo>, String> {
+async fn fetch_modrinth_versions(
+    client: &reqwest::Client,
+    mod_id: &str,
+) -> Result<Vec<ModrinthVersionInfo>, String> {
     let url = format!("https://api.modrinth.com/v2/project/{}/version", mod_id);
     let response = client
         .get(&url)
@@ -893,14 +1037,18 @@ fn is_version_compatible(version: &ModrinthVersionInfo, mc_version: &str, loader
     })
 }
 
-async fn search_modrinth_by_name(client: &reqwest::Client, name: &str) -> Result<Option<ModrinthSearchResult>, String> {
+async fn search_modrinth_by_name(
+    client: &reqwest::Client,
+    name: &str,
+) -> Result<Option<ModrinthSearchResult>, String> {
     // Einfache Modrinth-Suche
     let url = format!(
         "https://api.modrinth.com/v2/search?query={}&limit=1",
         urlencoding::encode(name)
     );
 
-    let response = client.get(&url)
+    let response = client
+        .get(&url)
         .header("User-Agent", "Lion-Launcher/1.0")
         .send()
         .await
@@ -941,18 +1089,108 @@ async fn search_modrinth_by_name(client: &reqwest::Client, name: &str) -> Result
 pub struct InstalledResourcePack {
     pub name: String,
     pub icon_path: Option<String>,
+    pub icon_url: Option<String>,
+    pub project_id: Option<String>,
+    pub slug: Option<String>,
+    pub title: Option<String>,
     pub is_folder: bool,
     pub size: u64,
 }
 
+#[derive(serde::Deserialize)]
+struct InstalledContentMetadata {
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    slug: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    icon_url: Option<String>,
+}
+
+fn installed_content_metadata_path(
+    game_dir: &std::path::Path,
+    metadata_dir_name: &str,
+    content_name: &str,
+) -> std::path::PathBuf {
+    game_dir
+        .join(metadata_dir_name)
+        .join(format!("{}.json", content_name))
+}
+
+fn read_installed_content_metadata(
+    game_dir: &std::path::Path,
+    metadata_dir_name: &str,
+    content_name: &str,
+) -> Option<InstalledContentMetadata> {
+    let path = installed_content_metadata_path(game_dir, metadata_dir_name, content_name);
+    let content = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str::<InstalledContentMetadata>(&content).ok()
+}
+
+fn as_png_data_url(bytes: &[u8]) -> String {
+    use base64::{engine::general_purpose, Engine as _};
+    format!(
+        "data:image/png;base64,{}",
+        general_purpose::STANDARD.encode(bytes)
+    )
+}
+
+fn read_pack_icon_data_url(path: &std::path::Path, is_folder: bool) -> Option<String> {
+    if is_folder {
+        let icon_path = path.join("pack.png");
+        let icon_bytes = std::fs::read(icon_path).ok()?;
+        return Some(as_png_data_url(&icon_bytes));
+    }
+
+    let is_zip = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("zip"))
+        .unwrap_or(false);
+    if !is_zip {
+        return None;
+    }
+
+    let file = std::fs::File::open(path).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+
+    if let Ok(mut entry) = archive.by_name("pack.png") {
+        let mut bytes = Vec::new();
+        if std::io::Read::read_to_end(&mut entry, &mut bytes).is_ok() {
+            return Some(as_png_data_url(&bytes));
+        }
+    }
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).ok()?;
+        let name = entry.name().to_ascii_lowercase();
+        if name.ends_with("/pack.png") || name == "pack.png" {
+            let mut bytes = Vec::new();
+            if std::io::Read::read_to_end(&mut entry, &mut bytes).is_ok() {
+                return Some(as_png_data_url(&bytes));
+            }
+        }
+    }
+
+    None
+}
+
 #[tauri::command]
-pub async fn get_installed_resourcepacks(profile_id: String) -> Result<Vec<InstalledResourcePack>, String> {
+pub async fn get_installed_resourcepacks(
+    profile_id: String,
+) -> Result<Vec<InstalledResourcePack>, String> {
     use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     let rp_dir = profile.game_dir.join("resourcepacks");
@@ -968,39 +1206,29 @@ pub async fn get_installed_resourcepacks(profile_id: String) -> Result<Vec<Insta
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
-        let name = path.file_name()
+        let name = path
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
         let is_folder = path.is_dir();
         let size = if !is_folder {
-            std::fs::metadata(&path)
-                .ok()
-                .map(|m| m.len())
-                .unwrap_or(0)
+            std::fs::metadata(&path).ok().map(|m| m.len()).unwrap_or(0)
         } else {
             0
         };
 
-        // Suche nach pack.png Icon
-        let icon_path = if is_folder {
-            let icon = path.join("pack.png");
-            if icon.exists() {
-                Some(icon.to_string_lossy().to_string())
-            } else {
-                None
-            }
-        } else if name.ends_with(".zip") {
-            // Für ZIP-Dateien könnten wir das Icon extrahieren, aber das ist aufwendig
-            // Verwende Placeholder
-            None
-        } else {
-            None
-        };
+        let icon_path = read_pack_icon_data_url(&path, is_folder);
+        let metadata =
+            read_installed_content_metadata(&profile.game_dir, "resourcepackinfos", &name);
 
         packs.push(InstalledResourcePack {
             name,
             icon_path,
+            icon_url: metadata.as_ref().and_then(|m| m.icon_url.clone()),
+            project_id: metadata.as_ref().and_then(|m| m.project_id.clone()),
+            slug: metadata.as_ref().and_then(|m| m.slug.clone()),
+            title: metadata.as_ref().and_then(|m| m.title.clone()),
             is_folder,
             size,
         });
@@ -1014,13 +1242,19 @@ pub async fn get_installed_resourcepacks(profile_id: String) -> Result<Vec<Insta
 // ==================== SHADER PACKS ====================
 
 #[tauri::command]
-pub async fn get_installed_shaderpacks(profile_id: String) -> Result<Vec<InstalledResourcePack>, String> {
+pub async fn get_installed_shaderpacks(
+    profile_id: String,
+) -> Result<Vec<InstalledResourcePack>, String> {
     use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     let shader_dir = profile.game_dir.join("shaderpacks");
@@ -1036,23 +1270,28 @@ pub async fn get_installed_shaderpacks(profile_id: String) -> Result<Vec<Install
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
-        let name = path.file_name()
+        let name = path
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
         let is_folder = path.is_dir();
         let size = if !is_folder {
-            std::fs::metadata(&path)
-                .ok()
-                .map(|m| m.len())
-                .unwrap_or(0)
+            std::fs::metadata(&path).ok().map(|m| m.len()).unwrap_or(0)
         } else {
             0
         };
 
+        let icon_path = read_pack_icon_data_url(&path, is_folder);
+        let metadata = read_installed_content_metadata(&profile.game_dir, "shaderpackinfos", &name);
+
         packs.push(InstalledResourcePack {
             name,
-            icon_path: None,
+            icon_path,
+            icon_url: metadata.as_ref().and_then(|m| m.icon_url.clone()),
+            project_id: metadata.as_ref().and_then(|m| m.project_id.clone()),
+            slug: metadata.as_ref().and_then(|m| m.slug.clone()),
+            title: metadata.as_ref().and_then(|m| m.title.clone()),
             is_folder,
             size,
         });
@@ -1069,13 +1308,17 @@ pub async fn get_installed_shaderpacks(profile_id: String) -> Result<Vec<Install
 
 #[tauri::command]
 pub async fn sync_settings_to_profile(profile_id: String) -> Result<(), String> {
-    use crate::core::profiles::ProfileManager;
     use crate::config::defaults::shared_settings_file;
+    use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     if !profile.settings_sync {
@@ -1113,7 +1356,10 @@ pub async fn sync_settings_to_profile(profile_id: String) -> Result<(), String> 
             .await
             .map_err(|e| format!("Konnte options.txt nicht schreiben: {}", e))?;
 
-        tracing::info!("Settings synced to profile: {} (merged with existing)", profile_id);
+        tracing::info!(
+            "Settings synced to profile: {} (merged with existing)",
+            profile_id
+        );
     }
 
     Ok(())
@@ -1130,12 +1376,15 @@ pub async fn sync_settings_from_profile(_profile_id: String) -> Result<(), Strin
 /// und merged sie zusammen. Die neueste hat Vorrang (außer Blacklist-Keys).
 /// Dann werden alle Profile mit Sync aktualisiert.
 pub async fn auto_sync_all_settings() -> Result<(), String> {
-    use crate::core::profiles::ProfileManager;
     use crate::config::defaults::shared_settings_file;
+    use crate::core::profiles::ProfileManager;
     use std::time::SystemTime;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Sammle alle options.txt Pfade mit ihrer Änderungszeit
     let mut options_files: Vec<(SystemTime, std::path::PathBuf, String)> = Vec::new();
@@ -1174,7 +1423,8 @@ pub async fn auto_sync_all_settings() -> Result<(), String> {
     tracing::info!("Found {} options.txt files for sync", options_files.len());
 
     // Starte mit leerer HashMap
-    let mut combined_values: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut combined_values: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
 
     // Lese shared_options.txt als Basis (falls vorhanden)
     let shared_file = shared_settings_file();
@@ -1211,7 +1461,10 @@ pub async fn auto_sync_all_settings() -> Result<(), String> {
         .await
         .map_err(|e| format!("Konnte shared_options.txt nicht schreiben: {}", e))?;
 
-    tracing::info!("Created combined shared_options.txt with {} settings", combined_values.len());
+    tracing::info!(
+        "Created combined shared_options.txt with {} settings",
+        combined_values.len()
+    );
 
     // Jetzt alle Profile mit Sync aktualisieren
     let mut synced_count = 0;
@@ -1262,10 +1515,7 @@ fn parse_options_txt(content: &str) -> Vec<(String, String)> {
 
 /// Erstellt einen options.txt String aus einer HashMap
 fn create_options_txt_string(values: &std::collections::HashMap<String, String>) -> String {
-    let mut lines: Vec<String> = values
-        .iter()
-        .map(|(k, v)| format!("{}:{}", k, v))
-        .collect();
+    let mut lines: Vec<String> = values.iter().map(|(k, v)| format!("{}:{}", k, v)).collect();
     lines.sort(); // Sortiere für konsistente Reihenfolge
     lines.join("\n")
 }
@@ -1281,11 +1531,17 @@ pub async fn toggle_settings_sync(profile_id: String, enabled: bool) -> Result<(
     use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let mut profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let mut profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
     if let Some(profile) = profiles.get_profile_mut(&profile_id) {
         profile.settings_sync = enabled;
-        profile_manager.save_profiles(&profiles).await.map_err(|e| e.to_string())?;
+        profile_manager
+            .save_profiles(&profiles)
+            .await
+            .map_err(|e| e.to_string())?;
 
         // Wenn aktiviert, synchronisiere sofort
         if enabled {
@@ -1293,7 +1549,10 @@ pub async fn toggle_settings_sync(profile_id: String, enabled: bool) -> Result<(
             sync_settings_to_profile(profile_id).await?;
         }
 
-        tracing::info!("Settings sync {} for profile", if enabled { "enabled" } else { "disabled" });
+        tracing::info!(
+            "Settings sync {} for profile",
+            if enabled { "enabled" } else { "disabled" }
+        );
     } else {
         return Err("Profile not found".to_string());
     }
@@ -1306,14 +1565,17 @@ pub async fn get_settings_sync_status(profile_id: String) -> Result<bool, String
     use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     Ok(profile.settings_sync)
 }
-
 
 /// Interne Merge-Funktion
 fn merge_options_content(existing: &str, new_content: &str) -> String {
@@ -1321,7 +1583,7 @@ fn merge_options_content(existing: &str, new_content: &str) -> String {
 
     // Keys die NICHT synchronisiert werden sollen (version-spezifisch)
     let blacklist: Vec<&str> = vec![
-        "version",           // Minecraft version number - bleibt profil-spezifisch
+        "version", // Minecraft version number - bleibt profil-spezifisch
     ];
 
     // Parse beide in key-value Maps
@@ -1378,13 +1640,19 @@ fn parse_option_line(line: &str) -> Option<(String, String)> {
 // ==================== WORLDS ====================
 
 #[tauri::command]
-pub async fn get_worlds(profile_id: String) -> Result<Vec<crate::core::minecraft::worlds::WorldInfo>, String> {
+pub async fn get_worlds(
+    profile_id: String,
+) -> Result<Vec<crate::core::minecraft::worlds::WorldInfo>, String> {
     use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     crate::core::minecraft::worlds::get_worlds(&profile.game_dir)
@@ -1394,24 +1662,36 @@ pub async fn get_worlds(profile_id: String) -> Result<Vec<crate::core::minecraft
 
 #[tauri::command]
 pub async fn launch_world(profile_id: String, world_name: String) -> Result<(), String> {
-    use crate::core::profiles::ProfileManager;
     use crate::core::minecraft::MinecraftLauncher;
+    use crate::core::profiles::ProfileManager;
     use crate::gui::auth::AUTH_STATE;
 
-    tracing::info!("Launching world '{}' for profile '{}'", world_name, profile_id);
+    tracing::info!(
+        "Launching world '{}' for profile '{}'",
+        world_name,
+        profile_id
+    );
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?
         .clone();
 
     // Hole aktiven Account
     let state = AUTH_STATE.lock().await;
-    let active_uuid = state.active_account.clone()
+    let active_uuid = state
+        .active_account
+        .clone()
         .ok_or_else(|| "No active account".to_string())?;
-    let account = state.accounts.iter()
+    let account = state
+        .accounts
+        .iter()
         .find(|a| a.uuid == active_uuid)
         .ok_or_else(|| "Account not found".to_string())?
         .clone();
@@ -1420,25 +1700,34 @@ pub async fn launch_world(profile_id: String, world_name: String) -> Result<(), 
     // Starte Minecraft mit --quickPlaySingleplayer Argument
     let launcher = MinecraftLauncher::new().map_err(|e| e.to_string())?;
 
-    launcher.launch_with_extra_args(
-        &profile,
-        &account.username,
-        &account.uuid,
-        Some(&account.access_token),
-        vec!["--quickPlaySingleplayer".to_string(), world_name]
-    ).await.map_err(|e| e.to_string())
+    launcher
+        .launch_with_extra_args(
+            &profile,
+            &account.username,
+            &account.uuid,
+            Some(&account.access_token),
+            vec!["--quickPlaySingleplayer".to_string(), world_name],
+        )
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ==================== SERVERS ====================
 
 #[tauri::command]
-pub async fn get_servers(profile_id: String) -> Result<Vec<crate::core::minecraft::worlds::ServerInfo>, String> {
+pub async fn get_servers(
+    profile_id: String,
+) -> Result<Vec<crate::core::minecraft::worlds::ServerInfo>, String> {
     use crate::core::profiles::ProfileManager;
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     crate::core::minecraft::worlds::get_servers(&profile.game_dir)
@@ -1448,24 +1737,36 @@ pub async fn get_servers(profile_id: String) -> Result<Vec<crate::core::minecraf
 
 #[tauri::command]
 pub async fn launch_server(profile_id: String, server_ip: String) -> Result<(), String> {
-    use crate::core::profiles::ProfileManager;
     use crate::core::minecraft::MinecraftLauncher;
+    use crate::core::profiles::ProfileManager;
     use crate::gui::auth::AUTH_STATE;
 
-    tracing::info!("Launching server '{}' for profile '{}'", server_ip, profile_id);
+    tracing::info!(
+        "Launching server '{}' for profile '{}'",
+        server_ip,
+        profile_id
+    );
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?
         .clone();
 
     // Hole aktiven Account
     let state = AUTH_STATE.lock().await;
-    let active_uuid = state.active_account.clone()
+    let active_uuid = state
+        .active_account
+        .clone()
         .ok_or_else(|| "No active account".to_string())?;
-    let account = state.accounts.iter()
+    let account = state
+        .accounts
+        .iter()
         .find(|a| a.uuid == active_uuid)
         .ok_or_else(|| "Account not found".to_string())?
         .clone();
@@ -1474,25 +1775,37 @@ pub async fn launch_server(profile_id: String, server_ip: String) -> Result<(), 
     // Starte Minecraft mit --quickPlayMultiplayer Argument
     let launcher = MinecraftLauncher::new().map_err(|e| e.to_string())?;
 
-    launcher.launch_with_extra_args(
-        &profile,
-        &account.username,
-        &account.uuid,
-        Some(&account.access_token),
-        vec!["--quickPlayMultiplayer".to_string(), server_ip]
-    ).await.map_err(|e| e.to_string())
+    launcher
+        .launch_with_extra_args(
+            &profile,
+            &account.username,
+            &account.uuid,
+            Some(&account.access_token),
+            vec!["--quickPlayMultiplayer".to_string(), server_ip],
+        )
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn add_server(profile_id: String, name: String, ip: String) -> Result<(), String> {
     use crate::core::profiles::ProfileManager;
 
-    tracing::info!("Adding server '{}' ({}) for profile '{}'", name, ip, profile_id);
+    tracing::info!(
+        "Adding server '{}' ({}) for profile '{}'",
+        name,
+        ip,
+        profile_id
+    );
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     crate::core::minecraft::worlds::add_server(&profile.game_dir, &name, &ip)
@@ -1507,9 +1820,13 @@ pub async fn remove_server(profile_id: String, ip: String) -> Result<(), String>
     tracing::info!("Removing server '{}' from profile '{}'", ip, profile_id);
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profiles = profile_manager
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let profile = profiles.get_profile(&profile_id)
+    let profile = profiles
+        .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
     crate::core::minecraft::worlds::remove_server(&profile.game_dir, &ip)
@@ -1529,9 +1846,8 @@ fn migrate_old_metadata(mods_dir: &std::path::Path, modinfos_dir: &std::path::Pa
 
                 if filename_str.ends_with(".jar.meta.json") {
                     // Neuer Dateiname: entferne ".jar.meta" und behalte nur ".json"
-                    let new_filename = filename_str
-                        .trim_end_matches(".jar.meta.json")
-                        .to_string() + ".json";
+                    let new_filename =
+                        filename_str.trim_end_matches(".jar.meta.json").to_string() + ".json";
 
                     let new_path = modinfos_dir.join(&new_filename);
 
@@ -1539,7 +1855,11 @@ fn migrate_old_metadata(mods_dir: &std::path::Path, modinfos_dir: &std::path::Pa
                     if let Err(e) = std::fs::rename(&path, &new_path) {
                         tracing::warn!("Failed to migrate metadata {}: {}", filename_str, e);
                     } else {
-                        tracing::info!("✅ Migrated metadata: {} -> modinfos/{}", filename_str, new_filename);
+                        tracing::info!(
+                            "✅ Migrated metadata: {} -> modinfos/{}",
+                            filename_str,
+                            new_filename
+                        );
                     }
                 }
             }
