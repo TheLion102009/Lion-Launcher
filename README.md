@@ -4,43 +4,42 @@ Ein minimalistischer Minecraft Launcher für Linux und Windows, geschrieben in R
 
 ## Features
 
-✨ **Profilverwaltung**
+**Profilverwaltung**
 - Erstelle mehrere Profile mit verschiedenen Minecraft-Versionen
 - Vollständige Unterstützung für alle Mod-Loader:
-  - ✅ **Vanilla** - Pures Minecraft ohne Mods
-  - ✅ **Fabric** - Leichtgewichtig und schnell (Empfohlen) ⭐
-  - ✅ **Quilt** - Fabric-Fork mit erweiterten Features ⭐
-  - ✅ **Forge/NeoForge** - Vollständige Kompatibilität mit intelligenter Auto-Auswahl 🆕
-    - Automatische Erkennung der besten Version
-    - MC < 1.20.1: Forge
-    - MC 1.20.1+: NeoForge bevorzugt
-    - Migrations-Assistent inkludiert
+  -  **Vanilla**
+  -  **Fabric** 
+  -  **Quilt** 
+  -  **Forge**
+  -  **Neoforge**
+
 - Jedes Profil kann eigene Mods, Einstellungen und Resource Packs haben
 - Automatisches Laden und Verwalten der Loader-Versionen
 
-🔍 **Mod Browser**
-- Durchsuche Modrinth (CurseForge Support geplant)
+**Mod Browser**
+- Durchsuche Modrinth
 - Filtere nach Minecraft-Version und Mod-Loader
 - Sortiere nach Relevanz, Downloads, Updates
 - Installiere Mods mit einem Klick
+- Eine große Detail übersicht 
 
-🔐 **Microsoft Account**
+**Microsoft Account**
 - Anmeldung mit Microsoft/Xbox Account
 - Device Code Flow für einfache Authentifizierung
 - Zeigt deinen Minecraft-Skin an
 - Offline-Account Option verfügbar
 
-🎨 **Skins**
+**Skins**
 - 3D-Skin-Vorschau
 - Suche nach Spieler-Skins
 - Zuletzt angesehene Skins speichern
 
-⚙️ **Einstellungen**
+**Einstellungen**
 - Dark/Light Mode
 - Anpassbare Akzentfarben 
 - Konfiguriere Speicher und Java-Pfad
 
-🎮 **Design**
+ **Design**
 - Minimalistisches UI in Grau mit anpassbaren Akzentfarben
 - Schnelle und reaktionsschnelle Oberfläche
 - Kleiner Bundle-Size (~10-15MB)
@@ -56,10 +55,9 @@ Ein minimalistischer Minecraft Launcher für Linux und Windows, geschrieben in R
 
 ### Releases
 
-Lade die neueste Version von den [Releases](https://github.com/yourusername/Lion-Launcher/releases):
+Lade die neueste Version von diesem Repository runter bei nighly builds.
 
-- **Linux**: `.AppImage` oder `.deb` oder `.rpm`
-- **Windows**: `Lion-Launcher_*_setup.exe`
+
 
 ### Aus Source bauen
 
