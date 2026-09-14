@@ -146,6 +146,8 @@ let selectedFilters = {
     categories: [],
     hideInstalled: false
 };
+const LION_SHARE_FORMAT_VERSION = 1;
+let pendingLionImportPayload = null;
 let currentModSearchQuery = '';
 let currentModPage = 0;
 const MODS_PER_PAGE = 20;
@@ -183,6 +185,143 @@ let currentAccentColor = 'gold';
 /** Set mit allen aktuell laufenden Profil-IDs */
 const runningProfiles = new Set();
 
+const sessionWidgetState = {
+    profileId: null,
+    profileName: 'No Session Active',
+    phase: 'idle',
+    status: 'Idle',
+    percent: null,
+    canStop: false
+};
+let sessionWidgetInitialized = false;
+
+function getProfileNameById(profileId) {
+    if (!profileId) return 'No Session Active';
+    const profile = profiles.find(p => p.id === profileId);
+    return profile ? profile.name : 'Unknown Profile';
+}
+
+function setSessionWidgetState(nextState = {}) {
+    Object.assign(sessionWidgetState, nextState);
+    renderSessionWidget();
+}
+
+function syncSessionWidgetWithRunningProfiles() {
+    if (runningProfiles.size === 0) {
+        const hasActiveTransientState = !!sessionWidgetState.profileId && (
+            sessionWidgetState.phase === 'spin' ||
+            sessionWidgetState.phase === 'progress' ||
+            sessionWidgetState.phase === 'queued'
+        );
+        if (hasActiveTransientState) {
+            return;
+        }
+
+        setSessionWidgetState({
+            profileId: null,
+            profileName: 'No Session Aktiv',
+            phase: 'idle',
+            status: 'Idle',
+            percent: null,
+            canStop: false
+        });
+        return;
+    }
+
+    const keepCurrent = sessionWidgetState.profileId && runningProfiles.has(sessionWidgetState.profileId);
+    const activeProfileId = keepCurrent ? sessionWidgetState.profileId : runningProfiles.values().next().value;
+    setSessionWidgetState({
+        profileId: activeProfileId,
+        profileName: getProfileNameById(activeProfileId),
+        phase: 'running',
+        status: 'Minecraft gestartet',
+        percent: null,
+        canStop: true
+    });
+}
+
+function renderSessionWidget() {
+    const widget = document.getElementById('session-widget');
+    const indicator = document.getElementById('session-indicator');
+    const indicatorLabel = document.getElementById('session-indicator-label');
+    const nameEl = document.getElementById('session-profile-name');
+    const stopBtn = document.getElementById('session-stop-btn');
+    if (!widget || !indicator || !indicatorLabel || !nameEl || !stopBtn) return;
+
+    const phase = sessionWidgetState.phase || 'idle';
+    const safePercent = Number.isFinite(sessionWidgetState.percent)
+        ? Math.max(0, Math.min(100, Math.round(sessionWidgetState.percent)))
+        : null;
+
+    indicator.classList.remove('idle', 'spin', 'progress', 'running', 'queued');
+    indicator.classList.add(phase);
+    if (safePercent != null) {
+        indicator.style.setProperty('--session-progress', String(safePercent));
+    } else {
+        indicator.style.setProperty('--session-progress', '0');
+    }
+
+    if (phase === 'progress' && safePercent != null && safePercent < 100) {
+        indicatorLabel.textContent = safePercent + '%';
+    } else {
+        indicatorLabel.textContent = '';
+    }
+
+    nameEl.textContent = sessionWidgetState.profileName || 'No Session Active';
+
+    const canStop = !!sessionWidgetState.profileId && !!sessionWidgetState.canStop;
+    stopBtn.classList.toggle('hidden', !canStop);
+}
+
+function initSessionWidget() {
+    if (sessionWidgetInitialized) return;
+    sessionWidgetInitialized = true;
+
+    const stopBtn = document.getElementById('session-stop-btn');
+    if (stopBtn) {
+        stopBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (sessionWidgetState.profileId) {
+                stopProfile(sessionWidgetState.profileId);
+            }
+        });
+    }
+
+    renderSessionWidget();
+}
+
+function animateSessionFlyIn(profileName) {
+    const widget = document.getElementById('session-widget');
+    if (!widget) return;
+
+    widget.classList.remove('fly-in-highlight');
+    // Trigger reflow to restart pulse animation reliably.
+    void widget.offsetWidth;
+    widget.classList.add('fly-in-highlight');
+
+    const chip = document.createElement('div');
+    chip.className = 'session-fly-chip';
+    chip.textContent = profileName;
+    document.body.appendChild(chip);
+
+    const startX = Math.max(window.innerWidth * 0.5 - 70, 20);
+    const startY = Math.max(window.innerHeight * 0.5 - 16, 20);
+    const widgetRect = widget.getBoundingClientRect();
+    const targetX = widgetRect.left + 16;
+    const targetY = widgetRect.top + 24;
+
+    chip.style.left = startX + 'px';
+    chip.style.top = startY + 'px';
+    chip.animate(
+        [
+            { transform: 'translate(0, 0) scale(1)', opacity: 0.96 },
+            { transform: `translate(${targetX - startX}px, ${targetY - startY}px) scale(0.72)`, opacity: 0.2 }
+        ],
+        { duration: 650, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }
+    ).onfinish = () => chip.remove();
+}
+
 /** Live-Log Interval Handle */
 let liveLogInterval = null;
 /** Welches Profil gerade im Live-Log angezeigt wird */
@@ -196,13 +335,11 @@ async function syncRunningProfiles() {
         const ids = await invoke('get_running_profiles');
         const newSet = new Set(ids);
 
-        // Prüfe welche Profile seit dem letzten Check gestoppt wurden
         for (const id of runningProfiles) {
             if (!newSet.has(id)) {
                 // Diese Instanz ist jetzt gestoppt
                 runningProfiles.delete(id);
                 updateAllPlayStopButtons(id);
-                // Live-Log-Anzeige aktualisieren falls das der aktive Live-Log ist
                 if (liveLogProfileId === id) {
                     const el = getLogContentElement();
                     if (el) refreshLiveLog(id, el);
@@ -217,6 +354,8 @@ async function syncRunningProfiles() {
             }
         }
     } catch (e) { /* silent */ }
+
+    syncSessionWidgetWithRunningProfiles();
 }
 
 /** Startet das periodische Polling (alle 3s) um Prozess-Exits zuverlässig zu erkennen */
@@ -254,6 +393,7 @@ async function stopProfile(profileId) {
             const el = getLogContentElement();
             if (el) refreshLiveLog(profileId, el);
         }
+        syncSessionWidgetWithRunningProfiles();
         showToast('Instanz gestoppt', 'info', 2000);
     } catch (e) {
         showToast('Fehler beim Stoppen: ' + e, 'error', 3000);
@@ -271,6 +411,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await resolveEmbeddedLogoUrl();
     initSidebarLogo();
+    initSessionWidget();
 
     const grid = document.getElementById('profiles-grid');
     if (grid) {
@@ -745,6 +886,12 @@ function showProfileContextMenu(event, profileId) {
              onmouseout="this.style.background='transparent'">
             <i class="bi bi-gear-fill"></i> Einstellungen
         </div>
+        <div onclick="openShareProfileModal('${profileId}')" 
+             style="padding: 10px 20px; cursor: pointer; color: var(--text-primary); display: flex; align-items: center; gap: 10px;"
+             onmouseover="this.style.background='var(--bg-light)'" 
+             onmouseout="this.style.background='transparent'">
+            <i class="bi bi-share-fill"></i> Share
+        </div>
         <div onclick="deleteProfile('${profileId}')" 
              style="padding: 10px 20px; cursor: pointer; color: #f44336; display: flex; align-items: center; gap: 10px;"
              onmouseover="this.style.background='var(--bg-light)'" 
@@ -763,6 +910,587 @@ function showProfileContextMenu(event, profileId) {
         }
     };
     setTimeout(() => document.addEventListener('click', closeMenu), 10);
+}
+
+function sanitizeLionName(name) {
+    return String(name || 'profile')
+        .trim()
+        .replace(/[^a-zA-Z0-9-_ ]+/g, '')
+        .replace(/\s+/g, '_')
+        .slice(0, 64) || 'profile';
+}
+
+function closeDynamicModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) modal.remove();
+}
+
+function getCheckedValues(root, selector) {
+    return Array.from(root.querySelectorAll(selector))
+        .filter(el => el.checked)
+        .map(el => el.value);
+}
+
+async function buildLionPayload(profileId, includes) {
+    const profile = profiles.find(p => p.id === profileId);
+    if (!profile) throw new Error('Profile not found');
+
+    const includeSet = new Set(includes || []);
+    const payload = {
+        format: 'lion-profile',
+        version: LION_SHARE_FORMAT_VERSION,
+        exportedAt: new Date().toISOString(),
+        profile: {
+            name: profile.name,
+            minecraft_version: profile.minecraft_version,
+            loader: profile.loader?.loader || 'vanilla',
+            loader_version: profile.loader?.version || '',
+            icon_path: profile.icon_path || LION_LOGO_URL,
+            memory_mb: profile.memory_mb || null,
+            java_args: Array.isArray(profile.java_args) ? [...profile.java_args] : [],
+            settings_sync: !!profile.settings_sync
+        },
+        content: {}
+    };
+
+    if (includeSet.has('mods')) {
+        const installedMods = await invoke('get_installed_mods', { profileId });
+        payload.content.mods = (installedMods || [])
+            .map(mod => ({
+                mod_id: mod.mod_id || null,
+                source: 'modrinth',
+                name: mod.name || mod.filename || '',
+                disabled: !!mod.disabled
+            }))
+            .filter(mod => !!mod.mod_id);
+    }
+
+    if (includeSet.has('resourcepacks')) {
+        const packs = await invoke('get_installed_resourcepacks', { profileId });
+        payload.content.resourcepacks = (packs || [])
+            .map(pack => ({
+                project_id: pack.project_id || null,
+                name: pack.title || pack.name || '',
+                slug: pack.slug || null
+            }))
+            .filter(pack => !!pack.project_id);
+    }
+
+    if (includeSet.has('shaderpacks')) {
+        const packs = await invoke('get_installed_shaderpacks', { profileId });
+        payload.content.shaderpacks = (packs || [])
+            .map(pack => ({
+                project_id: pack.project_id || null,
+                name: pack.title || pack.name || '',
+                slug: pack.slug || null
+            }))
+            .filter(pack => !!pack.project_id);
+    }
+
+    if (includeSet.has('servers')) {
+        const servers = await invoke('get_servers', { profileId });
+        payload.content.servers = (servers || []).map(s => ({
+            name: s.name || s.ip,
+            ip: s.ip
+        }));
+    }
+
+    if (includeSet.has('worlds')) {
+        const worlds = await invoke('get_worlds', { profileId });
+        payload.content.worlds = (worlds || []).map(w => ({
+            name: w.name,
+            folder_name: w.folder_name,
+            last_played: w.last_played,
+            game_mode: w.game_mode,
+            difficulty: w.difficulty,
+            size_bytes: w.size_bytes
+        }));
+    }
+
+    if (includeSet.has('logs')) {
+        let latestLog = '';
+        try {
+            latestLog = await invoke('get_profile_logs', { profileId, logType: 'latest' });
+        } catch (_e) {
+            latestLog = '';
+        }
+        payload.content.logs = {
+            latest: latestLog ? String(latestLog).split('\n').slice(-600).join('\n') : ''
+        };
+    }
+
+    const shareData = await invoke('export_profile_share_data', {
+        profileId,
+        includeWorldData: includeSet.has('worlds'),
+        includeLogsData: includeSet.has('logs'),
+        includeSettingsData: includeSet.has('settings')
+    });
+    payload.content.share_data = shareData || {};
+
+    return payload;
+}
+
+function downloadLionPayload(payload, suggestedName) {
+    const data = JSON.stringify(payload, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = sanitizeLionName(suggestedName) + '.lion';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+}
+
+async function saveLionPayloadWithDialog(payload, suggestedName) {
+    const content = JSON.stringify(payload, null, 2);
+    const defaultFileName = sanitizeLionName(suggestedName) + '.lion';
+    const savedPath = await invoke('save_lion_file_with_dialog', {
+        defaultFileName,
+        content
+    });
+    return savedPath;
+}
+
+function createImportReport() {
+    return {
+        mods: { success: 0, failed: 0 },
+        resourcepacks: { success: 0, failed: 0 },
+        shaderpacks: { success: 0, failed: 0 },
+        servers: { success: 0, failed: 0 },
+        settingsApplied: false,
+        worldsApplied: false,
+        logsApplied: false
+    };
+}
+
+function formatImportReport(report) {
+    return [
+        `Mods ${report.mods.success}/${report.mods.success + report.mods.failed}`,
+        `RP ${report.resourcepacks.success}/${report.resourcepacks.success + report.resourcepacks.failed}`,
+        `Shader ${report.shaderpacks.success}/${report.shaderpacks.success + report.shaderpacks.failed}`,
+        `Server ${report.servers.success}/${report.servers.success + report.servers.failed}`,
+        `Settings ${report.settingsApplied ? 'ok' : 'skip'}`,
+        `Worlds ${report.worldsApplied ? 'ok' : 'skip'}`,
+        `Logs ${report.logsApplied ? 'ok' : 'skip'}`
+    ].join(' | ');
+}
+
+function openShareProfileModal(profileId) {
+    closeDynamicModal('profile-context-menu');
+    closeDynamicModal('share-profile-modal');
+
+    const profile = profiles.find(p => p.id === profileId);
+    if (!profile) return;
+
+    const modal = document.createElement('div');
+    modal.id = 'share-profile-modal';
+    modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.82); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+
+    modal.innerHTML = `
+        <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 12px; width: min(520px, 92vw); padding: 22px;" onclick="event.stopPropagation()">
+            <h2 style="margin: 0 0 14px 0; color: var(--gold); font-size: 20px;"><i class="bi bi-share-fill"></i> Share Profile</h2>
+            <p style="margin: 0 0 14px 0; color: var(--text-secondary); font-size: 13px;">Waehle, was in die <code>.lion</code>-Datei soll.</p>
+            <div id="share-profile-options" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; color: var(--text-primary);">
+                <label><input type="checkbox" value="settings" checked> Settings (1:1)</label>
+                <label><input type="checkbox" value="mods" checked> Mods (Links)</label>
+                <label><input type="checkbox" value="resourcepacks" checked> Resource Packs (Links)</label>
+                <label><input type="checkbox" value="shaderpacks" checked> Shader Packs (Links)</label>
+                <label><input type="checkbox" value="servers" checked> Serverliste</label>
+                <label><input type="checkbox" value="worlds"> Worlds (voll)</label>
+                <label><input type="checkbox" value="logs"> Logs (voll)</label>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
+                <button class="btn btn-secondary" onclick="closeDynamicModal('share-profile-modal')">Abbrechen</button>
+                <button class="btn" id="share-profile-export-btn">Export .lion</button>
+            </div>
+        </div>
+    `;
+
+    modal.addEventListener('click', () => closeDynamicModal('share-profile-modal'));
+    document.body.appendChild(modal);
+
+    const exportBtn = document.getElementById('share-profile-export-btn');
+    if (exportBtn) {
+        exportBtn.addEventListener('click', async () => {
+            const root = document.getElementById('share-profile-options');
+            if (!root) return;
+            const includes = getCheckedValues(root, 'input[type="checkbox"]');
+            if (includes.length === 0) {
+                showToast('Waehle mindestens einen Bereich zum Teilen.', 'warning', 2800);
+                return;
+            }
+
+            exportBtn.disabled = true;
+            exportBtn.textContent = 'Export...';
+            try {
+                const payload = await buildLionPayload(profileId, includes);
+                let savedPath = null;
+                try {
+                    savedPath = await saveLionPayloadWithDialog(payload, profile.name);
+                } catch (_dialogError) {
+                    // Fallback fuer Umgebungen ohne nativen Save-Dialog.
+                    downloadLionPayload(payload, profile.name);
+                }
+
+                if (savedPath) {
+                    showToast('Profil exportiert: ' + savedPath, 'success', 3200);
+                } else {
+                    showToast('Export abgebrochen.', 'info', 2200);
+                    return;
+                }
+                closeDynamicModal('share-profile-modal');
+            } catch (error) {
+                showToast('Export fehlgeschlagen: ' + error, 'error', 4500);
+            } finally {
+                exportBtn.disabled = false;
+                exportBtn.textContent = 'Export .lion';
+            }
+        });
+    }
+}
+
+function openLionImportDialog() {
+    const input = document.getElementById('lion-import-input');
+    if (!input) return;
+    input.value = '';
+    input.click();
+}
+
+function closeImportLionModal() {
+    closeDynamicModal('import-lion-modal');
+    pendingLionImportPayload = null;
+}
+
+function buildImportSelectionFromModal() {
+    const root = document.getElementById('import-lion-options');
+    if (!root) return [];
+    return getCheckedValues(root, 'input[type="checkbox"]');
+}
+
+async function prepareProfileDownloadFlow(profileId, profileName) {
+    let unlistenPrepareProgress = null;
+    try {
+        setSessionWidgetState({
+            profileId,
+            profileName,
+            phase: 'spin',
+            status: 'Download wird vorbereitet...',
+            percent: null,
+            canStop: false
+        });
+
+        try {
+            unlistenPrepareProgress = await window.__TAURI__.event.listen('launch-progress', (event) => {
+                const { status, percent } = event.payload || {};
+                const progressValue = Number(percent);
+                const hasPercent = Number.isFinite(progressValue) && progressValue >= 0 && progressValue <= 100;
+                setSessionWidgetState({
+                    profileId,
+                    profileName,
+                    phase: hasPercent ? 'progress' : 'spin',
+                    status: status || 'Download wird vorbereitet...',
+                    percent: hasPercent ? progressValue : null,
+                    canStop: false
+                });
+            });
+        } catch (_e) {
+            // Event API evtl. nicht verfügbar
+        }
+
+        await invoke('prepare_profile_download', { profileId });
+
+        if (typeof unlistenPrepareProgress === 'function') unlistenPrepareProgress();
+        setSessionWidgetState({
+            profileId,
+            profileName,
+            phase: 'idle',
+            status: 'Download abgeschlossen - bereit zum Start.',
+            percent: null,
+            canStop: false
+        });
+    } catch (prepareError) {
+        if (typeof unlistenPrepareProgress === 'function') unlistenPrepareProgress();
+        setSessionWidgetState({
+            profileId,
+            profileName,
+            phase: 'idle',
+            status: 'Download fehlgeschlagen: ' + prepareError,
+            percent: null,
+            canStop: false
+        });
+        throw prepareError;
+    }
+}
+
+async function runLionImport() {
+    if (!pendingLionImportPayload) return;
+    const payload = pendingLionImportPayload;
+    const selections = buildImportSelectionFromModal();
+    const fastImport = !!document.getElementById('import-lion-fast-mode')?.checked;
+    if (!selections.length) {
+        showToast('Waehle mindestens einen Import-Bereich.', 'warning', 2800);
+        return;
+    }
+
+    const importBtn = document.getElementById('import-lion-run-btn');
+    if (importBtn) {
+        importBtn.disabled = true;
+        importBtn.textContent = 'Import...';
+    }
+
+    try {
+        const profileData = payload.profile || {};
+        const profileName = String(profileData.name || 'Imported Profile').slice(0, 60);
+        const mcVersion = profileData.minecraft_version || 'latest';
+        const loader = profileData.loader || 'fabric';
+        const loaderVersion = profileData.loader_version || 'latest';
+        const importedIcon = profileData.icon_path || LION_LOGO_URL;
+
+        const knownProfileIds = new Set(profiles.map(p => p.id));
+        const profileList = await invoke('create_profile', {
+            name: profileName,
+            minecraftVersion: mcVersion,
+            loader,
+            loaderVersion
+        });
+        profiles = profileList.profiles || [];
+        renderProfiles();
+
+        const createdProfile = profiles.find(p => !knownProfileIds.has(p.id)) ||
+            profiles.find(p => p.name === profileName && p.minecraft_version === mcVersion);
+        if (!createdProfile) {
+            throw new Error('Imported profile was not created');
+        }
+
+        const content = payload.content || {};
+
+        const report = createImportReport();
+
+        if (selections.includes('settings')) {
+            await invoke('update_profile', {
+                profileId: createdProfile.id,
+                updates: {
+                    name: profileName,
+                    minecraft_version: mcVersion,
+                    loader,
+                    loader_version: loaderVersion,
+                    memory_mb: profileData.memory_mb || 4096,
+                    java_args: Array.isArray(profileData.java_args) ? profileData.java_args : [],
+                    icon_path: importedIcon
+                }
+            });
+            report.settingsApplied = true;
+        }
+
+        if (selections.includes('settings') && typeof profileData.settings_sync === 'boolean') {
+            await invoke('toggle_settings_sync', { profileId: createdProfile.id, enabled: !!profileData.settings_sync });
+        }
+
+        const shareData = content.share_data || {};
+        await invoke('import_profile_share_data', {
+            profileId: createdProfile.id,
+            data: shareData,
+            importWorldData: selections.includes('worlds'),
+            importLogsData: selections.includes('logs'),
+            importSettingsData: selections.includes('settings')
+        });
+        report.worldsApplied = selections.includes('worlds') && !!shareData?.worlds_archive_base64;
+        report.logsApplied = selections.includes('logs') && !!shareData?.logs_archive_base64;
+
+        let tasksDone = 0;
+        const tasks = [];
+
+        if (selections.includes('mods') && Array.isArray(content.mods)) {
+            content.mods.forEach(mod => {
+                if (mod && mod.mod_id) tasks.push({ kind: 'mod', data: mod });
+            });
+        }
+        if (selections.includes('resourcepacks') && Array.isArray(content.resourcepacks)) {
+            content.resourcepacks.forEach(pack => {
+                if (pack && pack.project_id) tasks.push({ kind: 'resourcepack', data: pack });
+            });
+        }
+        if (selections.includes('shaderpacks') && Array.isArray(content.shaderpacks)) {
+            content.shaderpacks.forEach(pack => {
+                if (pack && pack.project_id) tasks.push({ kind: 'shaderpack', data: pack });
+            });
+        }
+
+        if (selections.includes('servers') && Array.isArray(content.servers)) {
+            for (const server of content.servers) {
+                if (!server?.ip) continue;
+                try {
+                    await invoke('add_server', {
+                        profileId: createdProfile.id,
+                        name: server.name || server.ip,
+                        ip: server.ip
+                    });
+                    report.servers.success += 1;
+                } catch (_e) {
+                    report.servers.failed += 1;
+                }
+            }
+        }
+
+        const applyTaskResult = (taskKind, ok) => {
+            const key = taskKind === 'mod' ? 'mods' : taskKind === 'resourcepack' ? 'resourcepacks' : 'shaderpacks';
+            report[key][ok ? 'success' : 'failed'] += 1;
+        };
+
+        const runInstallTask = async (task) => {
+            if (task.kind === 'mod') {
+                await invoke('install_mod', {
+                    profileId: createdProfile.id,
+                    modId: task.data.mod_id,
+                    versionId: null,
+                    source: task.data.source || 'modrinth'
+                });
+            } else if (task.kind === 'resourcepack') {
+                await invoke('install_resourcepack', {
+                    profileId: createdProfile.id,
+                    packId: task.data.project_id,
+                    versionId: null
+                });
+            } else if (task.kind === 'shaderpack') {
+                await invoke('install_shaderpack', {
+                    profileId: createdProfile.id,
+                    packId: task.data.project_id,
+                    versionId: null
+                });
+            }
+        };
+
+        if (fastImport && tasks.length > 0) {
+            let completed = 0;
+            const results = await Promise.allSettled(tasks.map(async (task) => {
+                try {
+                    await runInstallTask(task);
+                    applyTaskResult(task.kind, true);
+                } catch (_e) {
+                    applyTaskResult(task.kind, false);
+                } finally {
+                    completed += 1;
+                    const pct = Math.round((completed / tasks.length) * 100);
+                    setSessionWidgetState({
+                        profileId: createdProfile.id,
+                        profileName: createdProfile.name,
+                        phase: 'progress',
+                        status: 'Importiere Inhalte... (' + completed + '/' + tasks.length + ')',
+                        percent: pct,
+                        canStop: false
+                    });
+                }
+            }));
+            void results;
+        } else {
+            for (const task of tasks) {
+                tasksDone += 1;
+                const pct = Math.round((tasksDone / Math.max(tasks.length, 1)) * 100);
+                setSessionWidgetState({
+                    profileId: createdProfile.id,
+                    profileName: createdProfile.name,
+                    phase: 'progress',
+                    status: 'Importiere Inhalte... (' + tasksDone + '/' + tasks.length + ')',
+                    percent: pct,
+                    canStop: false
+                });
+
+                try {
+                    await runInstallTask(task);
+                    applyTaskResult(task.kind, true);
+                } catch (_installErr) {
+                    applyTaskResult(task.kind, false);
+                }
+            }
+        }
+
+        await prepareProfileDownloadFlow(createdProfile.id, createdProfile.name);
+        closeImportLionModal();
+        const createModal = document.getElementById('create-profile-modal');
+        if (createModal) createModal.classList.remove('active');
+        showToast('Import abgeschlossen. ' + formatImportReport(report), 'success', 5200);
+
+    } catch (error) {
+        showToast('Import fehlgeschlagen: ' + error, 'error', 5000);
+    } finally {
+        if (importBtn) {
+            importBtn.disabled = false;
+            importBtn.textContent = 'Import starten';
+        }
+    }
+}
+
+function openLionImportModal(payload) {
+    closeImportLionModal();
+    pendingLionImportPayload = payload;
+
+    const has = (key) => {
+        const c = payload?.content || {};
+        return Array.isArray(c[key]) && c[key].length > 0;
+    };
+    const hasShare = (key) => !!payload?.content?.share_data?.[key];
+    const incomingVersion = Number(payload?.version || 1);
+    const isNewerFormat = Number.isFinite(incomingVersion) && incomingVersion > LION_SHARE_FORMAT_VERSION;
+    const isOlderFormat = Number.isFinite(incomingVersion) && incomingVersion < LION_SHARE_FORMAT_VERSION;
+
+    const modal = document.createElement('div');
+    modal.id = 'import-lion-modal';
+    modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.82); display: flex; align-items: center; justify-content: center; z-index: 10001;';
+    modal.innerHTML = `
+        <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 12px; width: min(560px, 92vw); padding: 22px;" onclick="event.stopPropagation()">
+            <h2 style="margin: 0 0 10px 0; color: var(--gold); font-size: 20px;"><i class="bi bi-box-arrow-in-down"></i> Import .lion</h2>
+            <p style="margin: 0 0 12px 0; color: var(--text-secondary); font-size: 13px;">${escapeHtml(payload?.profile?.name || 'Imported Profile')} - waehle die Bereiche fuer den Import.</p>
+            <p style="margin: 0 0 12px 0; color: ${isNewerFormat ? '#ff9800' : 'var(--text-secondary)'}; font-size: 12px;">Format v${incomingVersion} (lokal: v${LION_SHARE_FORMAT_VERSION})${isOlderFormat ? ' - aelteres Format, Import mit Fallback.' : ''}${isNewerFormat ? ' - neuer als diese Launcher-Version.' : ''}</p>
+            <div id="import-lion-options" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; color: var(--text-primary);">
+                <label><input type="checkbox" value="settings" ${payload?.content?.share_data?.settings ? 'checked' : ''}> Settings (1:1)</label>
+                <label><input type="checkbox" value="mods" ${has('mods') ? 'checked' : ''}> Mods</label>
+                <label><input type="checkbox" value="resourcepacks" ${has('resourcepacks') ? 'checked' : ''}> Resource Packs</label>
+                <label><input type="checkbox" value="shaderpacks" ${has('shaderpacks') ? 'checked' : ''}> Shader Packs</label>
+                <label><input type="checkbox" value="servers" ${has('servers') ? 'checked' : ''}> Serverliste</label>
+                <label><input type="checkbox" value="worlds" ${(has('worlds') || hasShare('worlds_archive_base64')) ? 'checked' : ''}> Worlds</label>
+                <label><input type="checkbox" value="logs" ${(payload?.content?.logs || hasShare('logs_archive_base64')) ? 'checked' : ''}> Logs</label>
+            </div>
+            <label style="display:flex; align-items:center; gap:8px; color: var(--text-secondary); margin-top: 12px; font-size: 12px;">
+                <input type="checkbox" id="import-lion-fast-mode"> Fast Import (parallel)
+            </label>
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
+                <button class="btn btn-secondary" onclick="closeImportLionModal()">Abbrechen</button>
+                <button class="btn" id="import-lion-run-btn" ${isNewerFormat ? 'disabled' : ''}>Import starten</button>
+            </div>
+        </div>
+    `;
+    modal.addEventListener('click', closeImportLionModal);
+    document.body.appendChild(modal);
+
+    const runBtn = document.getElementById('import-lion-run-btn');
+    if (runBtn) runBtn.addEventListener('click', runLionImport);
+}
+
+async function handleLionImportInputChange(event) {
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+    try {
+        const text = await file.text();
+        const payload = JSON.parse(text);
+        if (payload?.format !== 'lion-profile') {
+            throw new Error('Ungueltiges .lion Format');
+        }
+        const fileVersion = Number(payload?.version || 1);
+        if (!Number.isFinite(fileVersion) || fileVersion <= 0) {
+            throw new Error('Ungueltige .lion Versionsnummer');
+        }
+        if (fileVersion > LION_SHARE_FORMAT_VERSION) {
+            throw new Error('Diese .lion Datei ist neuer als dein Launcher (v' + fileVersion + ')');
+        }
+        if (fileVersion < LION_SHARE_FORMAT_VERSION) {
+            showToast('Aeltere .lion Version erkannt. Import mit Fallback.', 'info', 3200);
+        }
+        openLionImportModal(payload);
+    } catch (error) {
+        showToast('Import-Datei konnte nicht gelesen werden: ' + error, 'error', 4500);
+    }
 }
 
 // RAM-Slider Hilfsfunktionen
@@ -1259,6 +1987,7 @@ async function saveProfileSettingsFromModal(profileId, silent = false) {
 async function launchProfile(profileId) {
     const profile = profiles.find(p => p.id === profileId);
     const profileName = profile ? profile.name : 'Unknown';
+    let unlistenProgress = null;
 
     if (!currentUsername || currentUsername === 'Guest') {
         alert('Bitte setze zuerst deinen Username in den Settings!');
@@ -1268,42 +1997,30 @@ async function launchProfile(profileId) {
 
     debugLog('Launching: ' + profileName, 'info');
 
-    // Zeige Fortschrittsanzeige
-    const modalHTML = `
-        <div id="launch-progress-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 10000;">
-            <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 10px; padding: 40px; text-align: center; min-width: 400px;">
-                <div style="font-size: 48px; margin-bottom: 20px;"><i class="bi bi-box"></i></div>
-                <h2 style="color: var(--gold); margin: 0 0 20px 0;">Minecraft wird vorbereitet...</h2>
-                <p style="color: var(--text-secondary); margin-bottom: 30px;" id="launch-status">
-                    Lade Version-Info...
-                </p>
-                <div style="background: var(--bg-light); border-radius: 10px; height: 8px; overflow: hidden;">
-                    <div id="launch-progress-bar" style="background: var(--gold); height: 100%; width: 0%; transition: width 0.3s;"></div>
-                </div>
-            </div>
-        </div>
-    `;
-
-    const modalDiv = document.createElement('div');
-    modalDiv.innerHTML = modalHTML;
-    document.body.appendChild(modalDiv.firstElementChild);
-
-    const updateProgress = (status, percent) => {
-        const statusEl = document.getElementById('launch-status');
-        const barEl = document.getElementById('launch-progress-bar');
-        if (statusEl) statusEl.textContent = status;
-        if (barEl) barEl.style.width = percent + '%';
-    };
-
     try {
-        updateProgress('Vorbereitung...', 5);
+        setSessionWidgetState({
+            profileId,
+            profileName,
+            phase: 'spin',
+            status: 'Minecraft startet...',
+            percent: null,
+            canStop: true
+        });
 
         // Lausche auf echte Fortschrittsereignisse vom Backend
-        let unlistenProgress = null;
         try {
             unlistenProgress = await window.__TAURI__.event.listen('launch-progress', (event) => {
                 const { status, percent } = event.payload;
-                updateProgress(status, percent);
+                const progressValue = Number(percent);
+                const hasPercent = Number.isFinite(progressValue) && progressValue >= 0 && progressValue < 100;
+                setSessionWidgetState({
+                    profileId,
+                    profileName,
+                    phase: hasPercent ? 'progress' : 'spin',
+                    status: status || 'Minecraft startet...',
+                    percent: hasPercent ? progressValue : null,
+                    canStop: true
+                });
             });
         } catch (_e) {
             // Tauri-Events nicht verfügbar (z.B. im Browser-Dev-Mode)
@@ -1315,45 +2032,72 @@ async function launchProfile(profileId) {
         });
 
         if (unlistenProgress) unlistenProgress();
-
-        updateProgress('Minecraft gestartet!', 100);
         debugLog('Minecraft started successfully!', 'success');
 
         // Instanz als laufend markieren und Buttons sofort updaten
         runningProfiles.add(profileId);
         updateAllPlayStopButtons(profileId);
+
+        await waitForMinecraftMenuReady(profileId, profileName);
+        setSessionWidgetState({
+            profileId,
+            profileName,
+            phase: 'running',
+            status: 'Minecraft gestartet',
+            percent: null,
+            canStop: true
+        });
         if (liveLogProfileId === profileId) {
             const el = getLogContentElement();
             if (el) refreshLiveLog(profileId, el);
         }
-
-        await new Promise(r => setTimeout(r, 1500));
-
-        // Modal schließen
-        const modal = document.getElementById('launch-progress-modal');
-        if (modal) modal.remove();
-
-
     } catch (error) {
         if (typeof unlistenProgress === 'function') unlistenProgress();
         debugLog('Launch failed: ' + error, 'error');
+        syncSessionWidgetWithRunningProfiles();
+        showToast('Launch fehlgeschlagen: ' + error, 'error', 5000);
+    }
+}
 
-        // Fehler-Modal zeigen
-        const modal = document.getElementById('launch-progress-modal');
-        if (modal) {
-            modal.innerHTML = `
-                <div style="background: var(--bg-dark); border: 2px solid #f44336; border-radius: 10px; padding: 40px; text-align: center; max-width: 500px;">
-                    <div style="font-size: 48px; margin-bottom: 20px; color: #f44336;"><i class="bi bi-x-circle-fill"></i></div>
-                    <h2 style="color: #f44336; margin: 0 0 20px 0;">Launch fehlgeschlagen</h2>
-                    <p style="color: var(--text-secondary); margin-bottom: 20px; word-break: break-word;">
-                        ${error}
-                    </p>
-                    <button class="btn" onclick="document.getElementById('launch-progress-modal').remove()" style="padding: 12px 30px;">
-                        OK
-                    </button>
-                </div>
-            `;
+async function waitForMinecraftMenuReady(profileId, profileName) {
+    const readyMarkers = [
+        'Sound engine started',
+        'OpenAL initialized',
+        'Narrator library',
+        'Reloading ResourceManager',
+        'Created:'
+    ];
+    const timeoutMs = 150000;
+    const pollMs = 2000;
+    const start = Date.now();
+    let tick = 0;
+
+    while (Date.now() - start < timeoutMs) {
+        tick += 1;
+        const elapsedRatio = Math.min((Date.now() - start) / timeoutMs, 1);
+        const percent = 92 + Math.round(elapsedRatio * 7);
+
+        setSessionWidgetState({
+            profileId,
+            profileName,
+            phase: 'progress',
+            status: 'Warte bis Minecraft komplett offen ist...',
+            percent,
+            canStop: true
+        });
+
+        try {
+            const logText = await invoke('get_profile_logs', { profileId, logType: 'latest' });
+            const lower = String(logText || '').toLowerCase();
+            const matched = readyMarkers.some(marker => lower.includes(marker.toLowerCase()));
+            if (matched && tick >= 2) {
+                return;
+            }
+        } catch (_e) {
+            // latest.log kann direkt nach Start kurz fehlen.
         }
+
+        await new Promise(r => setTimeout(r, pollMs));
     }
 }
 
@@ -1411,18 +2155,60 @@ function showMicrosoftLoginInfo() {
 }
 
 async function deleteProfile(profileId) {
-    if (!confirm('Are you sure you want to delete this profile?')) {
+    closeDynamicModal('profile-context-menu');
+    closeDynamicModal('share-profile-modal');
+
+    const confirmed = await showDeleteProfileConfirmModal(profileId);
+    if (!confirmed) {
         return;
     }
 
     try {
         const profileList = await invoke('delete_profile', { profileId });
         profiles = profileList.profiles || [];
+        closeDynamicModal('profile-context-menu');
+        closeDynamicModal('share-profile-modal');
         renderProfiles();
+        showToast('Profil wurde geloescht.', 'success', 2200);
     } catch (error) {
         debugLog('Failed to delete profile: ' + error, 'error');
         alert('Failed to delete profile: ' + error);
     }
+}
+
+function showDeleteProfileConfirmModal(profileId) {
+    return new Promise((resolve) => {
+        closeDynamicModal('delete-profile-confirm-modal');
+        const profile = profiles.find(p => p.id === profileId);
+        const profileName = profile ? profile.name : 'dieses Profil';
+
+        const modal = document.createElement('div');
+        modal.id = 'delete-profile-confirm-modal';
+        modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.82); display: flex; align-items: center; justify-content: center; z-index: 10002;';
+        modal.innerHTML = `
+            <div style="background: var(--bg-dark); border: 2px solid #f44336; border-radius: 12px; width: min(430px, 90vw); padding: 20px;" onclick="event.stopPropagation()">
+                <h3 style="margin: 0 0 10px 0; color: #f44336; font-size: 20px;"><i class="bi bi-trash"></i> Profil loeschen?</h3>
+                <p style="margin: 0 0 16px 0; color: var(--text-secondary); font-size: 13px;">Willst du <strong style="color: var(--text-primary);">${escapeHtml(profileName)}</strong> wirklich loeschen?</p>
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button class="btn btn-secondary" id="delete-profile-cancel-btn">Abbrechen</button>
+                    <button class="btn" id="delete-profile-confirm-btn" style="background:#f44336; color:#fff;">Yes I will</button>
+                </div>
+            </div>
+        `;
+
+        const cleanup = (result) => {
+            if (modal.parentElement) modal.remove();
+            resolve(result);
+        };
+
+        modal.addEventListener('click', () => cleanup(false));
+        document.body.appendChild(modal);
+
+        const cancelBtn = document.getElementById('delete-profile-cancel-btn');
+        const confirmBtn = document.getElementById('delete-profile-confirm-btn');
+        if (cancelBtn) cancelBtn.addEventListener('click', () => cleanup(false));
+        if (confirmBtn) confirmBtn.addEventListener('click', () => cleanup(true));
+    });
 }
 
 // Profile Details View
@@ -1444,32 +2230,33 @@ function showProfileDetails(profileId) {
 
     // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst App-Icon
     const iconHTML = profile.icon_path
-        ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 64px; height: 64px; object-fit: cover; border-radius: 8px;" onerror="this.onerror=null; this.src='${LION_LOGO_URL}';">`
-        : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 64px; height: 64px; object-fit: cover; border-radius: 8px;">`;
+        ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover; border-radius: 12px;" onerror="this.onerror=null; this.src='${LION_LOGO_URL}';">`
+        : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover; border-radius: 12px;">`;
 
     grid.innerHTML = `
         <div style="grid-column: 1 / -1;">
             <!-- Profil Header -->
-            <div style="display: flex; align-items: center; margin-bottom: 25px; gap: 20px; padding-top: 20px;">
-                <!-- Linke Spalte: Icon + Zurück-Button untereinander -->
+            <div style="display: flex; align-items: flex-end; margin-bottom: 25px; gap: 22px; padding-top: 34px; position: relative;">
+                <button class="btn btn-secondary" onclick="loadProfiles()" style="position:absolute; left:0; top:0; padding: 8px 14px;">
+                    ← Back
+                </button>
+
+                <!-- Linke Spalte: Groesseres Icon -->
                 <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; flex-shrink: 0;">
-                    <div style="width: 80px; height: 80px; font-size: 80px; display: flex; align-items: center; justify-content: center; 
-                                flex-shrink: 0; border-radius: 10px; overflow: hidden; background: var(--bg-light);">
+                    <div style="width: 150px; height: 150px; font-size: 150px; display: flex; align-items: center; justify-content: center;
+                                flex-shrink: 0; border-radius: 14px; overflow: hidden; background: var(--bg-light);">
                         ${iconHTML}
                     </div>
-                    <button class="btn btn-secondary" onclick="loadProfiles()" style="padding: 8px 14px;">
-                        ← Zurück
-                    </button>
                 </div>
-                
+
                 <!-- Profil Info (rechts vom Icon) -->
-                <div style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+                <div style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; min-height: 150px;">
                     <h2 style="color: var(--gold); margin: 0; font-size: 24px; font-weight: 700;">${profile.name}</h2>
                     <p style="margin: 0; color: var(--text-secondary); font-size: 14px;">
                         Minecraft ${profile.minecraft_version} • ${profile.loader.loader} ${profile.loader.version}
                     </p>
                 </div>
-                
+
                 <!-- Play Button -->
                 <button class="btn" data-play-btn="${profile.id}" onclick="launchProfile('${profile.id}')" style="padding: 15px 40px; font-size: 18px; flex-shrink: 0;">
                     <i class="bi bi-play-fill"></i> Play
@@ -1516,7 +2303,7 @@ function showProfileDetails(profileId) {
                     </div>
                 </div>
             </div>
-            
+
             <!-- Content Area (unter dem Strich) -->
             <div id="main-category-shell" style="background: var(--bg-medium); border: 1px solid var(--bg-light); border-radius: 12px; padding: 12px; margin-bottom: 16px; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);">
                 <div id="main-category-content">
@@ -2159,7 +2946,6 @@ async function loadLogs(profileId) {
         updateLogStats(logs);
         debugLog('Logs loaded: ' + logs.split('\n').length + ' lines', 'success');
 
-        // Dropdown befüllen wenn Logs-Tab aktiv
         if (currentLogType === 'latest') {
             populateLogSourceDropdown(profileId);
         }
@@ -5172,8 +5958,21 @@ function setupModals() {
 
     const cancelBtn = document.getElementById('cancel-profile-btn');
     const saveBtn = document.getElementById('save-profile-btn');
+    const importBtn = document.getElementById('import-profile-btn');
+    const lionImportInput = document.getElementById('lion-import-input');
     const loaderSelect = document.getElementById('profile-loader');
     const loaderWarning = document.getElementById('loader-warning');
+
+    if (importBtn) {
+        importBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            openLionImportDialog();
+        });
+    }
+
+    if (lionImportInput) {
+        lionImportInput.addEventListener('change', handleLionImportInputChange);
+    }
 
     // Hilfsfunktion: Warnung nur für Quilt 0.26.1.x anzeigen
     function checkQuilt261Warning() {
@@ -5501,6 +6300,7 @@ async function createProfile() {
 
     try {
         debugLog('Creating profile: ' + name, 'info');
+        const knownProfileIds = new Set(profiles.map(p => p.id));
         const profileList = await invoke('create_profile', {
             name,
             minecraftVersion: mcVersion,
@@ -5511,9 +6311,31 @@ async function createProfile() {
         profiles = profileList.profiles || [];
         renderProfiles();
 
+        const createdProfile = profiles.find(p => !knownProfileIds.has(p.id)) ||
+            profiles.find(p => p.name === name && p.minecraft_version === mcVersion) ||
+            null;
+
+        setSessionWidgetState({
+            profileId: createdProfile ? createdProfile.id : null,
+            profileName: createdProfile ? createdProfile.name : name,
+            phase: 'queued',
+            status: 'Profil erstellt - starte Download...',
+            percent: null,
+            canStop: false
+        });
+        animateSessionFlyIn(createdProfile ? createdProfile.name : name);
+
         const modal = document.getElementById('create-profile-modal');
         if (modal) modal.classList.remove('active');
         nameInput.value = '';
+
+        if (createdProfile && createdProfile.id) {
+            try {
+                await prepareProfileDownloadFlow(createdProfile.id, createdProfile.name);
+            } catch (prepareError) {
+                showToast('Profil erstellt, aber Download fehlgeschlagen: ' + prepareError, 'error', 5000);
+            }
+        }
 
         debugLog('Profile created successfully', 'success');
     } catch (error) {
@@ -5577,6 +6399,8 @@ function buildBrowserCacheKey(contentType, query, page) {
         loader: selectedFilters.loader || '',
         sort: selectedFilters.sort || '',
         categories: [...(selectedFilters.categories || [])].sort(),
+        hideInstalled: !!selectedFilters.hideInstalled,
+        effectiveLimit: getEffectiveLimit(),
         profileId: currentProfile ? currentProfile.id : null
     });
 }
@@ -5705,6 +6529,9 @@ function setupSearch() {
     if (hideInstalledFilter) {
         hideInstalledFilter.addEventListener('change', (e) => {
             selectedFilters.hideInstalled = e.target.checked;
+            currentModPage = 0;
+            // Alte Page-Caches verwerfen, damit Overfetch + Pagination konsistent bleibt.
+            browserResultsCache.clear();
             triggerContentSearch();
         });
     }
@@ -9072,7 +9899,6 @@ function backFromModDetails() {
     currentModDetails = null;
 }
 
-// Legacy-Funktion für Rückwärtskompatibilität
 function backToModBrowser() {
     backFromModDetails();
 }

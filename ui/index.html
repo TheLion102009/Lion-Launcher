@@ -46,6 +46,20 @@
 
         <!-- Main Content -->
         <div class="main-content">
+            <div id="session-widget" class="session-widget" aria-live="polite">
+                <div class="session-widget-main">
+                    <div id="session-indicator" class="session-indicator idle">
+                        <span id="session-indicator-label"></span>
+                    </div>
+                    <button id="session-stop-btn" class="session-stop-btn" type="button" title="Stop active profile">
+                        <i class="bi bi-stop-fill"></i>
+                    </button>
+                    <div class="session-widget-meta">
+                        <div id="session-profile-name" class="session-profile-name">No Session Aktiv</div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Profiles Page -->
             <div id="page-profiles" class="page">
                 <div class="header">
@@ -438,7 +452,10 @@
 
     <!-- Create Profile Modal -->
     <div id="create-profile-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="position: relative;">
+            <button class="btn btn-secondary" id="import-profile-btn" style="position: absolute; top: 16px; right: 16px; padding: 8px 12px; font-size: 12px;">
+                Import
+            </button>
             <div class="modal-header" data-i18n="create_profile_title">Create New Profile</div>
             <div class="form-group">
                 <label data-i18n="profile_name_label">Profile Name</label>
@@ -475,6 +492,8 @@
             </div>
         </div>
     </div>
+
+    <input type="file" id="lion-import-input" accept=".lion,application/json" style="display: none;">
 
     <script src="i18n.js"></script>
     <script src="app.js"></script>

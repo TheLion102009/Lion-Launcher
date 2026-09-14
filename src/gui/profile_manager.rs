@@ -1,8 +1,12 @@
-use crate::core::profiles::ProfileManager;
+﻿use crate::core::profiles::ProfileManager;
 use crate::types::profile::{Profile, ProfileList};
 use crate::types::version::ModLoader;
+use base64::{engine::general_purpose, Engine as _};
 use std::collections::HashMap;
+use std::io::{Cursor, Read, Write};
+use std::path::Path;
 use std::time::SystemTime;
+use walkdir::WalkDir;
 
 #[tauri::command]
 pub async fn get_profiles() -> Result<ProfileList, String> {
@@ -139,7 +143,7 @@ pub async fn launch_profile(
                 .await
                 .ok();
 
-            // Merge mit existierenden Profil-Settings (behält version etc.)
+            // Merge mit existierenden Profil-Settings (beh├ñlt version etc.)
             let final_content = if profile_options.exists() {
                 if let Ok(existing) = tokio::fs::read_to_string(&profile_options).await {
                     merge_for_profile(&existing, &combined)
@@ -155,7 +159,7 @@ pub async fn launch_profile(
                 .ok();
             tracing::info!("Synced combined settings to profile before launch");
 
-            // Speichere auch in shared_options.txt für Referenz
+            // Speichere auch in shared_options.txt f├╝r Referenz
             let shared_file = crate::config::defaults::shared_settings_file();
             if let Some(parent) = shared_file.parent() {
                 tokio::fs::create_dir_all(parent).await.ok();
@@ -194,7 +198,7 @@ pub async fn launch_profile(
         crate::gui::auth::get_active_access_token_refreshed()
             .await
             .unwrap_or_else(|| {
-                // Fallback für Offline-Accounts
+                // Fallback f├╝r Offline-Accounts
                 let uuid = uuid::Uuid::new_v4().to_string().replace("-", "");
                 (uuid, username.clone(), "0".to_string())
             });
@@ -206,30 +210,7 @@ pub async fn launch_profile(
         access_token != "0"
     );
 
-    // ── Fortschritts-Kanal aufbauen ───────────────────────────────────────────
-    // Erstelle einen synchronen Kanal (bounded=8), den MinecraftLauncher
-    // für Fortschrittsmeldungen nutzen kann ohne AppHandle zu kennen.
-    // Ein Hintergrund-Task leitet die Meldungen per Tauri-Event ans Frontend.
-    let (progress_tx, progress_rx) = std::sync::mpsc::sync_channel::<(String, u8)>(8);
-    crate::core::minecraft::set_launch_progress_sender(progress_tx);
-
-    let app_for_progress = app_handle.clone();
-    std::thread::spawn(move || {
-        use tauri::Emitter;
-        while let Ok((status, percent)) = progress_rx.recv() {
-            tracing::debug!("Launch progress {}%: {}", percent, status);
-            app_for_progress
-                .emit(
-                    "launch-progress",
-                    serde_json::json!({
-                        "status": status,
-                        "percent": percent
-                    }),
-                )
-                .ok();
-        }
-    });
-    // ─────────────────────────────────────────────────────────────────────────
+    let _progress_guard = setup_launch_progress_bridge(&app_handle);
 
     let launcher = crate::core::minecraft::MinecraftLauncher::new().map_err(|e| e.to_string())?;
     let result = launcher
@@ -246,16 +227,279 @@ pub async fn launch_profile(
         .await
         .map_err(|e| e.to_string());
 
-    // Sender entfernen damit der Empfänger-Thread sauber beendet
+    // Sender entfernen damit der Empf├ñnger-Thread sauber beendet
     crate::core::minecraft::clear_launch_progress_sender();
 
     result.map(|_| ())
 }
 
+#[tauri::command]
+pub async fn prepare_profile_download(
+    app_handle: tauri::AppHandle,
+    profile_id: String,
+) -> Result<(), String> {
+    let manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = manager.load_profiles().await.map_err(|e| e.to_string())?;
+
+    let profile_to_prepare = profiles
+        .get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?
+        .clone();
+
+    let _progress_guard = setup_launch_progress_bridge(&app_handle);
+
+    let launcher = crate::core::minecraft::MinecraftLauncher::new().map_err(|e| e.to_string())?;
+    launcher
+        .prepare_profile(&profile_to_prepare)
+        .await
+        .map_err(|e| e.to_string())
+        .map(|_| ())
+}
+
+#[tauri::command]
+pub async fn export_profile_share_data(
+    profile_id: String,
+    include_world_data: bool,
+    include_logs_data: bool,
+    include_settings_data: bool,
+) -> Result<serde_json::Value, String> {
+    let manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profile = profiles
+        .get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    let mut payload = serde_json::Map::new();
+
+    if include_settings_data {
+        let options_path = profile.game_dir.join("options.txt");
+        if let Ok(options_txt) = tokio::fs::read_to_string(&options_path).await {
+            payload.insert(
+                "settings".to_string(),
+                serde_json::json!({ "options_txt": options_txt }),
+            );
+        }
+    }
+
+    if include_world_data {
+        let saves_dir = profile.game_dir.join("saves");
+        if let Some(zip_b64) = zip_directory_to_base64(&saves_dir).map_err(|e| e.to_string())? {
+            payload.insert(
+                "worlds_archive_base64".to_string(),
+                serde_json::Value::String(zip_b64),
+            );
+        }
+    }
+
+    if include_logs_data {
+        let logs_dir = profile.game_dir.join("logs");
+        if let Some(zip_b64) = zip_directory_to_base64(&logs_dir).map_err(|e| e.to_string())? {
+            payload.insert(
+                "logs_archive_base64".to_string(),
+                serde_json::Value::String(zip_b64),
+            );
+        }
+    }
+
+    Ok(serde_json::Value::Object(payload))
+}
+
+#[tauri::command]
+pub async fn import_profile_share_data(
+    profile_id: String,
+    data: serde_json::Value,
+    import_world_data: bool,
+    import_logs_data: bool,
+    import_settings_data: bool,
+) -> Result<(), String> {
+    let manager = ProfileManager::new().map_err(|e| e.to_string())?;
+    let profiles = manager.load_profiles().await.map_err(|e| e.to_string())?;
+    let profile = profiles
+        .get_profile(&profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+
+    if import_settings_data {
+        if let Some(options_txt) = data
+            .get("settings")
+            .and_then(|s| s.get("options_txt"))
+            .and_then(|v| v.as_str())
+        {
+            tokio::fs::create_dir_all(&profile.game_dir)
+                .await
+                .map_err(|e| e.to_string())?;
+            tokio::fs::write(profile.game_dir.join("options.txt"), options_txt)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    if import_world_data {
+        if let Some(b64) = data.get("worlds_archive_base64").and_then(|v| v.as_str()) {
+            extract_base64_zip_to_dir(b64, &profile.game_dir.join("saves"))
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    if import_logs_data {
+        if let Some(b64) = data.get("logs_archive_base64").and_then(|v| v.as_str()) {
+            extract_base64_zip_to_dir(b64, &profile.game_dir.join("logs"))
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn save_lion_file_with_dialog(
+    default_file_name: String,
+    content: String,
+) -> Result<Option<String>, String> {
+    let suggested_name = if default_file_name.trim().is_empty() {
+        "profile.lion".to_string()
+    } else {
+        default_file_name
+    };
+
+    let save_path = rfd::FileDialog::new()
+        .add_filter("Lion Profile", &["lion"])
+        .set_file_name(&suggested_name)
+        .save_file();
+
+    match save_path {
+        Some(path) => {
+            tokio::fs::write(&path, content)
+                .await
+                .map_err(|e| format!("Failed to write .lion file: {}", e))?;
+            Ok(Some(path.to_string_lossy().to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+struct LaunchProgressGuard;
+
+impl Drop for LaunchProgressGuard {
+    fn drop(&mut self) {
+        crate::core::minecraft::clear_launch_progress_sender();
+    }
+}
+
+fn setup_launch_progress_bridge(app_handle: &tauri::AppHandle) -> LaunchProgressGuard {
+    let (progress_tx, progress_rx) = std::sync::mpsc::sync_channel::<(String, u8)>(8);
+    crate::core::minecraft::set_launch_progress_sender(progress_tx);
+
+    let app_for_progress = app_handle.clone();
+    std::thread::spawn(move || {
+        use tauri::Emitter;
+        while let Ok((status, percent)) = progress_rx.recv() {
+            app_for_progress
+                .emit(
+                    "launch-progress",
+                    serde_json::json!({
+                        "status": status,
+                        "percent": percent
+                    }),
+                )
+                .ok();
+        }
+    });
+
+    LaunchProgressGuard
+}
+
+fn zip_directory_to_base64(source_dir: &Path) -> anyhow::Result<Option<String>> {
+    if !source_dir.exists() || !source_dir.is_dir() {
+        return Ok(None);
+    }
+
+    let mut has_entries = false;
+    for entry in std::fs::read_dir(source_dir)? {
+        if entry.is_ok() {
+            has_entries = true;
+            break;
+        }
+    }
+    if !has_entries {
+        return Ok(None);
+    }
+
+    let mut cursor = Cursor::new(Vec::<u8>::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        let options = {
+            let opts = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            #[cfg(unix)]
+            let opts = opts.unix_permissions(0o755);
+            opts
+        };
+
+        for entry in WalkDir::new(source_dir).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            let rel = match path.strip_prefix(source_dir) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            if rel.as_os_str().is_empty() {
+                continue;
+            }
+
+            let rel_name = rel.to_string_lossy().replace('\\', "/");
+            if path.is_dir() {
+                zip.add_directory(rel_name, options)?;
+            } else if path.is_file() {
+                zip.start_file(rel_name, options)?;
+                let mut f = std::fs::File::open(path)?;
+                std::io::copy(&mut f, &mut zip)?;
+            }
+        }
+
+        zip.finish()?;
+    }
+
+    let bytes = cursor.into_inner();
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(general_purpose::STANDARD.encode(bytes)))
+}
+
+fn extract_base64_zip_to_dir(base64_data: &str, target_dir: &Path) -> anyhow::Result<()> {
+    let bytes = general_purpose::STANDARD.decode(base64_data)?;
+    let cursor = Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor)?;
+
+    std::fs::create_dir_all(target_dir)?;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let Some(safe_rel_path) = file.enclosed_name().map(|p| p.to_owned()) else {
+            continue;
+        };
+        let out_path = target_dir.join(safe_rel_path);
+
+        if file.is_dir() {
+            std::fs::create_dir_all(&out_path)?;
+        } else {
+            if let Some(parent) = out_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut out_file = std::fs::File::create(&out_path)?;
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer)?;
+            out_file.write_all(&buffer)?;
+        }
+    }
+
+    Ok(())
+}
+
 // ==================== SETTINGS SYNC FUNKTIONEN ====================
 
 /// Sammelt alle options.txt von allen Profilen mit Sync und merged sie.
-/// Die neueste Änderung hat Vorrang.
+/// Die neueste ├änderung hat Vorrang.
 async fn create_combined_options(profiles: &[Profile]) -> String {
     // Sammle alle options.txt mit Zeitstempel
     let mut all_options: Vec<(SystemTime, std::path::PathBuf)> = Vec::new();
@@ -282,7 +526,7 @@ async fn create_combined_options(profiles: &[Profile]) -> String {
         return String::new();
     }
 
-    // Sortiere nach Zeit (älteste zuerst, damit neueste überschreibt)
+    // Sortiere nach Zeit (├ñlteste zuerst, damit neueste ├╝berschreibt)
     all_options.sort_by_key(|(time, _)| *time);
 
     tracing::info!("Found {} options.txt files for sync", all_options.len());
@@ -320,11 +564,11 @@ async fn create_combined_options(profiles: &[Profile]) -> String {
     lines.join("\n")
 }
 
-/// Merged combined options in ein Profil, behält aber profil-spezifische Keys
+/// Merged combined options in ein Profil, beh├ñlt aber profil-spezifische Keys
 fn merge_for_profile(existing: &str, combined: &str) -> String {
     let mut values: HashMap<String, String> = HashMap::new();
 
-    // Blacklist: Diese Keys werden nicht überschrieben (version-spezifisch)
+    // Blacklist: Diese Keys werden nicht ├╝berschrieben (version-spezifisch)
     let blacklist = ["version"];
 
     // Lese existierende Werte
@@ -338,7 +582,7 @@ fn merge_for_profile(existing: &str, combined: &str) -> String {
         }
     }
 
-    // Übernehme alle combined Werte
+    // ├£bernehme alle combined Werte
     for (key, value) in parse_options(combined) {
         values.insert(key, value);
     }
@@ -366,7 +610,7 @@ fn parse_options(content: &str) -> Vec<(String, String)> {
     values
 }
 
-/// Findet die neueste Version einer Datei über alle Profile
+/// Findet die neueste Version einer Datei ├╝ber alle Profile
 async fn find_latest_file(filename: &str, profiles: &[Profile]) -> Option<std::path::PathBuf> {
     let mut latest_time = SystemTime::UNIX_EPOCH;
     let mut latest_path: Option<std::path::PathBuf> = None;
@@ -433,7 +677,7 @@ async fn sync_resourcepacks(profiles: &[Profile], target_game_dir: &std::path::P
                 None => continue,
             };
 
-            // Hole Änderungszeit
+            // Hole ├änderungszeit
             let mut time = SystemTime::UNIX_EPOCH;
             if let Ok(metadata) = std::fs::metadata(&path) {
                 if let Ok(modified) = metadata.modified() {
@@ -457,7 +701,7 @@ async fn sync_resourcepacks(profiles: &[Profile], target_game_dir: &std::path::P
     for (filename, (_, source_path)) in all_packs {
         let target_path = target_resourcepacks.join(&filename);
 
-        // Überspringe wenn bereits vorhanden und gleich oder neuer
+        // ├£berspringe wenn bereits vorhanden und gleich oder neuer
         if target_path.exists() {
             if let (Ok(source_meta), Ok(target_meta)) = (
                 std::fs::metadata(&source_path),

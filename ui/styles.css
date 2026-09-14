@@ -9,6 +9,7 @@
     --gold-hover: #FFC700;
     --text-primary: #ffffff;
     --text-secondary: #b0b0b0;
+    --session-progress: 0;
 }
 
 /* Light Mode */
@@ -182,6 +183,160 @@ body {
     flex-direction: column;
     overflow: hidden;
     position: relative;
+}
+
+.session-widget {
+    position: absolute;
+    top: 30px;
+    right: 16px;
+    min-width: 140px;
+    max-width: 200px;
+    padding: 5px 7px;
+    background: linear-gradient(160deg, rgba(28, 28, 28, 0.96), rgba(40, 40, 40, 0.9));
+    border: 1px solid transparent;
+    border-radius: 12px;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.36);
+    backdrop-filter: blur(8px);
+    z-index: 300;
+    overflow: hidden;
+}
+
+.session-widget::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 1px solid var(--gold);
+    border-radius: 12px;
+    opacity: 0.28;
+    pointer-events: none;
+}
+
+.session-widget::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 2px;
+    bottom: 2px;
+    width: 1px;
+    background: var(--gold);
+    opacity: 0.3;
+}
+
+.session-widget-main {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-left: 5px;
+}
+
+.session-indicator {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.session-indicator.idle {
+    border: 2px solid rgba(255, 255, 255, 0.24);
+    color: var(--text-secondary);
+}
+
+.session-indicator.spin {
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-top-color: var(--gold);
+    border-right-color: var(--gold);
+    animation: sessionSpin 0.9s linear infinite;
+    color: transparent;
+}
+
+.session-indicator.progress {
+    background: conic-gradient(var(--gold) calc(var(--session-progress, 0) * 1%), rgba(255, 255, 255, 0.18) 0);
+    color: var(--text-primary);
+}
+
+.session-indicator.running {
+    background: #32b56c;
+    border: 2px solid rgba(60, 205, 123, 0.95);
+    color: #0f2e1d;
+}
+
+.session-indicator.queued {
+    border: 2px dashed var(--gold);
+    color: var(--gold);
+}
+
+.session-profile-name {
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 11px;
+    max-width: 132px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.session-widget-meta {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+}
+
+.session-stop-btn {
+    width: 16px;
+    height: 16px;
+    border: none;
+    border-radius: 999px;
+    background: #c0392b;
+    color: #fff;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.18s ease, opacity 0.18s ease;
+    flex-shrink: 0;
+    font-size: 8px;
+}
+
+.session-stop-btn:hover {
+    transform: scale(1.08);
+}
+
+.session-stop-btn.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.session-widget.fly-in-highlight {
+    animation: sessionPulse 0.7s ease;
+}
+
+.session-fly-chip {
+    position: fixed;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: var(--gold);
+    color: var(--bg-dark);
+    font-size: 12px;
+    font-weight: 700;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.34);
+    z-index: 2000;
+    pointer-events: none;
+}
+
+@keyframes sessionSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+@keyframes sessionPulse {
+    0% { transform: translateY(-4px); box-shadow: 0 0 0 rgba(255, 215, 0, 0); }
+    45% { transform: translateY(0); box-shadow: 0 0 0 1px var(--gold), 0 0 18px var(--gold); }
+    100% { transform: translateY(0); box-shadow: 0 10px 26px rgba(0, 0, 0, 0.36); }
 }
 
 .header {
