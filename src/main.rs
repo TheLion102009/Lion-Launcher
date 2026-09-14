@@ -64,6 +64,10 @@ fn main() {
             gui::delete_profile,
             gui::update_profile,
             gui::launch_profile,
+            gui::prepare_profile_download,
+            gui::export_profile_share_data,
+            gui::import_profile_share_data,
+            gui::save_lion_file_with_dialog,
             // Mods - Browser
             gui::get_modrinth_categories,
             gui::search_mods,

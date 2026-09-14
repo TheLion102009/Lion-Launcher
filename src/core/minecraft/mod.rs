@@ -595,6 +595,140 @@ impl MinecraftLauncher {
         Ok(take_launch_warnings())
     }
 
+    /// Lädt alle benötigten Dateien für ein Profil herunter, startet Minecraft aber NICHT.
+    pub async fn prepare_profile(&self, profile: &Profile) -> Result<Vec<String>> {
+        take_launch_warnings();
+
+        let version = &profile.minecraft_version;
+        let game_dir = Path::new(&profile.game_dir);
+        let loader = &profile.loader.loader;
+
+        tracing::info!(
+            "Preparing download-only profile {} with {:?}",
+            version,
+            loader
+        );
+        send_launch_progress("Lade Version-Info...", 5);
+
+        let version_info = self.get_version_info(version).await?;
+
+        let versions_dir = defaults::versions_dir();
+        let libraries_dir = defaults::libraries_dir();
+        let assets_dir = defaults::assets_dir();
+        let natives_dir = game_dir.join("natives");
+
+        tokio::fs::create_dir_all(&versions_dir).await?;
+        tokio::fs::create_dir_all(&libraries_dir).await?;
+        tokio::fs::create_dir_all(&assets_dir).await?;
+        tokio::fs::create_dir_all(&natives_dir).await?;
+        tokio::fs::create_dir_all(game_dir).await?;
+
+        // Profil-Ordner früh anlegen, damit der Nutzer direkt eine vollständige Struktur hat.
+        tokio::fs::create_dir_all(game_dir.join("mods")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("config")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("logs")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("saves")).await.ok();
+        tokio::fs::create_dir_all(game_dir.join("resourcepacks"))
+            .await
+            .ok();
+        tokio::fs::create_dir_all(game_dir.join("shaderpacks"))
+            .await
+            .ok();
+
+        let client_jar = versions_dir.join(format!("{}/{}.jar", version, version));
+        if !client_jar.exists() {
+            send_launch_progress("Lade Minecraft Client-JAR...", 15);
+            tokio::fs::create_dir_all(client_jar.parent().unwrap()).await?;
+            self.download_manager
+                .download_with_hash(
+                    &version_info.downloads.client.url,
+                    &client_jar,
+                    Some(&version_info.downloads.client.sha1),
+                )
+                .await?;
+        }
+
+        send_launch_progress("Lade Libraries...", 35);
+        let vanilla_classpath = self
+            .download_libraries(&version_info, &libraries_dir, &natives_dir)
+            .await?;
+
+        send_launch_progress(
+            "Lade Assets (Sounds, Texturen)... Das kann beim ersten Mal 1-2 Min. dauern.",
+            55,
+        );
+        self.download_assets(&version_info.assetIndex, &assets_dir)
+            .await?;
+
+        match loader {
+            crate::types::version::ModLoader::Fabric => {
+                send_launch_progress("Installiere Fabric Loader...", 75);
+                let _ = self.install_fabric(version, &libraries_dir).await?;
+            }
+            crate::types::version::ModLoader::Quilt => {
+                send_launch_progress("Installiere Quilt Loader...", 75);
+                let _ = self.install_quilt(version, &libraries_dir).await?;
+            }
+            crate::types::version::ModLoader::Forge => {
+                send_launch_progress("Installiere Forge...", 75);
+                let loader_version =
+                    if profile.loader.version == "latest" || profile.loader.version.is_empty() {
+                        self.resolve_latest_forge_version(version).await?
+                    } else {
+                        profile.loader.version.clone()
+                    };
+                let required_java = version_info
+                    .javaVersion
+                    .as_ref()
+                    .map(|j| j.majorVersion)
+                    .unwrap_or(8);
+                let max_java: Option<u32> = if required_java <= 8 { Some(8) } else { None };
+                let java_path = self.ensure_java_installed(required_java, max_java).await?;
+
+                let forge_installer = forge::ForgeInstaller::new(self.download_manager.clone());
+                let _ = forge_installer
+                    .install_forge_complete(
+                        version,
+                        &loader_version,
+                        &libraries_dir,
+                        &client_jar,
+                        Some(&java_path),
+                    )
+                    .await?;
+            }
+            crate::types::version::ModLoader::NeoForge => {
+                send_launch_progress("Installiere NeoForge...", 75);
+                let required_java = version_info
+                    .javaVersion
+                    .as_ref()
+                    .map(|j| j.majorVersion)
+                    .unwrap_or(21)
+                    .max(21);
+                let java_path = self.ensure_java_installed(required_java, None).await?;
+                let loader_version = if profile.loader.version.is_empty() {
+                    "latest"
+                } else {
+                    &profile.loader.version
+                };
+                let _ = neoforge::install_neoforge(
+                    version,
+                    loader_version,
+                    &libraries_dir,
+                    &versions_dir,
+                    &java_path,
+                    &vanilla_classpath,
+                )
+                .await?;
+            }
+            crate::types::version::ModLoader::Vanilla => {
+                // Keine zusätzlichen Loader-Dateien notwendig.
+            }
+        }
+
+        send_launch_progress("Download abgeschlossen - bereit zum Start.", 100);
+        Ok(take_launch_warnings())
+    }
+
     /// Launch für NeoForge mit der neuen neoforge.rs Implementation
     #[allow(clippy::too_many_arguments)]
     async fn launch_neoforge_new(
