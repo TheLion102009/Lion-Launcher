@@ -1,4 +1,4 @@
-// Icon-Fehler-Handler – ausgelagert um Anführungszeichen-Probleme in HTML-Attributen zu vermeiden
+// Icon error handler – extracted to avoid quote issues in HTML attributes
 function handleIconError(el) {
     el.onerror = null;
     el.parentElement.innerHTML = '<span style="font-size: 22px;"><i class="bi bi-box"></i></span>';
@@ -20,7 +20,7 @@ function handleGalleryImageError(el) {
     wrapper.innerHTML = `
         <div style="height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--bg-dark); color: var(--text-secondary);">
             <i class="bi bi-image" style="font-size: 28px;"></i>
-            <span style="font-size: 12px;">Bild konnte nicht geladen werden</span>
+            <span style="font-size: 12px;">Image could not be loaded</span>
         </div>
     `;
 }
@@ -32,7 +32,7 @@ function handleFullscreenImageError(el) {
     container.innerHTML = `
         <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text-secondary);padding:40px;text-align:center;">
             <i class="bi bi-image" style="font-size:42px;margin-bottom:10px;"></i>
-            <span>Das Bild konnte nicht geladen werden.</span>
+            <span>The image could not be loaded.</span>
         </div>
     `;
 }
@@ -48,8 +48,8 @@ function normalizeMediaUrl(url) {
 }
 
 /**
- * Escaped HTML-Sonderzeichen für den Einsatz in HTML-Attributen.
- * Verhindert den ';">' Bug wenn Mod-Namen Anführungszeichen enthalten.
+ * Escapes special HTML characters for use in HTML attributes.
+ * Prevents the ';">' bug when mod names contain quotes.
  */
 function escapeAttr(str) {
     if (!str) return '';
@@ -78,7 +78,7 @@ async function resolveEmbeddedLogoUrl() {
             LION_LOGO_URL = dataUrl;
         }
     } catch (_e) {
-        // Fallback bleibt die lokale Asset-URL
+        // Fallback remains the local asset URL
     }
 }
 
@@ -93,15 +93,15 @@ function initSidebarLogo() {
     };
 }
 
-// Debug-Log-Funktion für visuelles Feedback
+// Debug log function for visual feedback
 function debugLog(message, type = 'info') {
     const time = new Date().toLocaleTimeString();
-    console.log(`[${time}] ${message}`);
+    console.log(`[${time}] [${type}] ${message}`);
 }
 
-// Rechtsklick-Kontextmenü deaktivieren (außer bei speziellen Elementen)
+// Disable right-click context menu (except for special elements)
 document.addEventListener('contextmenu', (e) => {
-    // Erlaube Rechtsklick nur bei Elementen mit data-context-menu Attribut
+    // Allow right-click only on elements with the data-context-menu attribute
     if (!e.target.closest('[data-context-menu]')) {
         e.preventDefault();
     }
@@ -172,7 +172,7 @@ const DEFAULT_SERVER_JAVA_ARGS = [
 let latestStableJavaMajor = 21;
 let javaRuntimeOptionsCache = [];
 
-// Berechne effektives Limit: Bei "Hide Installed" mehr laden, um Seite zu füllen
+// Calculate the effective limit: when "Hide Installed" is on, load more to fill the page
 function getEffectiveLimit() {
     return selectedFilters.hideInstalled ? MODS_PER_PAGE * 5 : MODS_PER_PAGE;
 }
@@ -182,7 +182,7 @@ let currentTheme = 'dark';
 let currentAccentColor = 'gold';
 
 // ── Running Instances State ──────────────────────────────────────────────────
-/** Set mit allen aktuell laufenden Profil-IDs */
+/** Set of all currently running profile IDs */
 const runningProfiles = new Set();
 
 const sessionWidgetState = {
@@ -219,7 +219,7 @@ function syncSessionWidgetWithRunningProfiles() {
 
         setSessionWidgetState({
             profileId: null,
-            profileName: 'No Session Aktiv',
+            profileName: 'No Session Active',
             phase: 'idle',
             status: 'Idle',
             percent: null,
@@ -322,14 +322,14 @@ function animateSessionFlyIn(profileName) {
     ).onfinish = () => chip.remove();
 }
 
-/** Live-Log Interval Handle */
+/** Live log interval handle */
 let liveLogInterval = null;
-/** Welches Profil gerade im Live-Log angezeigt wird */
+/** Which profile is currently shown in the live log */
 let liveLogProfileId = null;
-/** Letzter bekannter Live-Log-Inhalt (für Delta-Rendering) */
+/** Last known live log content (for delta rendering) */
 let liveLogLastSnapshot = '';
 
-/** Lädt laufende Instanzen vom Backend, erkennt gestoppte und aktualisiert Buttons + Live-Log */
+/** Loads running instances from the backend, detects stopped ones, and updates buttons + live log */
 async function syncRunningProfiles() {
     try {
         const ids = await invoke('get_running_profiles');
@@ -337,7 +337,7 @@ async function syncRunningProfiles() {
 
         for (const id of runningProfiles) {
             if (!newSet.has(id)) {
-                // Diese Instanz ist jetzt gestoppt
+                // This instance has now stopped
                 runningProfiles.delete(id);
                 updateAllPlayStopButtons(id);
                 if (liveLogProfileId === id) {
@@ -346,7 +346,7 @@ async function syncRunningProfiles() {
                 }
             }
         }
-        // Neue laufende Profile hinzufügen
+        // Add newly running profiles
         for (const id of newSet) {
             if (!runningProfiles.has(id)) {
                 runningProfiles.add(id);
@@ -358,12 +358,12 @@ async function syncRunningProfiles() {
     syncSessionWidgetWithRunningProfiles();
 }
 
-/** Startet das periodische Polling (alle 3s) um Prozess-Exits zuverlässig zu erkennen */
+/** Starts periodic polling (every 3s) to reliably detect process exits */
 function startInstancePolling() {
     setInterval(syncRunningProfiles, 3000);
 }
 
-/** Aktualisiert ALLE Play/Stop-Buttons im DOM für ein bestimmtes Profil (oder alle) */
+/** Updates ALL Play/Stop buttons in the DOM for a specific profile (or all) */
 function updateAllPlayStopButtons(profileId) {
     document.querySelectorAll('[data-play-btn]').forEach(btn => {
         const id = btn.dataset.playBtn;
@@ -383,7 +383,7 @@ function updateAllPlayStopButtons(profileId) {
     });
 }
 
-/** Stoppt eine laufende Minecraft-Instanz */
+/** Stops a running Minecraft instance */
 async function stopProfile(profileId) {
     try {
         await invoke('stop_profile', { profileId });
@@ -394,9 +394,9 @@ async function stopProfile(profileId) {
             if (el) refreshLiveLog(profileId, el);
         }
         syncSessionWidgetWithRunningProfiles();
-        showToast('Instanz gestoppt', 'info', 2000);
+        showToast('Instance stopped', 'info', 2000);
     } catch (e) {
-        showToast('Fehler beim Stoppen: ' + e, 'error', 3000);
+        showToast('Error stopping: ' + e, 'error', 3000);
     }
 }
 // ────────────────────────────────────────────────────────────────────────────
@@ -418,7 +418,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         grid.innerHTML = `
             <div style="grid-column: 1 / -1; text-align: center; padding: 40px;">
                 <div style="font-size: 36px; margin-bottom: 15px;"><i class="bi bi-box2-heart"></i></div>
-                <p style="color: var(--gold);">Lion Launcher wird initialisiert...</p>
+                <p style="color: var(--gold);">Lion Launcher is initializing...</p>
             </div>
         `;
     }
@@ -450,7 +450,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (currentProfile) updateProfileScrollableBoxes();
         });
 
-        // Lade Environment-Icons
+        // Load environment icons
         loadEnvironmentIcons();
 
         debugLog('Lion Launcher ready!', 'success');
@@ -460,7 +460,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             grid.innerHTML = `
                 <div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-secondary);">
                     <div style="font-size: 36px; margin-bottom: 15px; color: #f44336;"><i class="bi bi-x-circle-fill"></i></div>
-                    <p>Fehler beim Starten: ${error}</p>
+                    <p>Error starting: ${error}</p>
                 </div>
             `;
         }
@@ -499,7 +499,7 @@ function showToast(message, type = 'info', duration = 3000) {
 
     document.body.appendChild(toast);
 
-    // Füge Animation CSS hinzu wenn noch nicht vorhanden
+    // Add animation CSS if not already present
     if (!document.getElementById('toast-animations')) {
         const style = document.createElement('style');
         style.id = 'toast-animations';
@@ -528,7 +528,7 @@ function showToast(message, type = 'info', duration = 3000) {
         document.head.appendChild(style);
     }
 
-    // Nach duration verschwinden lassen
+    // Disappear after duration
     setTimeout(() => {
         toast.style.animation = 'slideOut 0.3s ease-in';
         setTimeout(() => {
@@ -566,7 +566,7 @@ function setupNavigation() {
 }
 
 function switchPage(page) {
-    // Stoppe Mods-Watcher wenn Seite gewechselt wird
+    // Stop mods watcher when the page changes
     if (typeof stopModsWatcher === 'function') {
         stopModsWatcher();
     }
@@ -585,44 +585,54 @@ function switchPage(page) {
 
     currentPage = page;
 
-    // Wenn zur Profiles-Seite gewechselt wird, lade Übersicht (außer wenn skipLoadProfiles gesetzt ist)
+    // When switching to the profiles page, load the overview (unless skipLoadProfiles is set)
     if (page === 'profiles') {
         if (!skipLoadProfiles) {
-            loadProfiles(); // Lädt die Profil-Übersicht
+            loadProfiles(); // Loads the profile overview
         } else {
-            skipLoadProfiles = false; // Reset für nächstes Mal
+            skipLoadProfiles = false; // Reset for next time
         }
     }
 
-    // Wenn zum Content Browser gewechselt wird
-    if (page === 'mods') {
+    // Server content browser context: keep it only for navigation that belongs to it
+    if (serverBrowserContext && page !== 'mod-details' && !(page === 'mods' && serverBrowserNavigation)) {
+        serverBrowserContext = null;
+        restoreDefaultBrowserMode();
+    }
+
+    // When switching to the content browser
+    if (page === 'mods' && serverBrowserNavigation) {
+        // Opened from a local server - filters are configured by applyServerBrowserMode()
+        currentProfile = null;
+        openedFromProfile = false;
+    } else if (page === 'mods') {
         if (!openedFromProfile) {
-            // Von Hauptmenü geöffnet - lösche currentProfile und reset Filter
+            // Opened from main menu - clear currentProfile and reset filters
             currentProfile = null;
-            // Reset Filter auf Standard ("All Loaders")
+            // Reset filters to default ("All Loaders")
             setTimeout(() => {
                 resetFiltersToDefault();
             }, 100);
             debugLog('Content Browser opened from main menu - filters reset to default', 'info');
         } else {
-            // Von Profil geöffnet - currentProfile bleibt erhalten für Auto-Filter
+            // Opened from a profile - currentProfile is kept for auto-filter
             debugLog('Content Browser opened from profile - auto-filters will be applied', 'info');
         }
-        // Reset Flag für nächstes Mal
+        // Reset flag for next time
         openedFromProfile = false;
     }
 
-    // Zeige Back-Button im Mod-Browser wenn von einem Profil kommend
+    // Show back button in the mod browser when coming from a profile
     const backBtn = document.getElementById('back-to-profile-btn');
     if (backBtn) {
-        if (page === 'mods' && currentProfile) {
+        if (page === 'mods' && (currentProfile || serverBrowserContext)) {
             backBtn.style.display = 'block';
         } else {
             backBtn.style.display = 'none';
         }
     }
 
-    // Skin-Viewer initialisieren wenn Skins-Seite geöffnet wird
+    // Initialize skin viewer when the skins page is opened
     if (page === 'skins') {
         setTimeout(() => {
             initSkinViewer();
@@ -631,32 +641,32 @@ function switchPage(page) {
     }
 
 
-    // Zeige/Verstecke Modpacks Button je nach Kontext
+    // Show/hide modpacks button depending on context
     const modpacksBtn = document.querySelector('[data-content-type="modpacks"]');
     if (modpacksBtn) {
-        if (page === 'mods' && currentProfile) {
-            // Aus Profil geöffnet - verstecke Modpacks
+        if (page === 'mods' && (currentProfile || serverBrowserContext)) {
+            // Opened from a profile or server - hide modpacks
             modpacksBtn.style.display = 'none';
         } else if (page === 'mods') {
-            // Normal geöffnet - zeige Modpacks
+            // Opened normally - show modpacks
             modpacksBtn.style.display = '';
         }
     }
 
-    // Aktualisiere Cache wenn Mod-Browser geöffnet wird und rendere neu
+    // Update cache when the mod browser is opened and re-render
     if (page === 'mods') {
         if (!currentProfile) {
             debugLog('Warning: No profile selected when opening mod browser', 'warn');
         } else {
             debugLog('Opening mod browser for profile: ' + currentProfile.name, 'info');
 
-            // Setze Filter automatisch basierend auf Profil
+            // Set filters automatically based on the profile
             applyProfileFilters(currentProfile);
         }
 
-        // WICHTIG: Dieser Code wird NACH openContentBrowser/switchContentType ausgeführt!
-        // Daher sollte er NICHT den Content laden - das macht switchContentType bereits!
-        // Wir laden nur den installedModIds Cache.
+        // IMPORTANT: This code runs AFTER openContentBrowser/switchContentType!
+        // So it should NOT load the content - switchContentType already does that!
+        // We only load the installedModIds cache.
         loadInstalledModIds();
     }
 
@@ -665,13 +675,15 @@ function switchPage(page) {
     } else {
         clearServerHubIntervals();
     }
+
+    serverBrowserNavigation = false;
 }
 
-// Wendet die Filter basierend auf dem Profil an
+// Applies the filters based on the profile
 function applyProfileFilters(profile) {
     debugLog('Applying profile filters for: ' + profile.name + ', ContentType: ' + currentContentType, 'info');
 
-    // Setze Minecraft Version Filter (für alle Content Types)
+    // Set Minecraft version filter (for all content types)
     const versionFilter = document.getElementById('filter-version');
     if (versionFilter && profile.minecraft_version) {
         versionFilter.value = profile.minecraft_version;
@@ -679,30 +691,30 @@ function applyProfileFilters(profile) {
         debugLog('Set version filter to: ' + profile.minecraft_version, 'info');
     }
 
-    // Setze Mod Loader Filter NUR für Mods/Modpacks
+    // Set mod loader filter ONLY for mods/modpacks
     if (currentContentType === 'mods' || currentContentType === 'modpacks') {
         const loaderName = profile.loader.loader;
         if (loaderName && loaderName !== 'vanilla') {
-            // Setze das Loader-Dropdown
+            // Set the loader dropdown
             const loaderSelect = document.getElementById('filter-loader');
             if (loaderSelect) {
                 loaderSelect.value = loaderName;
                 debugLog('Set loader dropdown to: ' + loaderName, 'info');
             }
 
-            // Finde und aktiviere den Button für den Loader (falls Buttons existieren)
+            // Find and activate the button for the loader (if buttons exist)
             const loaderBtn = document.querySelector(`[data-loader="${loaderName}"]`);
             if (loaderBtn) {
-                // Entferne active von allen Loader-Buttons
+                // Remove active from all loader buttons
                 document.querySelectorAll('[data-loader]').forEach(b => b.classList.remove('active'));
-                // Setze den richtigen als active
+                // Set the correct one as active
                 loaderBtn.classList.add('active');
                 debugLog('Set loader button to: ' + loaderName, 'info');
             }
 
             selectedFilters.loader = loaderName;
         } else {
-            // Vanilla = kein Loader-Filter
+            // Vanilla = no loader filter
             const loaderSelect = document.getElementById('filter-loader');
             if (loaderSelect) {
                 loaderSelect.value = ''; // "All Loaders"
@@ -712,11 +724,11 @@ function applyProfileFilters(profile) {
         }
     }
 
-    // KEINE Suche triggern! loadPopularContent() wurde bereits von switchContentType() aufgerufen
+    // Do NOT trigger a search! loadPopularContent() was already called by switchContentType()
     debugLog('Filters applied, content already loaded by switchContentType()', 'info');
 }
 
-// Setzt alle Filter auf Standard zurück (für Content Browser vom Hauptmenü)
+// Resets all filters to default (for the content browser opened from the main menu)
 function resetFiltersToDefault() {
     debugLog('Resetting filters to default (All Loaders)', 'info');
 
@@ -743,14 +755,18 @@ function resetFiltersToDefault() {
 }
 
 function backToProfileFromModBrowser() {
+    if (serverBrowserContext) {
+        backToServerFromBrowser('content');
+        return;
+    }
     if (currentProfile && currentProfile.id) {
-        const profileId = currentProfile.id; // Speichere ID bevor currentProfile gelöscht wird
-        skipLoadProfiles = true; // Überspringe loadProfiles() um Flash zu vermeiden
+        const profileId = currentProfile.id; // Save the ID before currentProfile is cleared
+        skipLoadProfiles = true; // Skip loadProfiles() to avoid a flash
         switchPage('profiles');
-        // Zeige direkt die Detail-Ansicht (kein setTimeout mehr nötig!)
+        // Show the detail view directly (no setTimeout needed anymore!)
         showProfileDetails(profileId);
     } else {
-        // Kein Profil gesetzt, gehe zur Hauptübersicht
+        // No profile set, go to the main overview
         switchPage('profiles');
     }
 }
@@ -774,10 +790,10 @@ async function loadProfiles() {
             grid.innerHTML = `
                 <div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-secondary);">
                     <div style="font-size: 36px; margin-bottom: 15px; color: #ff9800;"><i class="bi bi-exclamation-triangle-fill"></i></div>
-                    <p style="margin-bottom: 10px;">Fehler beim Laden der Profile</p>
+                    <p style="margin-bottom: 10px;">Error loading profiles</p>
                     <p style="font-size: 14px; color: #888;">${error}</p>
                     <button class="btn" onclick="loadProfiles()" style="margin-top: 20px;">
-                        Erneut versuchen
+                        Try again
                     </button>
                 </div>
             `;
@@ -790,21 +806,21 @@ function renderProfiles() {
     if (!grid) return;
 
     if (profiles.length === 0) {
-        // Wenn keine Profile: Nur Create-Card anzeigen
+        // If no profiles: only show the create card
         grid.innerHTML = `
             <div class="profile-card" onclick="openCreateProfileModal()" 
                  style="cursor: pointer; background: var(--bg-light); border: 2px dashed var(--gold); display: flex; flex-direction: column; align-items: center; justify-content: center; transition: all 0.3s;"
                  onmouseover="this.style.background='var(--bg-dark)'; this.style.transform='scale(1.02)';"
                  onmouseout="this.style.background='var(--bg-light)'; this.style.transform='scale(1)';">
                 <div style="font-size: 64px; color: var(--gold); margin-bottom: 15px;">+</div>
-                <div style="color: var(--gold); font-weight: 600; font-size: 16px;">Profil erstellen</div>
+                <div style="color: var(--gold); font-weight: 600; font-size: 16px;">Create Profile</div>
             </div>
         `;
         return;
     }
 
-    // Sortiere Profile nach "Zuletzt gespielt" (neueste zuerst)
-    // Profile ohne last_played kommen ans Ende
+    // Sort profiles by "Last played" (newest first)
+    // Profiles without last_played go to the end
     const sortedProfiles = [...profiles].sort((a, b) => {
         if (!a.last_played && !b.last_played) return 0;
         if (!a.last_played) return 1;
@@ -812,13 +828,13 @@ function renderProfiles() {
         return new Date(b.last_played) - new Date(a.last_played);
     });
 
-    // Profile-Cards + Create-Card am Ende
+    // Profile cards + create card at the end
     const profileCards = sortedProfiles.map(profile => {
-        // Modloader-Name formatieren (erster Buchstabe groß)
+        // Format the modloader name (capitalize first letter)
         const loaderName = profile.loader.loader.charAt(0).toUpperCase() + profile.loader.loader.slice(1);
         const loaderDisplay = profile.loader.loader === 'vanilla' ? 'Vanilla' : loaderName;
 
-        // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst App-Icon
+        // Icon: if icon_path is present (data URL), show it, otherwise the app icon
         const iconHTML = profile.icon_path
             ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;" onerror="this.onerror=null; this.src='${LION_LOGO_URL}';">`
             : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;">`;
@@ -838,26 +854,26 @@ function renderProfiles() {
         </div>
     `});
 
-    // Create-Card am Ende hinzufügen
+    // Add the create card at the end
     const createCard = `
         <div class="profile-card" onclick="openCreateProfileModal()" 
              style="cursor: pointer; background: var(--bg-light); border: 2px dashed var(--gold); display: flex; flex-direction: column; align-items: center; justify-content: center; transition: all 0.3s;"
              onmouseover="this.style.background='var(--bg-dark)'; this.style.transform='scale(1.02)';"
              onmouseout="this.style.background='var(--bg-light)'; this.style.transform='scale(1)';">
             <div style="font-size: 64px; color: var(--gold); margin-bottom: 15px;">+</div>
-            <div style="color: var(--gold); font-weight: 600; font-size: 16px;">Profil erstellen</div>
+            <div style="color: var(--gold); font-weight: 600; font-size: 16px;">Create Profile</div>
         </div>
     `;
 
     grid.innerHTML = profileCards.join('') + createCard;
 }
 
-// Profil-Kontextmenü bei Rechtsklick
+// Profile context menu on right-click
 function showProfileContextMenu(event, profileId) {
     event.preventDefault();
     event.stopPropagation();
 
-    // Entferne altes Kontextmenü falls vorhanden
+    // Remove old context menu if present
     const existingMenu = document.getElementById('profile-context-menu');
     if (existingMenu) existingMenu.remove();
 
@@ -884,7 +900,7 @@ function showProfileContextMenu(event, profileId) {
              style="padding: 10px 20px; cursor: pointer; color: var(--text-primary); display: flex; align-items: center; gap: 10px;"
              onmouseover="this.style.background='var(--bg-light)'" 
              onmouseout="this.style.background='transparent'">
-            <i class="bi bi-gear-fill"></i> Einstellungen
+            <i class="bi bi-gear-fill"></i> Settings
         </div>
         <div onclick="openShareProfileModal('${profileId}')" 
              style="padding: 10px 20px; cursor: pointer; color: var(--text-primary); display: flex; align-items: center; gap: 10px;"
@@ -896,13 +912,13 @@ function showProfileContextMenu(event, profileId) {
              style="padding: 10px 20px; cursor: pointer; color: #f44336; display: flex; align-items: center; gap: 10px;"
              onmouseover="this.style.background='var(--bg-light)'" 
              onmouseout="this.style.background='transparent'">
-            <i class="bi bi-trash"></i> Löschen
+            <i class="bi bi-trash"></i> Delete
         </div>
     `;
 
     document.body.appendChild(menu);
 
-    // Schließe Menü bei Klick außerhalb
+    // Close menu on click outside
     const closeMenu = (e) => {
         if (!menu.contains(e.target)) {
             menu.remove();
@@ -1091,18 +1107,18 @@ function openShareProfileModal(profileId) {
     modal.innerHTML = `
         <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 12px; width: min(520px, 92vw); padding: 22px;" onclick="event.stopPropagation()">
             <h2 style="margin: 0 0 14px 0; color: var(--gold); font-size: 20px;"><i class="bi bi-share-fill"></i> Share Profile</h2>
-            <p style="margin: 0 0 14px 0; color: var(--text-secondary); font-size: 13px;">Waehle, was in die <code>.lion</code>-Datei soll.</p>
+            <p style="margin: 0 0 14px 0; color: var(--text-secondary); font-size: 13px;">Choose what goes into the <code>.lion</code> file.</p>
             <div id="share-profile-options" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; color: var(--text-primary);">
                 <label><input type="checkbox" value="settings" checked> Settings (1:1)</label>
                 <label><input type="checkbox" value="mods" checked> Mods (Links)</label>
                 <label><input type="checkbox" value="resourcepacks" checked> Resource Packs (Links)</label>
                 <label><input type="checkbox" value="shaderpacks" checked> Shader Packs (Links)</label>
-                <label><input type="checkbox" value="servers" checked> Serverliste</label>
+                <label><input type="checkbox" value="servers" checked> Server list</label>
                 <label><input type="checkbox" value="worlds"> Worlds (voll)</label>
                 <label><input type="checkbox" value="logs"> Logs (voll)</label>
             </div>
             <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
-                <button class="btn btn-secondary" onclick="closeDynamicModal('share-profile-modal')">Abbrechen</button>
+                <button class="btn btn-secondary" onclick="closeDynamicModal('share-profile-modal')">Cancel</button>
                 <button class="btn" id="share-profile-export-btn">Export .lion</button>
             </div>
         </div>
@@ -1118,7 +1134,7 @@ function openShareProfileModal(profileId) {
             if (!root) return;
             const includes = getCheckedValues(root, 'input[type="checkbox"]');
             if (includes.length === 0) {
-                showToast('Waehle mindestens einen Bereich zum Teilen.', 'warning', 2800);
+                showToast('Choose at least one section to share.', 'warning', 2800);
                 return;
             }
 
@@ -1130,19 +1146,19 @@ function openShareProfileModal(profileId) {
                 try {
                     savedPath = await saveLionPayloadWithDialog(payload, profile.name);
                 } catch (_dialogError) {
-                    // Fallback fuer Umgebungen ohne nativen Save-Dialog.
+                    // Fallback for environments without a native save dialog.
                     downloadLionPayload(payload, profile.name);
                 }
 
                 if (savedPath) {
-                    showToast('Profil exportiert: ' + savedPath, 'success', 3200);
+                    showToast('Profile exported: ' + savedPath, 'success', 3200);
                 } else {
-                    showToast('Export abgebrochen.', 'info', 2200);
+                    showToast('Export canceled.', 'info', 2200);
                     return;
                 }
                 closeDynamicModal('share-profile-modal');
             } catch (error) {
-                showToast('Export fehlgeschlagen: ' + error, 'error', 4500);
+                showToast('Export failed: ' + error, 'error', 4500);
             } finally {
                 exportBtn.disabled = false;
                 exportBtn.textContent = 'Export .lion';
@@ -1176,7 +1192,7 @@ async function prepareProfileDownloadFlow(profileId, profileName) {
             profileId,
             profileName,
             phase: 'spin',
-            status: 'Download wird vorbereitet...',
+            status: 'Preparing download...',
             percent: null,
             canStop: false
         });
@@ -1196,7 +1212,7 @@ async function prepareProfileDownloadFlow(profileId, profileName) {
                 });
             });
         } catch (_e) {
-            // Event API evtl. nicht verfügbar
+            // Event API might not be available
         }
 
         await invoke('prepare_profile_download', { profileId });
@@ -1206,7 +1222,7 @@ async function prepareProfileDownloadFlow(profileId, profileName) {
             profileId,
             profileName,
             phase: 'idle',
-            status: 'Download abgeschlossen - bereit zum Start.',
+            status: 'Download complete - ready to launch.',
             percent: null,
             canStop: false
         });
@@ -1216,7 +1232,7 @@ async function prepareProfileDownloadFlow(profileId, profileName) {
             profileId,
             profileName,
             phase: 'idle',
-            status: 'Download fehlgeschlagen: ' + prepareError,
+            status: 'Download failed: ' + prepareError,
             percent: null,
             canStop: false
         });
@@ -1230,7 +1246,7 @@ async function runLionImport() {
     const selections = buildImportSelectionFromModal();
     const fastImport = !!document.getElementById('import-lion-fast-mode')?.checked;
     if (!selections.length) {
-        showToast('Waehle mindestens einen Import-Bereich.', 'warning', 2800);
+        showToast('Choose at least one import section.', 'warning', 2800);
         return;
     }
 
@@ -1377,7 +1393,7 @@ async function runLionImport() {
                         profileId: createdProfile.id,
                         profileName: createdProfile.name,
                         phase: 'progress',
-                        status: 'Importiere Inhalte... (' + completed + '/' + tasks.length + ')',
+                        status: 'Importing content... (' + completed + '/' + tasks.length + ')',
                         percent: pct,
                         canStop: false
                     });
@@ -1392,7 +1408,7 @@ async function runLionImport() {
                     profileId: createdProfile.id,
                     profileName: createdProfile.name,
                     phase: 'progress',
-                    status: 'Importiere Inhalte... (' + tasksDone + '/' + tasks.length + ')',
+                    status: 'Importing content... (' + tasksDone + '/' + tasks.length + ')',
                     percent: pct,
                     canStop: false
                 });
@@ -1410,14 +1426,14 @@ async function runLionImport() {
         closeImportLionModal();
         const createModal = document.getElementById('create-profile-modal');
         if (createModal) createModal.classList.remove('active');
-        showToast('Import abgeschlossen. ' + formatImportReport(report), 'success', 5200);
+        showToast('Import complete. ' + formatImportReport(report), 'success', 5200);
 
     } catch (error) {
-        showToast('Import fehlgeschlagen: ' + error, 'error', 5000);
+        showToast('Import failed: ' + error, 'error', 5000);
     } finally {
         if (importBtn) {
             importBtn.disabled = false;
-            importBtn.textContent = 'Import starten';
+            importBtn.textContent = 'Start Import';
         }
     }
 }
@@ -1441,14 +1457,14 @@ function openLionImportModal(payload) {
     modal.innerHTML = `
         <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 12px; width: min(560px, 92vw); padding: 22px;" onclick="event.stopPropagation()">
             <h2 style="margin: 0 0 10px 0; color: var(--gold); font-size: 20px;"><i class="bi bi-box-arrow-in-down"></i> Import .lion</h2>
-            <p style="margin: 0 0 12px 0; color: var(--text-secondary); font-size: 13px;">${escapeHtml(payload?.profile?.name || 'Imported Profile')} - waehle die Bereiche fuer den Import.</p>
-            <p style="margin: 0 0 12px 0; color: ${isNewerFormat ? '#ff9800' : 'var(--text-secondary)'}; font-size: 12px;">Format v${incomingVersion} (lokal: v${LION_SHARE_FORMAT_VERSION})${isOlderFormat ? ' - aelteres Format, Import mit Fallback.' : ''}${isNewerFormat ? ' - neuer als diese Launcher-Version.' : ''}</p>
+            <p style="margin: 0 0 12px 0; color: var(--text-secondary); font-size: 13px;">${escapeHtml(payload?.profile?.name || 'Imported Profile')} - choose the sections to import.</p>
+            <p style="margin: 0 0 12px 0; color: ${isNewerFormat ? '#ff9800' : 'var(--text-secondary)'}; font-size: 12px;">Format v${incomingVersion} (lokal: v${LION_SHARE_FORMAT_VERSION})${isOlderFormat ? ' - older format, import with fallback.' : ''}${isNewerFormat ? ' - newer than this launcher version.' : ''}</p>
             <div id="import-lion-options" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; color: var(--text-primary);">
                 <label><input type="checkbox" value="settings" ${payload?.content?.share_data?.settings ? 'checked' : ''}> Settings (1:1)</label>
                 <label><input type="checkbox" value="mods" ${has('mods') ? 'checked' : ''}> Mods</label>
                 <label><input type="checkbox" value="resourcepacks" ${has('resourcepacks') ? 'checked' : ''}> Resource Packs</label>
                 <label><input type="checkbox" value="shaderpacks" ${has('shaderpacks') ? 'checked' : ''}> Shader Packs</label>
-                <label><input type="checkbox" value="servers" ${has('servers') ? 'checked' : ''}> Serverliste</label>
+                <label><input type="checkbox" value="servers" ${has('servers') ? 'checked' : ''}> Server list</label>
                 <label><input type="checkbox" value="worlds" ${(has('worlds') || hasShare('worlds_archive_base64')) ? 'checked' : ''}> Worlds</label>
                 <label><input type="checkbox" value="logs" ${(payload?.content?.logs || hasShare('logs_archive_base64')) ? 'checked' : ''}> Logs</label>
             </div>
@@ -1456,8 +1472,8 @@ function openLionImportModal(payload) {
                 <input type="checkbox" id="import-lion-fast-mode"> Fast Import (parallel)
             </label>
             <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
-                <button class="btn btn-secondary" onclick="closeImportLionModal()">Abbrechen</button>
-                <button class="btn" id="import-lion-run-btn" ${isNewerFormat ? 'disabled' : ''}>Import starten</button>
+                <button class="btn btn-secondary" onclick="closeImportLionModal()">Cancel</button>
+                <button class="btn" id="import-lion-run-btn" ${isNewerFormat ? 'disabled' : ''}>Start Import</button>
             </div>
         </div>
     `;
@@ -1475,32 +1491,32 @@ async function handleLionImportInputChange(event) {
         const text = await file.text();
         const payload = JSON.parse(text);
         if (payload?.format !== 'lion-profile') {
-            throw new Error('Ungueltiges .lion Format');
+            throw new Error('Invalid .lion format');
         }
         const fileVersion = Number(payload?.version || 1);
         if (!Number.isFinite(fileVersion) || fileVersion <= 0) {
-            throw new Error('Ungueltige .lion Versionsnummer');
+            throw new Error('Invalid .lion version number');
         }
         if (fileVersion > LION_SHARE_FORMAT_VERSION) {
-            throw new Error('Diese .lion Datei ist neuer als dein Launcher (v' + fileVersion + ')');
+            throw new Error('This .lion file is newer than your launcher (v' + fileVersion + ')');
         }
         if (fileVersion < LION_SHARE_FORMAT_VERSION) {
-            showToast('Aeltere .lion Version erkannt. Import mit Fallback.', 'info', 3200);
+            showToast('Older .lion version detected. Importing with fallback.', 'info', 3200);
         }
         openLionImportModal(payload);
     } catch (error) {
-        showToast('Import-Datei konnte nicht gelesen werden: ' + error, 'error', 4500);
+        showToast('Could not read import file: ' + error, 'error', 4500);
     }
 }
 
-// RAM-Slider Hilfsfunktionen
+// RAM slider helper functions
 function updateMemoryDisplay(value) {
     const display = document.getElementById('memory-value-display');
     if (display) {
         display.textContent = `${value} MB`;
     }
 
-    // Update Fortschrittsbalken
+    // Update progress bar
     const progressBar = document.getElementById('memory-slider-progress');
     const slider = document.getElementById('edit-profile-memory');
 
@@ -1514,7 +1530,7 @@ function updateMemoryDisplay(value) {
 
 async function initMemorySlider(currentMemory) {
     try {
-        // Hole System-RAM
+        // Get system RAM
         const systemMemoryMB = await invoke('get_system_memory');
         console.log('[Memory Slider] System RAM:', systemMemoryMB, 'MB');
 
@@ -1522,7 +1538,7 @@ async function initMemorySlider(currentMemory) {
         const maxLabel = document.getElementById('max-memory-label');
 
         if (slider && systemMemoryMB) {
-            // Setze Maximum auf 90% des System-RAMs (sinnvolle Obergrenze)
+            // Set maximum to 90% of system RAM (sensible upper limit)
             const maxMemory = Math.floor(systemMemoryMB * 0.9);
             slider.max = maxMemory;
 
@@ -1530,17 +1546,17 @@ async function initMemorySlider(currentMemory) {
                 maxLabel.textContent = `${Math.floor(maxMemory / 1024)} GB`;
             }
 
-            // Setze aktuellen Wert
+            // Set current value
             slider.value = currentMemory || 4096;
 
-            // Initialisiere Fortschrittsbalken
+            // Initialize progress bar
             updateMemoryDisplay(slider.value);
 
             console.log('[Memory Slider] Initialized - Max:', maxMemory, 'MB, Current:', slider.value, 'MB');
         }
     } catch (error) {
         console.error('[Memory Slider] Failed to get system memory:', error);
-        // Fallback: Behalte Standard-Maximum und initialisiere trotzdem
+        // Fallback: keep the default maximum and initialize anyway
         const slider = document.getElementById('edit-profile-memory');
         if (slider) {
             updateMemoryDisplay(slider.value);
@@ -1548,7 +1564,7 @@ async function initMemorySlider(currentMemory) {
     }
 }
 
-// Öffne Profil-Einstellungen als eigenes Modal-Fenster
+// Open profile settings as its own modal window
 async function openProfileSettings(profileId) {
     const menu = document.getElementById('profile-context-menu');
     if (menu) menu.remove();
@@ -1556,10 +1572,10 @@ async function openProfileSettings(profileId) {
     const profile = profiles.find(p => p.id === profileId);
     if (!profile) return;
 
-    // Edit-Modal nutzt currentProfile als Referenz für Vorauswahl/State
+    // Edit modal uses currentProfile as reference for preselection/state
     currentProfile = profile;
 
-    // Entferne altes Modal falls vorhanden
+    // Remove old modal if present
     const existingModal = document.getElementById('profile-settings-modal');
     if (existingModal) existingModal.remove();
 
@@ -1584,17 +1600,17 @@ async function openProfileSettings(profileId) {
             
             <!-- Header -->
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid var(--bg-light);">
-                <h2 style="color: var(--gold); margin: 0; font-size: 18px;"><i class="bi bi-gear-fill"></i> Profil-Einstellungen</h2>
+                <h2 style="color: var(--gold); margin: 0; font-size: 18px;"><i class="bi bi-gear-fill"></i> Profile Settings</h2>
                 <button onclick="closeProfileSettingsModal('${profile.id}')" 
                         style="background: none; border: none; color: var(--text-secondary); font-size: 24px; cursor: pointer; padding: 0; line-height: 1;">
                     <i class="bi bi-x"></i>
                 </button>
             </div>
             
-            <!-- Scrollbarer Inhalt -->
+            <!-- Scrollable content -->
             <div style="padding: 20px; overflow-y: auto; flex: 1;">
                 
-                <!-- Profil-Bild -->
+                <!-- Profile picture -->
                 <div style="display: flex; gap: 15px; align-items: center; background: var(--bg-light); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
                     <div id="profile-icon-preview" style="width: 60px; height: 60px; background: var(--bg-medium); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 30px; overflow: hidden;">
                         ${profile.icon_path ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.onerror=null; this.src='${LION_LOGO_URL}';">` : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover;">`}
@@ -1602,7 +1618,7 @@ async function openProfileSettings(profileId) {
                     <div style="flex: 1;">
                         <input type="file" id="profile-icon-input" accept="image/*" onchange="previewProfileIcon(event)" style="display: none;">
                         <button class="btn btn-secondary" onclick="document.getElementById('profile-icon-input').click()" style="padding: 6px 12px; font-size: 12px;">
-                            <i class="bi bi-camera"></i> Bild
+                            <i class="bi bi-camera"></i> Image
                         </button>
                         <button class="btn btn-secondary" onclick="clearProfileIcon()" style="padding: 6px 12px; font-size: 12px; margin-left: 5px;">
                             <i class="bi bi-x"></i>
@@ -1610,9 +1626,9 @@ async function openProfileSettings(profileId) {
                     </div>
                 </div>
                 
-                <!-- Profilname -->
+                <!-- Profile name -->
                 <div style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 13px;">Profilname</label>
+                    <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 13px;">Profile Name</label>
                     <input type="text" value="${profile.name}" id="edit-profile-name"
                            style="width: 100%; padding: 10px; background: var(--bg-light); border: none; border-radius: 6px; color: var(--text-primary); font-size: 14px;">
                 </div>
@@ -1651,13 +1667,13 @@ async function openProfileSettings(profileId) {
                     </div>
                 </div>
                 
-                <!-- Speicher -->
+                <!-- Memory -->
                 <div style="margin-bottom: 15px;">
                     <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 13px;">
-                        RAM-Zuweisung: <span id="memory-value-display" style="color: var(--gold); font-weight: bold;">${profile.memory_mb || 4096} MB</span>
+                        RAM Allocation: <span id="memory-value-display" style="color: var(--gold); font-weight: bold;">${profile.memory_mb || 4096} MB</span>
                     </label>
                     <div style="width: 100%; position: relative; height: 20px; margin: 0 10px;">
-                        <!-- Fortschrittsbalken unter dem Slider -->
+                        <!-- Progress bar below the slider -->
                         <div style="position: absolute; width: calc(100% - 20px); height: 8px; background: var(--bg-light); border-radius: 4px; top: 6px; left: 0; right: 0; pointer-events: none;">
                             <div id="memory-slider-progress" style="height: 100%; background: var(--gold); border-radius: 4px; width: 0%; transition: width 0.1s ease;"></div>
                         </div>
@@ -1715,7 +1731,7 @@ async function openProfileSettings(profileId) {
                         box-shadow: 0 3px 8px rgba(0,0,0,0.5);
                     }
                     
-                    /* Track (unsichtbar/transparent) */
+                    /* Track (invisible/transparent) */
                     #edit-profile-memory::-webkit-slider-runnable-track {
                         width: 100%;
                         height: 20px;
@@ -1731,17 +1747,17 @@ async function openProfileSettings(profileId) {
                     }
                 </style>
                 
-                <!-- Java Argumente -->
+                <!-- Java Arguments -->
                 <div style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 13px;">Java Argumente</label>
+                    <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 13px;">Java Arguments</label>
                     <textarea id="edit-profile-java-args" rows="2"
                               style="width: 100%; padding: 10px; background: var(--bg-light); border: none; border-radius: 6px; color: var(--text-primary); font-family: monospace; font-size: 12px; resize: vertical;"
                               placeholder="-XX:+UseG1GC">${(profile.java_args || []).join(' ')}</textarea>
                 </div>
                 
-                <!-- Spielverzeichnis -->
+                <!-- Game Directory -->
                 <div style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 13px;">Spielverzeichnis</label>
+                    <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 13px;">Game Directory</label>
                     <div style="display: flex; gap: 8px;">
                         <input type="text" value="${profile.game_dir}" readonly
                                style="flex: 1; padding: 10px; background: var(--bg-light); border: none; border-radius: 6px; color: var(--text-secondary); font-size: 12px;">
@@ -1755,10 +1771,10 @@ async function openProfileSettings(profileId) {
                 <div style="margin-bottom: 15px; background: var(--bg-light); padding: 15px; border-radius: 8px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div style="flex: 1;">
-                            <label style="display: block; color: var(--text-primary); font-size: 14px; font-weight: 500;"><i class="bi bi-arrow-clockwise"></i> Settings synchronisieren</label>
+                            <label style="display: block; color: var(--text-primary); font-size: 14px; font-weight: 500;"><i class="bi bi-arrow-clockwise"></i> Sync Settings</label>
                             <span style="color: var(--text-secondary); font-size: 11px; display: block; margin-top: 5px;">
-                                Synchronisiert Keybinds und Einstellungen automatisch zwischen allen Profilen.
-                                Die neueste Änderung hat Vorrang.
+                                Automatically syncs keybinds and settings between all profiles.
+                                The most recent change takes priority.
                             </span>
                         </div>
                         <label class="switch">
@@ -1769,21 +1785,21 @@ async function openProfileSettings(profileId) {
                     </div>
                 </div>
                 
-                <!-- Wartung / Reparatur -->
+                <!-- Maintenance / Repair -->
                 <div style="margin-bottom: 15px; background: rgba(255, 152, 0, 0.1); border: 1px solid #ff9800; padding: 15px; border-radius: 8px;">
-                    <label style="display: block; color: #ff9800; font-size: 14px; font-weight: 500; margin-bottom: 10px;"><i class="bi bi-tools"></i> Wartung</label>
+                    <label style="display: block; color: #ff9800; font-size: 14px; font-weight: 500; margin-bottom: 10px;"><i class="bi bi-tools"></i> Maintenance</label>
                     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                         <button class="btn btn-secondary" onclick="repairProfile('${profile.id}')" 
                                 style="padding: 8px 15px; font-size: 12px; display: flex; align-items: center; gap: 6px;">
-                            <i class="bi bi-arrow-clockwise"></i> Installation reparieren
+                            <i class="bi bi-arrow-clockwise"></i> Repair Installation
                         </button>
                         <button class="btn btn-secondary" onclick="clearProfileCache('${profile.id}')" 
                                 style="padding: 8px 15px; font-size: 12px; display: flex; align-items: center; gap: 6px;">
-                            <i class="bi bi-trash"></i> Cache leeren
+                            <i class="bi bi-trash"></i> Clear Cache
                         </button>
                     </div>
                     <span style="color: var(--text-secondary); font-size: 10px; display: block; margin-top: 8px;">
-                        Lädt Minecraft, Loader und Libraries neu herunter. Mods bleiben erhalten.
+                        Re-downloads Minecraft, the loader, and libraries. Mods are kept.
                     </span>
                 </div>
             </div>
@@ -1792,15 +1808,15 @@ async function openProfileSettings(profileId) {
 
     document.body.appendChild(modal);
 
-    // Initialisiere RAM-Slider mit System-RAM
+    // Initialize RAM slider with system RAM
     initMemorySlider(profile.memory_mb || 4096);
 
-    // Schließen bei Klick auf Hintergrund (mit Auto-Save)
+    // Close on background click (with auto-save)
     modal.addEventListener('click', (e) => {
         if (e.target === modal) closeProfileSettingsModal(profile.id);
     });
 
-    // Escape-Taste zum Schließen (mit Auto-Save)
+    // Escape key closes (with auto-save)
     const escHandler = (e) => {
         if (e.key === 'Escape') {
             closeProfileSettingsModal(profile.id);
@@ -1809,7 +1825,7 @@ async function openProfileSettings(profileId) {
     };
     document.addEventListener('keydown', escHandler);
 
-    // Versionen laden (MC + Loader), damit nicht nur "Neueste" sichtbar bleibt
+    // Load versions (MC + loader) so more than just "Latest" is visible
     setTimeout(async () => {
         await populateEditVersionSelect();
         await updateEditLoaderVersions();
@@ -1817,7 +1833,7 @@ async function openProfileSettings(profileId) {
 }
 
 async function closeProfileSettingsModal(profileId) {
-    // Auto-Save: Speichere Änderungen vor dem Schließen
+    // Auto-save: save changes before closing
     if (profileId) {
         await saveProfileSettingsFromModal(profileId, true); // true = silent mode
     }
@@ -1827,64 +1843,64 @@ async function closeProfileSettingsModal(profileId) {
     selectedProfileIcon = null;
 }
 
-// ==================== PROFIL REPARATUR ====================
+// ==================== PROFILE REPAIR ====================
 
 async function repairProfile(profileId) {
     const profile = profiles.find(p => p.id === profileId);
     if (!profile) {
-        showToast('Profil nicht gefunden', 'error', 3000);
+        showToast('Profile not found', 'error', 3000);
         return;
     }
 
-    // Bestätigungsdialog
+    // Confirmation dialog
     const confirmed = confirm(
-        `Installation reparieren?\n\n` +
+        `Repair installation?\n\n` +
         `Profil: ${profile.name}\n` +
         `Version: ${profile.minecraft_version}\n` +
         `Loader: ${profile.loader.loader}\n\n` +
-        `Dies wird Minecraft und alle Loader-Dateien neu herunterladen.\n` +
-        `Deine Mods, Welten und Einstellungen bleiben erhalten.`
+        `This will re-download Minecraft and all loader files.\n` +
+        `Your mods, worlds, and settings will be kept.`
     );
 
     if (!confirmed) return;
 
     closeProfileSettingsModal();
-    showToast('Reparatur wird gestartet...', 'info', 3000);
+    showToast('Starting repair...', 'info', 3000);
     debugLog('Starting repair for profile: ' + profileId, 'info');
 
     try {
         await invoke('repair_profile', { profileId: profileId });
-        showToast('Profil wurde erfolgreich repariert!', 'success', 4000);
+        showToast('Profile repaired successfully!', 'success', 4000);
         debugLog('Profile repair completed: ' + profileId, 'success');
     } catch (error) {
         debugLog('Failed to repair profile: ' + error, 'error');
-        showToast('Reparatur fehlgeschlagen: ' + error, 'error', 5000);
+        showToast('Repair failed: ' + error, 'error', 5000);
     }
 }
 
 async function clearProfileCache(profileId) {
     const profile = profiles.find(p => p.id === profileId);
     if (!profile) {
-        showToast('Profil nicht gefunden', 'error', 3000);
+        showToast('Profile not found', 'error', 3000);
         return;
     }
 
-    // Bestätigungsdialog
+    // Confirmation dialog
     const confirmed = confirm(
-        `Cache leeren?\n\n` +
+        `Clear cache?\n\n` +
         `Profil: ${profile.name}\n\n` +
-        `Dies löscht temporäre Dateien und den Shader-Cache.\n` +
-        `Deine Mods, Welten und Einstellungen bleiben erhalten.`
+        `This deletes temporary files and the shader cache.\n` +
+        `Your mods, worlds, and settings will be kept.`
     );
 
     if (!confirmed) return;
 
-    showToast('Cache wird geleert...', 'info', 2000);
+    showToast('Clearing cache...', 'info', 2000);
     debugLog('Clearing cache for profile: ' + profileId, 'info');
 
     try {
         await invoke('clear_profile_cache', { profileId: profileId });
-        showToast('Cache wurde geleert!', 'success', 3000);
+        showToast('Cache cleared!', 'success', 3000);
         debugLog('Cache cleared for profile: ' + profileId, 'success');
     } catch (error) {
         debugLog('Failed to clear cache: ' + error, 'error');
@@ -1898,13 +1914,13 @@ async function toggleSettingsSync(profileId, enabled) {
     try {
         await invoke('toggle_settings_sync', { profileId, enabled });
 
-        // Aktualisiere Slider-Farbe
+        // Update slider color
         const slider = document.querySelector('.settings-sync-slider');
         if (slider) {
             slider.style.backgroundColor = enabled ? 'var(--gold)' : 'var(--bg-medium)';
         }
 
-        showToast(enabled ? 'Settings-Sync aktiviert' : 'Settings-Sync deaktiviert', 'success', 2000);
+        showToast(enabled ? 'Settings sync enabled' : 'Settings sync disabled', 'success', 2000);
         debugLog(`Settings sync ${enabled ? 'enabled' : 'disabled'} for profile ${profileId}`);
     } catch (error) {
         debugLog('Failed to toggle settings sync: ' + error, 'error');
@@ -1915,7 +1931,7 @@ async function toggleSettingsSync(profileId, enabled) {
 async function syncSettingsFromProfile(profileId) {
     try {
         await invoke('sync_settings_from_profile', { profileId });
-        showToast('Settings wurden zu allen Profilen mit Sync synchronisiert!', 'success', 3000);
+        showToast('Settings synced to all profiles with sync enabled!', 'success', 3000);
         debugLog('Settings synced from profile ' + profileId + ' to all other profiles');
     } catch (error) {
         debugLog('Failed to sync settings from profile: ' + error, 'error');
@@ -1926,7 +1942,7 @@ async function syncSettingsFromProfile(profileId) {
 async function syncSettingsToProfile(profileId) {
     try {
         await invoke('sync_settings_to_profile', { profileId });
-        showToast('Standard-Einstellungen auf Profil angewendet', 'success', 3000);
+        showToast('Default settings applied to profile', 'success', 3000);
         debugLog('Settings synced to profile ' + profileId);
     } catch (error) {
         debugLog('Failed to sync settings to profile: ' + error, 'error');
@@ -1944,7 +1960,7 @@ async function saveProfileSettingsFromModal(profileId, silent = false) {
 
     if (!nameInput || !memoryInput) {
         if (!silent) {
-            showToast('Fehler: Formular nicht gefunden', 'error', 3000);
+            showToast('Error: form not found', 'error', 3000);
         }
         return;
     }
@@ -1970,7 +1986,7 @@ async function saveProfileSettingsFromModal(profileId, silent = false) {
         });
 
         if (!silent) {
-            showToast('Profil-Einstellungen gespeichert!', 'success', 3000);
+            showToast('Profile settings saved!', 'success', 3000);
         }
         selectedProfileIcon = null;
 
@@ -1979,7 +1995,7 @@ async function saveProfileSettingsFromModal(profileId, silent = false) {
     } catch (error) {
         debugLog('Failed to save settings: ' + error, 'error');
         if (!silent) {
-            showToast('Fehler beim Speichern: ' + error, 'error', 5000);
+            showToast('Error saving: ' + error, 'error', 5000);
         }
     }
 }
@@ -1990,7 +2006,7 @@ async function launchProfile(profileId) {
     let unlistenProgress = null;
 
     if (!currentUsername || currentUsername === 'Guest') {
-        alert('Bitte setze zuerst deinen Username in den Settings!');
+        alert('Please set your username in Settings first!');
         switchPage('settings');
         return;
     }
@@ -2002,12 +2018,12 @@ async function launchProfile(profileId) {
             profileId,
             profileName,
             phase: 'spin',
-            status: 'Minecraft startet...',
+            status: 'Minecraft starting...',
             percent: null,
             canStop: true
         });
 
-        // Lausche auf echte Fortschrittsereignisse vom Backend
+        // Listen for real progress events from the backend
         try {
             unlistenProgress = await window.__TAURI__.event.listen('launch-progress', (event) => {
                 const { status, percent } = event.payload;
@@ -2023,7 +2039,7 @@ async function launchProfile(profileId) {
                 });
             });
         } catch (_e) {
-            // Tauri-Events nicht verfügbar (z.B. im Browser-Dev-Mode)
+            // Tauri events not available (e.g. in browser dev mode)
         }
 
         await invoke('launch_profile', {
@@ -2034,7 +2050,7 @@ async function launchProfile(profileId) {
         if (unlistenProgress) unlistenProgress();
         debugLog('Minecraft started successfully!', 'success');
 
-        // Instanz als laufend markieren und Buttons sofort updaten
+        // Mark instance as running and update buttons immediately
         runningProfiles.add(profileId);
         updateAllPlayStopButtons(profileId);
 
@@ -2043,7 +2059,7 @@ async function launchProfile(profileId) {
             profileId,
             profileName,
             phase: 'running',
-            status: 'Minecraft gestartet',
+            status: 'Minecraft started',
             percent: null,
             canStop: true
         });
@@ -2055,7 +2071,7 @@ async function launchProfile(profileId) {
         if (typeof unlistenProgress === 'function') unlistenProgress();
         debugLog('Launch failed: ' + error, 'error');
         syncSessionWidgetWithRunningProfiles();
-        showToast('Launch fehlgeschlagen: ' + error, 'error', 5000);
+        showToast('Launch failed: ' + error, 'error', 5000);
     }
 }
 
@@ -2081,7 +2097,7 @@ async function waitForMinecraftMenuReady(profileId, profileName) {
             profileId,
             profileName,
             phase: 'progress',
-            status: 'Warte bis Minecraft komplett offen ist...',
+            status: 'Waiting for Minecraft to fully open...',
             percent,
             canStop: true
         });
@@ -2094,7 +2110,7 @@ async function waitForMinecraftMenuReady(profileId, profileName) {
                 return;
             }
         } catch (_e) {
-            // latest.log kann direkt nach Start kurz fehlen.
+            // latest.log may briefly be missing right after startup.
         }
 
         await new Promise(r => setTimeout(r, pollMs));
@@ -2108,37 +2124,37 @@ function showMicrosoftLoginInfo() {
                 <h2 style="color: var(--gold); margin: 0 0 20px 0;"><i class="bi bi-shield-lock"></i> Microsoft-Login (Coming Soon)</h2>
                 
                 <p style="color: var(--text-secondary); margin-bottom: 20px;">
-                    Der Lion Launcher wird einen <strong style="color: var(--gold);">echten Microsoft-Login</strong> implementieren!
+                    The Lion Launcher will implement <strong style="color: var(--gold);">real Microsoft login</strong>!
                 </p>
                 
-                <h3 style="color: var(--text-primary); margin-bottom: 10px;">Wie wird es funktionieren?</h3>
+                <h3 style="color: var(--text-primary); margin-bottom: 10px;">How will it work?</h3>
                 
                 <ol style="color: var(--text-secondary); margin: 0 0 20px 20px; line-height: 1.8;">
-                    <li><strong>OAuth2-Flow</strong> - Browser öffnet sich mit Microsoft-Login</li>
-                    <li><strong>Du meldest dich an</strong> - Mit deinem echten Microsoft-Account</li>
-                    <li><strong>Token wird gespeichert</strong> - Verschlüsselt auf deinem PC</li>
-                    <li><strong>Automatische Verlängerung</strong> - Token wird automatisch erneuert</li>
-                    <li><strong>Offline-Support</strong> - Cached Token für Offline-Play</li>
+                    <li><strong>OAuth2 flow</strong> - a browser opens with Microsoft login</li>
+                    <li><strong>You sign in</strong> - with your real Microsoft account</li>
+                    <li><strong>Token is stored</strong> - encrypted on your PC</li>
+                    <li><strong>Automatic renewal</strong> - the token is refreshed automatically</li>
+                    <li><strong>Offline support</strong> - cached token for offline play</li>
                 </ol>
                 
-                <h3 style="color: var(--text-primary); margin-bottom: 10px;">Was bekommst du?</h3>
+                <h3 style="color: var(--text-primary); margin-bottom: 10px;">What do you get?</h3>
                 
                 <ul style="color: var(--text-secondary); margin: 0 0 20px 20px; line-height: 1.8;">
-                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Dein echter Minecraft-Account</strong></li>
-                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Zugriff auf gekaufte Skins & Capes</strong></li>
-                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Multiplayer auf allen Servern</strong></li>
-                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Realms-Support</strong></li>
-                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Account-Sicherheit</strong></li>
+                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Your real Minecraft account</strong></li>
+                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Access to purchased skins & capes</strong></li>
+                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Multiplayer on all servers</strong></li>
+                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Realms support</strong></li>
+                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Account security</strong></li>
                 </ul>
                 
                 <div style="background: var(--bg-light); border-left: 4px solid #4CAF50; padding: 15px; margin-top: 20px;">
                     <p style="color: var(--text-primary); margin: 0 0 5px 0;">
-                        <strong><i class="bi bi-lock"></i> Sicherheit:</strong>
+                        <strong><i class="bi bi-lock"></i> Security:</strong>
                     </p>
                     <p style="color: var(--text-secondary); margin: 0; font-size: 14px;">
-                        Dein Passwort wird <strong>NIE</strong> im Launcher gespeichert!<br>
-                        Nur Microsoft hat Zugriff auf deine Login-Daten.<br>
-                        Der Launcher speichert nur einen verschlüsselten Access-Token.
+                        Your password is <strong>NEVER</strong> stored in the launcher!<br>
+                        Only Microsoft has access to your login data.<br>
+                        The launcher only stores an encrypted access token.
                     </p>
                 </div>
                 
@@ -2169,7 +2185,7 @@ async function deleteProfile(profileId) {
         closeDynamicModal('profile-context-menu');
         closeDynamicModal('share-profile-modal');
         renderProfiles();
-        showToast('Profil wurde geloescht.', 'success', 2200);
+        showToast('Profile deleted.', 'success', 2200);
     } catch (error) {
         debugLog('Failed to delete profile: ' + error, 'error');
         alert('Failed to delete profile: ' + error);
@@ -2180,17 +2196,17 @@ function showDeleteProfileConfirmModal(profileId) {
     return new Promise((resolve) => {
         closeDynamicModal('delete-profile-confirm-modal');
         const profile = profiles.find(p => p.id === profileId);
-        const profileName = profile ? profile.name : 'dieses Profil';
+        const profileName = profile ? profile.name : 'this profile';
 
         const modal = document.createElement('div');
         modal.id = 'delete-profile-confirm-modal';
         modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.82); display: flex; align-items: center; justify-content: center; z-index: 10002;';
         modal.innerHTML = `
             <div style="background: var(--bg-dark); border: 2px solid #f44336; border-radius: 12px; width: min(430px, 90vw); padding: 20px;" onclick="event.stopPropagation()">
-                <h3 style="margin: 0 0 10px 0; color: #f44336; font-size: 20px;"><i class="bi bi-trash"></i> Profil loeschen?</h3>
-                <p style="margin: 0 0 16px 0; color: var(--text-secondary); font-size: 13px;">Willst du <strong style="color: var(--text-primary);">${escapeHtml(profileName)}</strong> wirklich loeschen?</p>
+                <h3 style="margin: 0 0 10px 0; color: #f44336; font-size: 20px;"><i class="bi bi-trash"></i> Delete profile?</h3>
+                <p style="margin: 0 0 16px 0; color: var(--text-secondary); font-size: 13px;">Do you really want to delete <strong style="color: var(--text-primary);">${escapeHtml(profileName)}</strong>?</p>
                 <div style="display: flex; justify-content: flex-end; gap: 10px;">
-                    <button class="btn btn-secondary" id="delete-profile-cancel-btn">Abbrechen</button>
+                    <button class="btn btn-secondary" id="delete-profile-cancel-btn">Cancel</button>
                     <button class="btn" id="delete-profile-confirm-btn" style="background:#f44336; color:#fff;">Yes I will</button>
                 </div>
             </div>
@@ -2228,7 +2244,7 @@ function showProfileDetails(profileId) {
     const grid = document.getElementById('profiles-grid');
     if (!grid) return;
 
-    // Icon: Wenn icon_path vorhanden ist (Data URL), zeige es, sonst App-Icon
+    // Icon: if icon_path is present (data URL), show it, otherwise the app icon
     const iconHTML = profile.icon_path
         ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover; border-radius: 12px;" onerror="this.onerror=null; this.src='${LION_LOGO_URL}';">`
         : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover; border-radius: 12px;">`;
@@ -2648,7 +2664,7 @@ function renderProfileTabContent(tabName, profile) {
                         <i class="bi bi-pause-circle"></i> Deaktivieren
                     </button>
                     <button class="btn btn-secondary" onclick="bulkDeleteMods('${profile.id}')" style="padding: 6px 12px; font-size: 11px; color: #f44336;">
-                        <i class="bi bi-trash"></i> Löschen
+                        <i class="bi bi-trash"></i> Delete
                     </button>
                 </div>
                 
@@ -2768,7 +2784,7 @@ function renderProfileTabContent(tabName, profile) {
                             <input type="text" id="add-server-ip" placeholder="z.B. mc.hypixel.net oder 192.168.1.1:25565" style="background: var(--bg-dark);">
                         </div>
                         <div class="modal-actions">
-                            <button class="btn btn-secondary" onclick="hideAddServerModal()">Abbrechen</button>
+                            <button class="btn btn-secondary" onclick="hideAddServerModal()">Cancel</button>
                             <button class="btn" onclick="submitAddServer('${profile.id}')"><i class="bi bi-plus-lg"></i> Hinzufügen</button>
                         </div>
                     </div>
@@ -3472,7 +3488,7 @@ async function loadInstalledMods(profileId, options = {}) {
                 <p>Fehler beim Laden der Mods</p>
                 <p style="font-size: 12px; color: var(--text-secondary);">${error}</p>
                 <button class="btn btn-secondary" onclick="loadInstalledMods('${profileId}', { force: true })" style="margin-top: 15px;">
-                    <i class="bi bi-arrow-clockwise"></i> Erneut versuchen
+                    <i class="bi bi-arrow-clockwise"></i> Try again
                 </button>
             </div>
         `;
@@ -4585,29 +4601,119 @@ async function launchServer(profileId, serverIp) {
     }
 }
 
-// ==================== LOCAL SERVER HUB ====================
+/// ==================== LOCAL SERVER HUB ====================
+
+const SERVER_SOFTWARE = {
+    paper: { label: 'Paper', icon: 'bi-send-fill', hint: 'Schnell und stabil – empfohlen für Plugin-Server.', versionHint: 'latest oder Build-Nummer' },
+    purpur: { label: 'Purpur', icon: 'bi-stars', hint: 'Paper-Fork mit vielen zusätzlichen Gameplay-Optionen.', versionHint: 'latest oder Build-Nummer' },
+    folia: { label: 'Folia', icon: 'bi-diagram-3-fill', hint: 'Multithreaded Paper-Fork für sehr große Server. Viele Plugins sind nicht Folia-kompatibel.', versionHint: 'latest oder Build-Nummer' },
+    spigot: { label: 'Spigot', icon: 'bi-droplet-fill', hint: 'Wird beim ersten Start mit den offiziellen BuildTools gebaut (dauert 5–10 Minuten).', versionHint: null },
+    bukkit: { label: 'Bukkit', icon: 'bi-bucket-fill', hint: 'CraftBukkit – wird beim ersten Start mit den BuildTools gebaut (dauert 5–10 Minuten).', versionHint: null },
+    vanilla: { label: 'Vanilla', icon: 'bi-box-fill', hint: 'Offizieller Mojang-Server ohne Plugins oder Mods.', versionHint: null },
+    fabric: { label: 'Fabric', icon: 'bi-grid-3x3-gap-fill', hint: 'Leichtgewichtiger Loader – empfohlen für Mod-Server.', versionHint: 'latest oder Loader-Version (z.B. 0.16.9)' },
+    quilt: { label: 'Quilt', icon: 'bi-grid-fill', hint: 'Fabric-kompatibler Loader. Fabric-Mods funktionieren meistens auch.', versionHint: 'latest oder Loader-Version' },
+    forge: { label: 'Forge', icon: 'bi-hammer', hint: 'Klassischer Mod-Loader mit der größten Auswahl an älteren Mods.', versionHint: 'latest oder Forge-Version (z.B. 47.3.0)' },
+    neoforge: { label: 'NeoForge', icon: 'bi-fire', hint: 'Moderner Forge-Nachfolger (ab Minecraft 1.20.1).', versionHint: 'latest oder NeoForge-Version (z.B. 21.1.77)' },
+};
+
+const SERVER_SOFTWARE_BY_MODE = {
+    plugins: ['paper', 'purpur', 'folia', 'spigot', 'bukkit', 'vanilla'],
+    modded: ['fabric', 'quilt', 'forge', 'neoforge', 'vanilla'],
+};
+
+const SERVER_METRIC_WINDOW_MS = 120000;
+// Die Zeitachse läuft etwas hinter "jetzt", damit neue Messwerte weich von rechts einlaufen
+const SERVER_METRIC_RENDER_DELAY_MS = 1500;
+const serverMetricHover = { cpu: null, ram: null, net: null };
+let serverMetricAnimationFrame = null;
+let serverMetricLastRuntime = null;
+let serverBackupBusy = false;
+let serverInstalledContentCache = [];
+const selectedServerContent = new Set();
+let serverInstalledProjectIds = new Set();
+let serverInstalledProjectIdsServerId = null;
+let serverBrowserContext = null;
+let serverBrowserNavigation = false;
+let pendingServerDetailOpen = null;
+let serverModDetailsReturn = null;
+const browserModeBackup = { loaderOptions: null, modsBtnText: null, backBtnText: null };
+
+/**
+ * Bestätigungsfenster im Stil des "Profil löschen"-Dialogs.
+ * `message` wird als Text eingefügt; `highlight` wird hervorgehoben dargestellt.
+ */
+function showConfirmModal({ title, message, highlight = '', suffix = '?', details = '', confirmText = 'Yes I will', cancelText = 'Cancel', icon = 'bi-trash', danger = true }) {
+    return new Promise((resolve) => {
+        closeDynamicModal('lion-confirm-modal');
+        const color = danger ? '#f44336' : 'var(--gold)';
+
+        const modal = document.createElement('div');
+        modal.id = 'lion-confirm-modal';
+        modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.82); display: flex; align-items: center; justify-content: center; z-index: 10002;';
+        modal.innerHTML = `
+            <div style="background: var(--bg-dark); border: 2px solid ${color}; border-radius: 12px; width: min(450px, 90vw); padding: 20px;" onclick="event.stopPropagation()">
+                <h3 style="margin: 0 0 10px 0; color: ${color}; font-size: 20px;"><i class="bi ${icon}"></i> <span data-confirm-title></span></h3>
+                <p style="margin: 0 0 ${details ? '8px' : '16px'} 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5;">
+                    <span data-confirm-message></span>
+                    ${highlight ? '<strong data-confirm-highlight style="color: var(--text-primary); word-break: break-word;"></strong><span data-confirm-suffix></span>' : ''}
+                </p>
+                ${details ? '<p data-confirm-details style="margin: 0 0 16px 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5;"></p>' : ''}
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button class="btn btn-secondary" data-confirm-cancel></button>
+                    <button class="btn" data-confirm-ok style="${danger ? 'background:#f44336; color:#fff;' : ''}"></button>
+                </div>
+            </div>
+        `;
+
+        modal.querySelector('[data-confirm-title]').textContent = title;
+        modal.querySelector('[data-confirm-message]').textContent = message;
+        if (highlight) {
+            modal.querySelector('[data-confirm-highlight]').textContent = highlight;
+            modal.querySelector('[data-confirm-suffix]').textContent = suffix;
+        }
+        if (details) modal.querySelector('[data-confirm-details]').textContent = details;
+        modal.querySelector('[data-confirm-cancel]').textContent = cancelText;
+        modal.querySelector('[data-confirm-ok]').textContent = confirmText;
+
+        const onKey = (event) => {
+            if (event.key === 'Escape') cleanup(false);
+        };
+        const cleanup = (result) => {
+            document.removeEventListener('keydown', onKey);
+            if (modal.parentElement) modal.remove();
+            resolve(result);
+        };
+
+        modal.addEventListener('click', () => cleanup(false));
+        modal.querySelector('[data-confirm-cancel]').addEventListener('click', () => cleanup(false));
+        modal.querySelector('[data-confirm-ok]').addEventListener('click', () => cleanup(true));
+        document.addEventListener('keydown', onKey);
+        document.body.appendChild(modal);
+        modal.querySelector('[data-confirm-cancel]').focus();
+    });
+}
 
 function getServerModeLabel(mode) {
     return mode === 'plugins' ? 'Plugins' : 'Modded';
 }
 
-function getServerIcon(mode) {
-    return mode === 'plugins' ? 'bi-plug-fill' : 'bi-puzzle-fill';
+function getServerSoftwareLabel(software) {
+    return SERVER_SOFTWARE[software]?.label || software;
+}
+
+function getServerIcon(server) {
+    return SERVER_SOFTWARE[server?.software]?.icon || (server?.mode === 'plugins' ? 'bi-plug-fill' : 'bi-puzzle-fill');
+}
+
+function getServerContentLabel(server) {
+    return server?.mode === 'plugins' ? 'Plugins' : 'Mods';
 }
 
 function getServerSoftwareOptions(mode) {
-    if (mode === 'modded') {
-        return [
-            { value: 'fabric', label: 'Fabric (recommended)' },
-            { value: 'vanilla', label: 'Vanilla' },
-        ];
-    }
-
-    return [
-        { value: 'paper', label: 'Paper (recommended)' },
-        { value: 'purpur', label: 'Purpur' },
-        { value: 'vanilla', label: 'Vanilla' },
-    ];
+    return (SERVER_SOFTWARE_BY_MODE[mode] || SERVER_SOFTWARE_BY_MODE.plugins).map((value, index) => ({
+        value,
+        label: SERVER_SOFTWARE[value].label + (index === 0 ? ' (recommended)' : ''),
+    }));
 }
 
 function renderServerSoftwareOptions(mode, selected = '') {
@@ -4627,6 +4733,29 @@ function updateServerSoftwareFieldByMode() {
     const fallback = options[0]?.value || 'paper';
     const next = options.some(o => o.value === current) ? current : fallback;
     softwareSelect.innerHTML = renderServerSoftwareOptions(mode, next);
+    updateServerCreateSoftwareDetails();
+}
+
+function formatServerMemory(mb) {
+    const value = Number(mb || 0);
+    if (value >= 1024) return `${(value / 1024).toFixed(value >= 10240 ? 0 : 1)} GB`;
+    return `${Math.round(value)} MB`;
+}
+
+function formatServerRate(kbps) {
+    const value = Number(kbps || 0);
+    if (value >= 1024) return `${(value / 1024).toFixed(1)} MB/s`;
+    return `${value.toFixed(value < 10 ? 1 : 0)} KB/s`;
+}
+
+function formatServerUptime(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds || 0)));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if (h > 0) return `${h} h ${m} min`;
+    if (m > 0) return `${m} min ${s} s`;
+    return `${s} s`;
 }
 
 function clearServerHubIntervals() {
@@ -4642,6 +4771,7 @@ function clearServerHubIntervals() {
         clearInterval(serverConsolePollInterval);
         serverConsolePollInterval = null;
     }
+    stopServerMetricAnimation();
 }
 
 function animateServerTabContent(shell) {
@@ -4654,8 +4784,8 @@ function animateServerTabContent(shell) {
 function updateServerAutoScrollButton() {
     const btn = document.getElementById('server-auto-scroll-btn');
     if (!btn) return;
-    btn.textContent = serverConsoleAutoScroll ? 'Auto-Scroll: On' : 'Auto-Scroll: Off';
-    btn.style.color = serverConsoleAutoScroll ? '#fff' : 'var(--text-secondary)';
+    btn.innerHTML = `<i class="bi bi-arrow-down-square"></i> Auto-Scroll: ${serverConsoleAutoScroll ? 'On' : 'Off'}`;
+    btn.style.color = serverConsoleAutoScroll ? 'var(--text-primary)' : 'var(--text-secondary)';
 }
 
 function toggleServerConsoleAutoScroll() {
@@ -4671,21 +4801,20 @@ function toggleServerConsoleAutoScroll() {
 
 function getServerCardTemplate(server) {
     const modeLabel = getServerModeLabel(server.mode);
-    const iconClass = getServerIcon(server.mode);
     const safeId = escapeAttr(server.id);
 
     return `
         <div class="server-card server-card-rich" onclick="openServerProfileDetails('${safeId}')">
             <div class="server-card-top">
-                <div class="server-card-icon"><i class="bi ${iconClass}"></i></div>
+                <div class="server-card-icon"><i class="bi ${getServerIcon(server)}"></i></div>
                 <div style="flex:1; min-width:0;">
                     <h3 class="server-card-title">${escapeHtml(server.name)}</h3>
-                    <div class="server-card-subtitle">${escapeHtml(server.software)} • MC ${escapeHtml(server.minecraft_version)} • ${modeLabel}</div>
+                    <div class="server-card-subtitle">${escapeHtml(getServerSoftwareLabel(server.software))} • MC ${escapeHtml(server.minecraft_version)} • ${modeLabel}</div>
                 </div>
             </div>
 
-            <div class="server-runtime-badge" id="server-runtime-${safeId}">Status wird geladen...</div>
-            <div class="server-load-row" id="server-load-${safeId}">CPU --% • RAM -- MB • Uptime --</div>
+            <div class="server-runtime-badge offline" id="server-runtime-${safeId}"><i class="bi bi-circle-fill"></i> Status wird geladen...</div>
+            <div class="server-load-row" id="server-load-${safeId}">&nbsp;</div>
 
             <div class="server-card-actions" onclick="event.stopPropagation()">
                 <button class="btn" data-server-toggle-btn="${safeId}" onclick="toggleServerProfile('${safeId}')">
@@ -4701,10 +4830,20 @@ async function loadServerHub() {
     if (!root) return;
 
     clearServerHubIntervals();
+    currentServerProfile = null;
     root.innerHTML = '<div class="loading">Loading local servers...</div>';
 
     try {
         serverProfiles = await invoke('get_server_profiles');
+
+        if (pendingServerDetailOpen && serverProfiles.some(s => s.id === pendingServerDetailOpen.id)) {
+            const { id, tab } = pendingServerDetailOpen;
+            pendingServerDetailOpen = null;
+            openServerProfileDetails(id, tab);
+            return;
+        }
+        pendingServerDetailOpen = null;
+
         if (!serverProfiles || serverProfiles.length === 0) {
             root.innerHTML = `
                 <div class="server-grid">
@@ -4740,36 +4879,34 @@ async function loadServerHub() {
         serverHubPollInterval = setInterval(() => {
             if (currentPage !== 'servers-hub') return;
             serverProfiles.forEach(server => refreshServerRuntimeUI(server.id, false));
-            if (currentServerProfile) {
-                refreshServerRuntimeUI(currentServerProfile.id, false);
-            }
         }, 1600);
     } catch (error) {
         root.innerHTML = `<div style="color:#f44336;">Failed to load servers: ${escapeHtml(String(error))}</div>`;
     }
 }
 
+const serverSoftwareVersionsCache = new Map();
+
+async function getServerSoftwareVersions(software) {
+    if (serverSoftwareVersionsCache.has(software)) {
+        return serverSoftwareVersionsCache.get(software);
+    }
+    const versions = await invoke('get_server_software_versions', { software });
+    if (Array.isArray(versions) && versions.length > 0) {
+        serverSoftwareVersionsCache.set(software, versions);
+    }
+    return versions || [];
+}
+
 async function openCreateServerProfileModal() {
     const existing = document.getElementById('create-server-profile-modal');
     if (existing) existing.remove();
-
-    let versions = [];
-    try {
-        versions = await invoke('get_minecraft_versions');
-    } catch (_e) {
-        versions = [];
-    }
-    const releaseVersions = versions
-        .filter(v => String(v.version_type || '').toLowerCase() === 'release')
-        .slice(0, 40)
-        .map(v => `<option value="${escapeAttr(v.id)}">${escapeHtml(v.id)}</option>`)
-        .join('');
 
     const modal = document.createElement('div');
     modal.id = 'create-server-profile-modal';
     modal.className = 'modal active';
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 520px;">
+        <div class="modal-content" style="max-width: 560px;">
             <div class="modal-header"><i class="bi bi-hdd-network"></i> Create Local Server</div>
             <div class="form-group">
                 <label>Server Name</label>
@@ -4778,19 +4915,21 @@ async function openCreateServerProfileModal() {
             <div class="form-group">
                 <label>Mode</label>
                 <select id="new-server-mode">
-                    <option value="plugins">Plugins</option>
-                    <option value="modded">Modded</option>
+                    <option value="plugins">Plugins (Paper, Purpur, Folia, Spigot, Bukkit)</option>
+                    <option value="modded">Modded (Fabric, Quilt, Forge, NeoForge)</option>
                 </select>
             </div>
             <div class="form-group">
                 <label>Software</label>
                 <select id="new-server-software">${renderServerSoftwareOptions('plugins', 'paper')}</select>
+                <div id="new-server-software-hint" class="server-create-hint"></div>
             </div>
             <div class="form-group">
                 <label>Minecraft Version</label>
-                <select id="new-server-mc-version">${releaseVersions || '<option value="1.21.1">1.21.1</option>'}</select>
+                <select id="new-server-mc-version"><option value="">Lade verfügbare Versionen...</option></select>
+                <div id="new-server-version-status" class="server-create-hint"></div>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="new-server-software-version-group">
                 <label>Software Version / Build</label>
                 <input type="text" id="new-server-software-version" placeholder="latest" value="latest">
             </div>
@@ -4800,16 +4939,73 @@ async function openCreateServerProfileModal() {
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeCreateServerProfileModal()">Cancel</button>
-                <button class="btn" onclick="submitCreateServerProfile()">Create</button>
+                <button class="btn" id="new-server-submit" onclick="submitCreateServerProfile()">Create</button>
             </div>
         </div>
     `;
 
     document.body.appendChild(modal);
-    const modeSelect = document.getElementById('new-server-mode');
-    if (modeSelect) {
-        modeSelect.addEventListener('change', updateServerSoftwareFieldByMode);
+    document.getElementById('new-server-mode')?.addEventListener('change', updateServerSoftwareFieldByMode);
+    document.getElementById('new-server-software')?.addEventListener('change', updateServerCreateSoftwareDetails);
+
+    updateServerCreateSoftwareDetails();
+}
+
+async function updateServerCreateSoftwareDetails() {
+    const software = document.getElementById('new-server-software')?.value || 'paper';
+    const info = SERVER_SOFTWARE[software] || {};
+
+    const hint = document.getElementById('new-server-software-hint');
+    if (hint) hint.textContent = info.hint || '';
+
+    const versionGroup = document.getElementById('new-server-software-version-group');
+    const versionInput = document.getElementById('new-server-software-version');
+    if (versionGroup && versionInput) {
+        versionGroup.style.display = info.versionHint ? '' : 'none';
+        versionInput.placeholder = info.versionHint || 'latest';
+        if (!info.versionHint) versionInput.value = 'latest';
     }
+
+    const select = document.getElementById('new-server-mc-version');
+    const status = document.getElementById('new-server-version-status');
+    const submit = document.getElementById('new-server-submit');
+    if (!select) return;
+    const previous = select.value;
+
+    select.disabled = true;
+    if (submit) submit.disabled = true;
+    select.innerHTML = '<option value="">Lade verfügbare Versionen...</option>';
+    if (status) status.textContent = '';
+
+    let versions = [];
+    let loadError = null;
+    try {
+        versions = await getServerSoftwareVersions(software);
+    } catch (error) {
+        loadError = error;
+    }
+
+    // Das Modal könnte inzwischen geschlossen oder die Software geändert worden sein
+    if (document.getElementById('new-server-software')?.value !== software) return;
+
+    if (loadError || versions.length === 0) {
+        select.innerHTML = '<option value="">Keine Versionen verfügbar</option>';
+        if (status) {
+            status.innerHTML = `<span style="color:#f44336;"><i class="bi bi-exclamation-triangle"></i> Versionen für ${escapeHtml(info.label || software)} konnten nicht geladen werden${loadError ? ': ' + escapeHtml(String(loadError)) : ''}</span>
+                <a href="#" onclick="serverSoftwareVersionsCache.delete('${escapeAttr(software)}'); updateServerCreateSoftwareDetails(); return false;" style="color: var(--gold); margin-left:6px;">Erneut versuchen</a>`;
+        }
+        return;
+    }
+
+    select.innerHTML = versions
+        .map(v => `<option value="${escapeAttr(v)}">${escapeHtml(v)}</option>`)
+        .join('');
+    if (previous && versions.includes(previous)) {
+        select.value = previous;
+    }
+    select.disabled = false;
+    if (submit) submit.disabled = false;
+    if (status) status.textContent = `${versions.length} Versionen für ${info.label || software} verfügbar`;
 }
 
 function closeCreateServerProfileModal() {
@@ -4852,7 +5048,7 @@ async function submitCreateServerProfile() {
     }
 }
 
-function openServerProfileDetails(serverId) {
+function openServerProfileDetails(serverId, initialTab = 'console') {
     const root = document.getElementById('servers-hub-content');
     if (!root) return;
     const server = serverProfiles.find(s => s.id === serverId);
@@ -4862,28 +5058,32 @@ function openServerProfileDetails(serverId) {
     currentServerProfile = server;
     currentServerFilesPath = '';
     currentServerEditedFile = null;
+    serverMetricLastRuntime = null;
     if (!serverMetricHistory.has(server.id)) {
         serverMetricHistory.set(server.id, []);
     }
 
+    const safeId = escapeAttr(server.id);
     root.innerHTML = `
-        <div style="margin-bottom:14px;">
-            <button class="btn btn-secondary" onclick="loadServerHub()" style="margin-bottom:10px;">← Back</button>
-            <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+        <div class="server-detail-header">
+            <button class="btn btn-secondary" onclick="loadServerHub()" style="margin-bottom:12px;">← Back</button>
+            <div class="server-detail-top">
+                <div class="server-detail-icon"><i class="bi ${getServerIcon(server)}"></i></div>
                 <div style="flex:1; min-width:0;">
-                    <h2 style="color:var(--gold); margin:0;">${escapeHtml(server.name)}</h2>
-                    <p style="margin:6px 0 0; color:var(--text-secondary);">${escapeHtml(server.software)} • ${escapeHtml(server.mode)} • MC ${escapeHtml(server.minecraft_version)}</p>
-                    <div id="server-detail-runtime" class="server-runtime-badge" style="margin-top:8px; width:fit-content;">Status wird geladen...</div>
-                    <div id="server-detail-load" class="server-load-row" style="margin-top:6px;">CPU --% • RAM -- MB • Uptime --</div>
+                    <h2 class="server-detail-name">${escapeHtml(server.name)}</h2>
+                    <div class="server-detail-meta">${escapeHtml(getServerSoftwareLabel(server.software))} • ${getServerModeLabel(server.mode)} • Minecraft ${escapeHtml(server.minecraft_version)}</div>
+                    <div id="server-detail-runtime" class="server-runtime-badge offline" style="margin-top:8px; width:fit-content;"><i class="bi bi-circle-fill"></i> Status wird geladen...</div>
                 </div>
                 <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
-                    <div class="server-address-badge" id="server-detail-address">127.0.0.1:${server.port || 25565}</div>
+                    <button class="server-address-badge" id="server-detail-address" title="Adresse kopieren" onclick="copyServerAddress('${safeId}')">
+                        <i class="bi bi-clipboard"></i> 127.0.0.1:${server.port || 25565}
+                    </button>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
-                        <button class="btn" id="server-detail-toggle-btn" data-server-toggle-btn="${server.id}" onclick="toggleServerProfile('${server.id}')">
+                        <button class="btn" id="server-detail-toggle-btn" data-server-toggle-btn="${safeId}" onclick="toggleServerProfile('${safeId}')">
                             <i class="bi bi-play-fill"></i> Start
                         </button>
-                        <button class="btn btn-secondary" onclick="restartServerProfile('${server.id}')"><i class="bi bi-arrow-clockwise"></i> Restart</button>
-                        <button class="btn btn-secondary" onclick="killServerProfile('${server.id}')"><i class="bi bi-lightning-charge"></i> Kill</button>
+                        <button class="btn btn-secondary" onclick="restartServerProfile('${safeId}')"><i class="bi bi-arrow-clockwise"></i> Restart</button>
+                        <button class="btn btn-secondary" onclick="killServerProfile('${safeId}')"><i class="bi bi-lightning-charge"></i> Kill</button>
                     </div>
                 </div>
             </div>
@@ -4891,21 +5091,33 @@ function openServerProfileDetails(serverId) {
 
         <div class="server-tab-shell">
             <div class="server-tab-inner">
-                <button class="btn btn-secondary server-detail-tab" data-server-tab="console" onclick="switchServerDetailTab('console','${server.id}')">Console</button>
-                <button class="btn btn-secondary server-detail-tab" data-server-tab="content" onclick="switchServerDetailTab('content','${server.id}')">Content</button>
-                <button class="btn btn-secondary server-detail-tab" data-server-tab="settings" onclick="switchServerDetailTab('settings','${server.id}')">Settings</button>
-                <button class="btn btn-secondary server-detail-tab" data-server-tab="files" onclick="switchServerDetailTab('files','${server.id}')">Files</button>
+                <button class="btn btn-secondary server-detail-tab" data-server-tab="console" onclick="switchServerDetailTab('console','${safeId}')"><i class="bi bi-terminal"></i> Console</button>
+                <button class="btn btn-secondary server-detail-tab" data-server-tab="content" onclick="switchServerDetailTab('content','${safeId}')"><i class="bi ${server.mode === 'plugins' ? 'bi-plug' : 'bi-puzzle'}"></i> Content</button>
+                <button class="btn btn-secondary server-detail-tab" data-server-tab="backups" onclick="switchServerDetailTab('backups','${safeId}')"><i class="bi bi-archive"></i> Backups</button>
+                <button class="btn btn-secondary server-detail-tab" data-server-tab="settings" onclick="switchServerDetailTab('settings','${safeId}')"><i class="bi bi-sliders"></i> Settings</button>
+                <button class="btn btn-secondary server-detail-tab" data-server-tab="files" onclick="switchServerDetailTab('files','${safeId}')"><i class="bi bi-folder2-open"></i> Files</button>
             </div>
         </div>
-        <div id="server-detail-content" style="max-height: calc(100vh - 260px); overflow-y: auto; padding-right: 4px;"></div>
+        <div id="server-detail-content" style="max-height: calc(100vh - 290px); overflow-y: auto; overflow-x: hidden; padding-right: 4px;"></div>
     `;
 
-    switchServerDetailTab('console', server.id);
+    switchServerDetailTab(initialTab, server.id);
     refreshServerRuntimeUI(server.id, false);
     serverDetailsPollInterval = setInterval(() => {
-        if (!currentServerProfile || currentServerProfile.id !== server.id) return;
+        if (currentPage !== 'servers-hub' || !currentServerProfile || currentServerProfile.id !== server.id) return;
         refreshServerRuntimeUI(server.id, false);
-    }, 1500);
+    }, 1000);
+}
+
+async function copyServerAddress(serverId) {
+    const server = serverProfiles.find(s => s.id === serverId);
+    const address = `127.0.0.1:${server?.port || 25565}`;
+    try {
+        await navigator.clipboard.writeText(address);
+        showToast(`${address} kopiert`, 'success', 1800);
+    } catch (_e) {
+        showToast(address, 'info', 2500);
+    }
 }
 
 function switchServerDetailTab(tab, serverId) {
@@ -4919,40 +5131,52 @@ function switchServerDetailTab(tab, serverId) {
         clearInterval(serverConsolePollInterval);
         serverConsolePollInterval = null;
     }
+    stopServerMetricAnimation();
+
+    const server = serverProfiles.find(s => s.id === serverId) || currentServerProfile;
+    const safeId = escapeAttr(serverId);
 
     if (tab === 'content') {
-        const contentType = currentServerProfile?.mode === 'plugins' ? 'plugins' : 'mods';
-        shell.innerHTML = `
-            <div style="margin-bottom:10px; color:var(--text-secondary); font-size:13px;">Installierte ${contentType} (Dateiverwaltung und Upload im Tab "Files")</div>
-            <div id="server-content-list" class="profile-scroll-box" style="background:var(--bg-medium); border-radius:10px; padding:10px;"></div>
-        `;
+        shell.innerHTML = renderServerContentTab(server);
         animateServerTabContent(shell);
-        loadServerContent(serverId, contentType);
+        loadServerInstalledContent(serverId);
+        return;
+    }
+
+    if (tab === 'backups') {
+        shell.innerHTML = renderServerBackupsTab(server);
+        animateServerTabContent(shell);
+        loadServerBackups(serverId);
         return;
     }
 
     if (tab === 'console') {
         shell.innerHTML = `
-            <div style="display:flex; justify-content:space-between; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
-                <div style="display:flex; gap:8px;">
-                    <button class="btn btn-secondary" onclick="loadServerConsole('${serverId}')"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
-                    <button class="btn btn-secondary" onclick="clearServerConsoleOutput()"><i class="bi bi-eraser"></i> Clear View</button>
-                    <button class="btn btn-secondary" id="server-auto-scroll-btn" onclick="toggleServerConsoleAutoScroll()">Auto-Scroll: On</button>
-                </div>
-                <div style="color:var(--text-secondary); font-size:12px; display:flex; align-items:center;">Live stream (polling)</div>
+            <div class="server-metrics-grid">
+                ${renderServerMetricCard('cpu', 'bi-cpu', 'CPU')}
+                ${renderServerMetricCard('ram', 'bi-memory', 'RAM')}
+                ${renderServerMetricCard('net', 'bi-hdd-network', 'Netzwerk (System)', `
+                    <div class="server-metric-legend">
+                        <span><span class="server-metric-key" data-series="rx"></span>Download</span>
+                        <span><span class="server-metric-key" data-series="tx"></span>Upload</span>
+                    </div>
+                `)}
             </div>
-            <pre id="server-console-output" class="profile-scroll-box" style="background:#0c0c0c; border:1px solid var(--bg-light); border-radius:10px; padding:12px; font-size:12px; line-height:1.45; white-space:pre-wrap; min-height:430px;"></pre>
-            <div style="display:flex; gap:8px; margin-top:10px;">
-                <input id="server-console-command" type="text" placeholder="say Server ready" style="flex:1;">
-                <button class="btn" onclick="sendServerConsoleCommand('${serverId}')">Send</button>
-            </div>
-            <div style="margin-top:10px; background:var(--bg-medium); border:1px solid var(--bg-light); border-radius:10px; padding:10px;">
-                <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:8px; font-size:12px;">
-                    <span id="server-metric-cpu">CPU: --%</span>
-                    <span id="server-metric-ram">RAM: -- MB</span>
-                    <span id="server-metric-net">NET: -- KB/s</span>
+
+            <div class="server-console-panel">
+                <div class="server-console-toolbar">
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button class="btn btn-secondary" onclick="loadServerConsole('${safeId}')"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                        <button class="btn btn-secondary" onclick="clearServerConsoleOutput()"><i class="bi bi-eraser"></i> Clear View</button>
+                        <button class="btn btn-secondary" id="server-auto-scroll-btn" onclick="toggleServerConsoleAutoScroll()"></button>
+                    </div>
+                    <div style="color:var(--text-secondary); font-size:12px; display:flex; align-items:center; gap:6px;"><i class="bi bi-broadcast"></i> Live</div>
                 </div>
-                <canvas id="server-metrics-chart" width="1200" height="180" style="width:100%; height:180px; display:block;"></canvas>
+                <pre id="server-console-output" class="profile-scroll-box server-console-output"></pre>
+                <div style="display:flex; gap:8px; margin-top:10px;">
+                    <input id="server-console-command" type="text" placeholder="Befehl eingeben, z.B. say Hallo" style="flex:1;">
+                    <button class="btn" onclick="sendServerConsoleCommand('${safeId}')"><i class="bi bi-send"></i> Send</button>
+                </div>
             </div>
         `;
         const input = document.getElementById('server-console-command');
@@ -4964,14 +5188,15 @@ function switchServerDetailTab(tab, serverId) {
             });
         }
 
+        ['cpu', 'ram', 'net'].forEach(key => bindServerMetricHover(key));
         animateServerTabContent(shell);
         updateServerAutoScrollButton();
         loadServerConsole(serverId);
-        renderServerMetricsChart(serverId);
+        updateServerMetricCards(serverId, serverMetricLastRuntime);
+        startServerMetricAnimation(serverId);
         serverConsolePollInterval = setInterval(() => {
             if (!currentServerProfile || currentServerProfile.id !== serverId) return;
             loadServerConsole(serverId);
-            renderServerMetricsChart(serverId);
         }, 1000);
         return;
     }
@@ -4984,24 +5209,24 @@ function switchServerDetailTab(tab, serverId) {
     }
 
     shell.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+        <div style="display:flex; justify-content:space-between; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <button class="btn btn-secondary" onclick="navigateServerFilesUp('${serverId}')"><i class="bi bi-arrow-up"></i> Up</button>
-                <button class="btn btn-secondary" onclick="loadServerFiles('${serverId}', currentServerFilesPath)"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
-                <button class="btn btn-secondary" onclick="createServerFolderPrompt('${serverId}')"><i class="bi bi-folder-plus"></i> New Folder</button>
+                <button class="btn btn-secondary" onclick="navigateServerFilesUp('${safeId}')"><i class="bi bi-arrow-up"></i> Up</button>
+                <button class="btn btn-secondary" onclick="loadServerFiles('${safeId}', currentServerFilesPath)"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                <button class="btn btn-secondary" onclick="createServerFolderPrompt('${safeId}')"><i class="bi bi-folder-plus"></i> New Folder</button>
                 <button class="btn btn-secondary" onclick="triggerServerFileUpload()"><i class="bi bi-upload"></i> Upload</button>
-                <button class="btn btn-secondary" onclick="openServerFolder('${serverId}', currentServerFilesPath || null)"><i class="bi bi-box-arrow-up-right"></i> Open Extern</button>
-                <input id="server-file-upload" type="file" style="display:none;" onchange="uploadServerFileFromInput('${serverId}', this)">
+                <button class="btn btn-secondary" onclick="openServerFolder('${safeId}', currentServerFilesPath || null)"><i class="bi bi-box-arrow-up-right"></i> Open Extern</button>
+                <input id="server-file-upload" type="file" style="display:none;" onchange="uploadServerFileFromInput('${safeId}', this)">
             </div>
             <div id="server-files-path" style="font-size:12px; color:var(--text-secondary);">/</div>
         </div>
         <div id="server-files-list" class="profile-scroll-box" style="background:var(--bg-medium); border-radius:10px; padding:10px; min-height:240px;"></div>
         <div id="server-file-editor-shell" style="display:none; margin-top:12px; background:var(--bg-medium); border-radius:10px; padding:12px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px;">
                 <strong id="server-file-editor-name"></strong>
                 <div style="display:flex; gap:8px;">
                     <button class="btn btn-secondary" onclick="closeServerFileEditor()">Close</button>
-                    <button class="btn" onclick="saveServerFileEditor('${serverId}')">Save</button>
+                    <button class="btn" onclick="saveServerFileEditor('${safeId}')">Save</button>
                 </div>
             </div>
             <textarea id="server-file-editor" style="width:100%; min-height:260px; font-family:Consolas, monospace;"></textarea>
@@ -5011,79 +5236,65 @@ function switchServerDetailTab(tab, serverId) {
     loadServerFiles(serverId, currentServerFilesPath || '');
 }
 
+function getServerRuntimeStatus(runtime) {
+    if (runtime?.running) {
+        return { cls: 'online', html: `<i class="bi bi-circle-fill"></i> Online · ${formatServerUptime(runtime.uptime_seconds)}` };
+    }
+    if (runtime?.installing) {
+        return { cls: 'installing', html: '<i class="bi bi-hourglass-split"></i> Wird vorbereitet...' };
+    }
+    return { cls: 'offline', html: '<i class="bi bi-circle"></i> Offline' };
+}
+
 async function refreshServerRuntimeUI(serverId, showErrorToast = false) {
     try {
         const runtime = await invoke('get_server_runtime', { serverId });
         const running = !!runtime?.running;
-        const networkKbps = Number(runtime?.network_kbps || 0);
+        const installing = !!runtime?.installing;
+        recordServerMetrics(serverId, runtime);
 
-        const runtimeText = running
-            ? `Running (PID ${runtime.pid || '-'})`
-            : 'Offline';
-        const uptimeText = running
-            ? `${Math.floor((runtime.uptime_seconds || 0) / 60)} min`
-            : '--';
+        const status = getServerRuntimeStatus(runtime);
         const loadText = running
-            ? `CPU ${(runtime.cpu_percent || 0).toFixed(1)}% • RAM ${runtime.memory_mb || 0} MB • NET ${networkKbps.toFixed(1)} KB/s • Uptime ${uptimeText}`
-            : 'CPU --% • RAM -- MB • NET -- KB/s • Uptime --';
+            ? `CPU ${(runtime.cpu_percent || 0).toFixed(1)} % • RAM ${formatServerMemory(runtime.memory_mb)} • PID ${runtime.pid || '-'}`
+            : installing
+                ? 'Installation läuft – siehe Konsole'
+                : 'Gestoppt';
 
-        const runtimeBadge = document.getElementById(`server-runtime-${serverId}`);
-        if (runtimeBadge) {
-            runtimeBadge.textContent = runtimeText;
-            runtimeBadge.style.color = running ? '#55d66b' : 'var(--text-secondary)';
-        }
+        [document.getElementById(`server-runtime-${serverId}`),
+            currentServerProfile?.id === serverId ? document.getElementById('server-detail-runtime') : null]
+            .forEach(badge => {
+                if (!badge) return;
+                badge.innerHTML = status.html;
+                badge.classList.remove('online', 'offline', 'installing');
+                badge.classList.add(status.cls);
+            });
 
         const loadRow = document.getElementById(`server-load-${serverId}`);
         if (loadRow) {
             loadRow.textContent = loadText;
         }
 
-        const detailBadge = document.getElementById('server-detail-runtime');
-        const detailLoad = document.getElementById('server-detail-load');
-        const detailAddress = document.getElementById('server-detail-address');
         if (currentServerProfile && currentServerProfile.id === serverId) {
-            if (detailBadge) {
-                detailBadge.textContent = runtimeText;
-                detailBadge.style.color = running ? '#55d66b' : 'var(--text-secondary)';
-            }
-            if (detailLoad) {
-                detailLoad.textContent = loadText;
-            }
-            if (detailAddress) {
-                detailAddress.textContent = `127.0.0.1:${currentServerProfile.port || 25565}`;
-            }
-
-            const cpuLabel = document.getElementById('server-metric-cpu');
-            const ramLabel = document.getElementById('server-metric-ram');
-            const netLabel = document.getElementById('server-metric-net');
-            if (cpuLabel) cpuLabel.textContent = `CPU: ${(runtime.cpu_percent || 0).toFixed(1)}%`;
-            if (ramLabel) ramLabel.textContent = `RAM: ${runtime.memory_mb || 0} MB`;
-            if (netLabel) netLabel.textContent = `NET: ${networkKbps.toFixed(1)} KB/s`;
-
-            const history = serverMetricHistory.get(serverId) || [];
-            history.push({
-                cpu: Number(runtime.cpu_percent || 0),
-                ram: Number(runtime.memory_mb || 0),
-                net: networkKbps,
-                ts: Date.now(),
-            });
-            while (history.length > 60) history.shift();
-            serverMetricHistory.set(serverId, history);
+            serverMetricLastRuntime = runtime;
+            updateServerMetricCards(serverId, runtime);
         }
 
         document.querySelectorAll(`[data-server-toggle-btn="${serverId}"]`).forEach(btn => {
+            btn.disabled = installing;
             if (running) {
                 btn.innerHTML = '<i class="bi bi-stop-fill"></i> Stop';
                 btn.style.background = '#c0392b';
                 btn.style.color = '#fff';
+            } else if (installing) {
+                btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Startet...';
+                btn.style.background = '';
+                btn.style.color = '';
             } else {
                 btn.innerHTML = '<i class="bi bi-play-fill"></i> Start';
                 btn.style.background = '';
                 btn.style.color = '';
             }
         });
-
-        renderServerMetricsChart(serverId);
     } catch (error) {
         if (showErrorToast) {
             showToast('Server status konnte nicht geladen werden: ' + error, 'error', 3500);
@@ -5091,144 +5302,468 @@ async function refreshServerRuntimeUI(serverId, showErrorToast = false) {
     }
 }
 
-function drawMetricLine(ctx, points, maxValue, width, height, color) {
-    if (!points.length) return;
-    ctx.beginPath();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
+// ==================== SERVER METRICS (CPU / RAM / NETZWERK) ====================
 
-    points.forEach((value, index) => {
-        const x = (index / Math.max(points.length - 1, 1)) * width;
-        const normalized = maxValue > 0 ? Math.min(value / maxValue, 1) : 0;
-        const y = height - normalized * (height - 10) - 5;
-        if (index === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
+function renderServerMetricCard(key, icon, label, extra = '') {
+    return `
+        <div class="server-metric-card" data-metric="${key}">
+            <div class="server-metric-head">
+                <div style="min-width:0;">
+                    <div class="server-metric-label"><i class="bi ${icon}"></i> ${label}</div>
+                    <div class="server-metric-value" id="server-metric-${key}-value">--</div>
+                </div>
+                <div class="server-metric-side">
+                    <div class="server-metric-sub" id="server-metric-${key}-sub">Server offline</div>
+                    ${extra}
+                </div>
+            </div>
+            <div class="server-metric-chart">
+                <canvas id="server-metric-${key}-chart" aria-label="${label} Verlauf der letzten 2 Minuten" role="img"></canvas>
+                <div class="server-metric-tooltip" id="server-metric-${key}-tooltip"></div>
+            </div>
+        </div>
+    `;
 }
 
-function renderServerMetricsChart(serverId) {
-    const canvas = document.getElementById('server-metrics-chart');
-    if (!canvas || !currentServerProfile || currentServerProfile.id !== serverId) return;
-
+function recordServerMetrics(serverId, runtime) {
     const history = serverMetricHistory.get(serverId) || [];
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const now = Date.now();
 
-    const width = canvas.width;
-    const height = canvas.height;
-    ctx.clearRect(0, 0, width, height);
-
-    ctx.fillStyle = '#0f1117';
-    ctx.fillRect(0, 0, width, height);
-
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
-    for (let i = 1; i <= 4; i++) {
-        const y = (height / 5) * i;
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
+    if (runtime?.running) {
+        history.push({
+            ts: now,
+            cpu: Number(runtime.cpu_percent || 0),
+            ram: Number(runtime.memory_mb || 0),
+            rx: Number(runtime.network_rx_kbps || 0),
+            tx: Number(runtime.network_tx_kbps || 0),
+        });
+    } else if (history.length > 0 && !history[history.length - 1].gap) {
+        // Lücke markieren, damit Start/Stop nicht mit einer Linie verbunden wird
+        history.push({ ts: now, gap: true });
     }
 
-    if (!history.length) {
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.font = '14px sans-serif';
-        ctx.fillText('Warte auf Runtime-Daten...', 14, 28);
+    const cutoff = now - SERVER_METRIC_WINDOW_MS - SERVER_METRIC_RENDER_DELAY_MS - 5000;
+    while (history.length > 0 && history[0].ts < cutoff) history.shift();
+    serverMetricHistory.set(serverId, history);
+}
+
+function updateServerMetricCards(serverId, runtime) {
+    if (!currentServerProfile || currentServerProfile.id !== serverId) return;
+    const set = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    };
+    const allocated = currentServerProfile.memory_mb || 4096;
+
+    if (!runtime?.running) {
+        const offlineText = runtime?.installing ? 'Wird vorbereitet...' : 'Server offline';
+        set('server-metric-cpu-value', '--');
+        set('server-metric-cpu-sub', offlineText);
+        set('server-metric-ram-value', '--');
+        set('server-metric-ram-sub', `${formatServerMemory(allocated)} zugewiesen`);
+        set('server-metric-net-value', '--');
+        set('server-metric-net-sub', offlineText);
         return;
     }
 
-    const cpuValues = history.map(v => v.cpu);
-    const ramValues = history.map(v => v.ram);
-    const netValues = history.map(v => v.net);
-
-    const maxCpu = 100;
-    const maxRam = Math.max(512, ...ramValues);
-    const maxNet = Math.max(64, ...netValues);
-
-    drawMetricLine(ctx, cpuValues, maxCpu, width, height, '#ffb703');
-    drawMetricLine(ctx, ramValues, maxRam, width, height, '#4dabf7');
-    drawMetricLine(ctx, netValues, maxNet, width, height, '#7bd88f');
-
-    ctx.fillStyle = '#ffb703';
-    ctx.fillRect(10, 8, 12, 3);
-    ctx.fillStyle = '#d7d7d7';
-    ctx.font = '12px sans-serif';
-    ctx.fillText('CPU %', 28, 12);
-
-    ctx.fillStyle = '#4dabf7';
-    ctx.fillRect(90, 8, 12, 3);
-    ctx.fillStyle = '#d7d7d7';
-    ctx.fillText('RAM MB', 108, 12);
-
-    ctx.fillStyle = '#7bd88f';
-    ctx.fillRect(188, 8, 12, 3);
-    ctx.fillStyle = '#d7d7d7';
-    ctx.fillText('NET KB/s', 206, 12);
+    set('server-metric-cpu-value', `${Number(runtime.cpu_percent || 0).toFixed(1)} %`);
+    set('server-metric-cpu-sub', `${runtime.cpu_cores || '?'} Kerne gesamt`);
+    set('server-metric-ram-value', formatServerMemory(runtime.memory_mb));
+    set('server-metric-ram-sub', `von ${formatServerMemory(allocated)} zugewiesen`);
+    set('server-metric-net-value', `↓ ${formatServerRate(runtime.network_rx_kbps)}`);
+    set('server-metric-net-sub', `↑ ${formatServerRate(runtime.network_tx_kbps)}`);
 }
+
+function niceServerChartMax(value) {
+    if (!(value > 0)) return 1;
+    const exponent = Math.floor(Math.log10(value));
+    const base = Math.pow(10, exponent);
+    const step = [1, 2, 2.5, 5, 10].find(s => s * base >= value) || 10;
+    return step * base;
+}
+
+function hexToRgba(color, alpha) {
+    const hex = String(color || '').trim().replace('#', '');
+    const full = hex.length === 3 ? hex.split('').map(c => c + c).join('') : hex;
+    if (!/^[0-9a-fA-F]{6}$/.test(full)) return `rgba(255, 215, 0, ${alpha})`;
+    const n = parseInt(full, 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+function isLightSurface(color) {
+    const hex = String(color || '').trim().replace('#', '');
+    const full = hex.length === 3 ? hex.split('').map(c => c + c).join('') : hex;
+    if (!/^[0-9a-fA-F]{6}$/.test(full)) return false;
+    const n = parseInt(full, 16);
+    const luminance = (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
+    return luminance > 0.6;
+}
+
+function getServerChartTheme(element) {
+    const styles = getComputedStyle(element);
+    const surface = styles.getPropertyValue('--bg-dark').trim() || '#1a1a1a';
+    const light = isLightSurface(surface);
+    return {
+        accent: styles.getPropertyValue('--gold').trim() || '#FFD700',
+        surface,
+        text: styles.getPropertyValue('--text-secondary').trim() || '#b0b0b0',
+        grid: light ? 'rgba(0, 0, 0, 0.09)' : 'rgba(255, 255, 255, 0.08)',
+        crosshair: light ? 'rgba(0, 0, 0, 0.35)' : 'rgba(255, 255, 255, 0.35)',
+        // Validierte Kategorie-Farben (blau/orange) je Theme-Oberfläche
+        download: light ? '#2a78d6' : '#3987e5',
+        upload: light ? '#eb6834' : '#d95926',
+    };
+}
+
+function valueAtServerChartTime(points, key, ts) {
+    // Linear interpolieren, damit die Linie exakt an der rechten Kante endet
+    for (let i = points.length - 1; i > 0; i--) {
+        const b = points[i];
+        const a = points[i - 1];
+        if (a.ts <= ts && b.ts >= ts) {
+            if (a.gap || b.gap) return null;
+            const t = (ts - a.ts) / Math.max(1, b.ts - a.ts);
+            return { ts, value: a[key] + (b[key] - a[key]) * t };
+        }
+    }
+    const last = points[points.length - 1];
+    if (last && !last.gap && last.ts <= ts) return { ts: last.ts, value: last[key] };
+    return null;
+}
+
+function drawServerMetricChart(canvas, config) {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width < 10 || rect.height < 10) return null;
+
+    const dpr = window.devicePixelRatio || 1;
+    const pixelWidth = Math.round(rect.width * dpr);
+    const pixelHeight = Math.round(rect.height * dpr);
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+        canvas.width = pixelWidth;
+        canvas.height = pixelHeight;
+    }
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, rect.width, rect.height);
+
+    const theme = config.theme;
+    const pad = { left: 52, right: 10, top: 8, bottom: 20 };
+    const plotWidth = Math.max(1, rect.width - pad.left - pad.right);
+    const plotHeight = Math.max(1, rect.height - pad.top - pad.bottom);
+    const end = config.now;
+    const start = end - SERVER_METRIC_WINDOW_MS;
+    const toX = ts => pad.left + ((ts - start) / SERVER_METRIC_WINDOW_MS) * plotWidth;
+    const toY = value => pad.top + plotHeight - (Math.max(0, Math.min(value, config.max)) / config.max) * plotHeight;
+
+    ctx.font = '11px "Segoe UI", system-ui, sans-serif';
+    ctx.lineWidth = 1;
+
+    // Gridlines + Y-Achse (0 / 50 % / 100 % der Skala)
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    [0, 0.5, 1].forEach(fraction => {
+        const y = Math.round(pad.top + plotHeight - fraction * plotHeight) + 0.5;
+        ctx.strokeStyle = theme.grid;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(pad.left + plotWidth, y);
+        ctx.stroke();
+        ctx.fillStyle = theme.text;
+        ctx.fillText(config.formatTick(config.max * fraction), pad.left - 8, y);
+    });
+
+    // X-Achse
+    ctx.textBaseline = 'top';
+    const labelY = pad.top + plotHeight + 6;
+    ctx.textAlign = 'left';
+    ctx.fillText('-2 min', pad.left, labelY);
+    ctx.textAlign = 'center';
+    ctx.fillText('-1 min', pad.left + plotWidth / 2, labelY);
+    ctx.textAlign = 'right';
+    ctx.fillText('jetzt', pad.left + plotWidth, labelY);
+
+    const points = config.points;
+    const hasData = points.some(p => !p.gap && p.ts >= start - 5000);
+    if (!hasData) {
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = theme.text;
+        ctx.fillText(config.emptyText, pad.left + plotWidth / 2, pad.top + plotHeight / 2);
+        return null;
+    }
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(pad.left, pad.top - 6, plotWidth, plotHeight + 12);
+    ctx.clip();
+
+    // In zusammenhängende Segmente aufteilen (Lücken = Server war offline)
+    const segments = [];
+    let current = [];
+    points.forEach(point => {
+        if (point.gap) {
+            if (current.length) segments.push(current);
+            current = [];
+        } else {
+            current.push(point);
+        }
+    });
+    if (current.length) segments.push(current);
+
+    const baseline = pad.top + plotHeight;
+    config.series.forEach(series => {
+        segments.forEach(segment => {
+            if (config.fill && segment.length > 1) {
+                ctx.beginPath();
+                ctx.moveTo(toX(segment[0].ts), baseline);
+                segment.forEach(p => ctx.lineTo(toX(p.ts), toY(p[series.key])));
+                ctx.lineTo(toX(segment[segment.length - 1].ts), baseline);
+                ctx.closePath();
+                ctx.fillStyle = hexToRgba(series.color, 0.1);
+                ctx.fill();
+            }
+
+            ctx.beginPath();
+            segment.forEach((p, index) => {
+                const x = toX(p.ts);
+                const y = toY(p[series.key]);
+                if (index === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.strokeStyle = series.color;
+            ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.stroke();
+        });
+    });
+    ctx.restore();
+
+    const drawDot = (x, y, color) => {
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = theme.surface;
+        ctx.stroke();
+    };
+
+    // Hover: Crosshair rastet auf den nächsten Messpunkt ein
+    if (config.hoverX != null) {
+        const visible = points.filter(p => !p.gap && p.ts >= start && p.ts <= end);
+        if (visible.length > 0) {
+            const nearest = visible.reduce((best, p) =>
+                Math.abs(toX(p.ts) - config.hoverX) < Math.abs(toX(best.ts) - config.hoverX) ? p : best);
+            const x = Math.round(toX(nearest.ts)) + 0.5;
+            ctx.strokeStyle = theme.crosshair;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x, pad.top);
+            ctx.lineTo(x, baseline);
+            ctx.stroke();
+            config.series.forEach(series => drawDot(x, toY(nearest[series.key]), series.color));
+            return { point: nearest, x };
+        }
+        return null;
+    }
+
+    // Endpunkt an der rechten Kante
+    config.series.forEach(series => {
+        const edge = valueAtServerChartTime(points, series.key, end);
+        if (edge) drawDot(toX(edge.ts), toY(edge.value), series.color);
+    });
+    return null;
+}
+
+function updateServerMetricTooltip(key, hit, series, formatValue, now) {
+    const tooltip = document.getElementById(`server-metric-${key}-tooltip`);
+    if (!tooltip) return;
+    if (!hit) {
+        tooltip.classList.remove('visible');
+        return;
+    }
+
+    tooltip.replaceChildren();
+    series.forEach(s => {
+        const row = document.createElement('div');
+        row.className = 'server-metric-tooltip-row';
+        const keyEl = document.createElement('span');
+        keyEl.className = 'server-metric-key';
+        keyEl.style.background = s.color;
+        const value = document.createElement('strong');
+        value.textContent = formatValue(hit.point[s.key]);
+        const label = document.createElement('span');
+        label.textContent = s.label;
+        row.append(keyEl, value, label);
+        tooltip.appendChild(row);
+    });
+    const age = document.createElement('div');
+    age.className = 'server-metric-tooltip-time';
+    const seconds = Math.max(0, Math.round((now + SERVER_METRIC_RENDER_DELAY_MS - hit.point.ts) / 1000));
+    age.textContent = seconds <= 1 ? 'gerade eben' : `vor ${seconds} s`;
+    tooltip.appendChild(age);
+
+    const chart = tooltip.parentElement;
+    const maxLeft = (chart?.clientWidth || 0) - tooltip.offsetWidth - 4;
+    const left = hit.x + 12 > maxLeft ? hit.x - tooltip.offsetWidth - 12 : hit.x + 12;
+    tooltip.style.left = `${Math.max(4, left)}px`;
+    tooltip.classList.add('visible');
+}
+
+function renderServerMetricCharts(serverId) {
+    const cpuCanvas = document.getElementById('server-metric-cpu-chart');
+    if (!cpuCanvas || !currentServerProfile || currentServerProfile.id !== serverId) return false;
+
+    const theme = getServerChartTheme(cpuCanvas);
+    const points = serverMetricHistory.get(serverId) || [];
+    const now = Date.now() - SERVER_METRIC_RENDER_DELAY_MS;
+    const valid = points.filter(p => !p.gap);
+    const emptyText = serverMetricLastRuntime?.installing ? 'Server wird vorbereitet...' : 'Keine Daten – Server ist offline';
+    const allocated = currentServerProfile.memory_mb || 4096;
+
+    document.querySelectorAll('.server-metric-key[data-series="rx"]').forEach(el => { el.style.background = theme.download; });
+    document.querySelectorAll('.server-metric-key[data-series="tx"]').forEach(el => { el.style.background = theme.upload; });
+
+    const charts = [
+        {
+            key: 'cpu',
+            series: [{ key: 'cpu', label: 'CPU', color: theme.accent }],
+            max: 100,
+            fill: true,
+            formatTick: v => `${Math.round(v)} %`,
+            formatValue: v => `${Number(v).toFixed(1)} %`,
+        },
+        {
+            key: 'ram',
+            series: [{ key: 'ram', label: 'RAM', color: theme.accent }],
+            max: Math.ceil(Math.max(allocated, ...valid.map(p => p.ram * 1.05)) / 512) * 512,
+            fill: true,
+            formatTick: v => formatServerMemory(v),
+            formatValue: v => formatServerMemory(v),
+        },
+        {
+            key: 'net',
+            series: [
+                { key: 'rx', label: 'Download', color: theme.download },
+                { key: 'tx', label: 'Upload', color: theme.upload },
+            ],
+            max: niceServerChartMax(Math.max(16, ...valid.map(p => Math.max(p.rx, p.tx) * 1.15))),
+            fill: false,
+            formatTick: v => formatServerRate(v),
+            formatValue: v => formatServerRate(v),
+        },
+    ];
+
+    charts.forEach(chart => {
+        const canvas = document.getElementById(`server-metric-${chart.key}-chart`);
+        if (!canvas) return;
+        const hit = drawServerMetricChart(canvas, {
+            theme,
+            points,
+            now,
+            max: chart.max,
+            fill: chart.fill,
+            series: chart.series,
+            formatTick: chart.formatTick,
+            emptyText,
+            hoverX: serverMetricHover[chart.key],
+        });
+        updateServerMetricTooltip(chart.key, hit, chart.series, chart.formatValue, now);
+    });
+    return true;
+}
+
+function bindServerMetricHover(key) {
+    const canvas = document.getElementById(`server-metric-${key}-chart`);
+    if (!canvas) return;
+    canvas.addEventListener('pointermove', event => {
+        const rect = canvas.getBoundingClientRect();
+        serverMetricHover[key] = event.clientX - rect.left;
+    });
+    canvas.addEventListener('pointerleave', () => {
+        serverMetricHover[key] = null;
+    });
+}
+
+function startServerMetricAnimation(serverId) {
+    stopServerMetricAnimation();
+    let lastFrame = 0;
+    const frame = (timestamp) => {
+        // ~30 FPS reichen für eine weich scrollende Zeitachse
+        if (timestamp - lastFrame >= 33) {
+            lastFrame = timestamp;
+            if (!renderServerMetricCharts(serverId)) {
+                serverMetricAnimationFrame = null;
+                return;
+            }
+        }
+        serverMetricAnimationFrame = requestAnimationFrame(frame);
+    };
+    serverMetricAnimationFrame = requestAnimationFrame(frame);
+}
+
+function stopServerMetricAnimation() {
+    if (serverMetricAnimationFrame) {
+        cancelAnimationFrame(serverMetricAnimationFrame);
+        serverMetricAnimationFrame = null;
+    }
+    serverMetricHover.cpu = null;
+    serverMetricHover.ram = null;
+    serverMetricHover.net = null;
+}
+
+// ==================== SERVER ACTIONS ====================
 
 async function toggleServerProfile(serverId) {
     try {
         const runtime = await invoke('get_server_runtime', { serverId });
         if (runtime?.running) {
-            await invoke('stop_server_profile', { serverId });
             showToast('Server wird gestoppt...', 'info', 1800);
-        } else {
-            await invoke('start_server_profile', { serverId });
-            showToast('Server wird gestartet (JAR Download automatisch bei Bedarf)', 'success', 2600);
+            const stopPromise = invoke('stop_server_profile', { serverId });
+            setTimeout(() => refreshServerRuntimeUI(serverId, false), 400);
+            await stopPromise;
+        } else if (!runtime?.installing) {
+            showToast('Server wird gestartet (Software wird bei Bedarf automatisch heruntergeladen)', 'success', 2600);
+            const startPromise = invoke('start_server_profile', { serverId });
+            setTimeout(() => refreshServerRuntimeUI(serverId, false), 300);
+            await startPromise;
         }
-
-        setTimeout(() => refreshServerRuntimeUI(serverId, false), 400);
+        refreshServerRuntimeUI(serverId, false);
     } catch (error) {
-        showToast('Server Aktion fehlgeschlagen: ' + error, 'error', 4200);
+        refreshServerRuntimeUI(serverId, false);
+        showToast('Server Aktion fehlgeschlagen: ' + error, 'error', 5200);
     }
 }
 
 async function restartServerProfile(serverId) {
     try {
-        await invoke('restart_server_profile', { serverId });
         showToast('Server wird neugestartet...', 'info', 2200);
+        const restartPromise = invoke('restart_server_profile', { serverId });
         setTimeout(() => refreshServerRuntimeUI(serverId, false), 500);
+        await restartPromise;
+        refreshServerRuntimeUI(serverId, false);
     } catch (error) {
         showToast('Neustart fehlgeschlagen: ' + error, 'error', 4200);
     }
 }
 
 async function killServerProfile(serverId) {
-    if (!confirm('Server-Prozess wirklich sofort killen?')) return;
+    const confirmed = await showConfirmModal({
+        title: 'Server killen?',
+        message: 'Möchtest du den Server-Prozess wirklich sofort beenden? Nicht gespeicherte Weltdaten gehen dabei verloren.',
+        confirmText: 'Kill',
+        icon: 'bi-lightning-charge',
+    });
+    if (!confirmed) return;
     try {
         await invoke('kill_server_profile', { serverId });
         showToast('Server-Prozess wurde gekillt', 'info', 2200);
         setTimeout(() => refreshServerRuntimeUI(serverId, false), 250);
     } catch (error) {
         showToast('Kill fehlgeschlagen: ' + error, 'error', 3500);
-    }
-}
-
-function triggerServerContentUpload() {
-    const el = document.getElementById('server-content-upload');
-    if (el) el.click();
-}
-
-async function uploadServerContentFile(serverId, contentType, input) {
-    const file = input.files?.[0];
-    if (!file) return;
-    const base64 = await fileToBase64(file);
-
-    try {
-        await invoke('import_server_content_file', {
-            serverId,
-            contentType,
-            fileName: file.name,
-            fileBase64: base64,
-        });
-        showToast(`${file.name} added`, 'success', 2500);
-        await loadServerContent(serverId, contentType);
-    } catch (error) {
-        showToast('Upload failed: ' + error, 'error', 4000);
-    } finally {
-        input.value = '';
     }
 }
 
@@ -5245,43 +5780,615 @@ function fileToBase64(file) {
     });
 }
 
-async function loadServerContent(serverId, contentType) {
-    const list = document.getElementById('server-content-list');
-    if (!list) return;
-    list.innerHTML = '<div class="loading">Loading content...</div>';
+// ==================== SERVER CONTENT (PLUGINS / MODS) ====================
+
+function renderServerContentTab(server) {
+    const label = getServerContentLabel(server);
+    const safeId = escapeAttr(server.id);
+
+    if (server.software === 'vanilla') {
+        return `
+            <div class="server-panel" style="text-align:center; padding:50px 20px; color:var(--text-secondary);">
+                <div style="font-size:42px; margin-bottom:12px;"><i class="bi bi-slash-circle"></i></div>
+                <p style="margin:0 0 6px; color:var(--text-primary); font-weight:600;">Vanilla-Server unterstützen keine ${label}</p>
+                <p style="margin:0; font-size:13px;">Erstelle einen ${server.mode === 'plugins' ? 'Paper-, Purpur-, Folia- oder Spigot' : 'Fabric-, Quilt-, Forge- oder NeoForge'}-Server, um ${label} zu installieren.</p>
+            </div>
+        `;
+    }
+
+    return `
+        <div class="server-panel">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap:10px; flex-wrap:wrap;">
+                <h3 style="color: var(--gold); margin: 0;">Installierte ${label}</h3>
+                <div style="display: flex; gap: 8px; align-items:center; flex-wrap:wrap;">
+                    <button class="btn btn-secondary" onclick="checkServerContentUpdates('${safeId}')" style="padding: 8px 12px; font-size: 12px;">
+                        <i class="bi bi-search"></i> Updates
+                    </button>
+                    <button class="btn btn-secondary" onclick="loadServerInstalledContent('${safeId}')" style="padding: 8px 12px; font-size: 12px;" title="Aktualisieren">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                    <button class="btn btn-secondary" onclick="triggerServerContentUpload()" style="padding: 8px 12px; font-size: 12px;" title=".jar importieren">
+                        <i class="bi bi-upload"></i>
+                    </button>
+                    <button class="btn btn-secondary" onclick="openServerFolder('${safeId}', '${server.mode === 'plugins' ? 'plugins' : 'mods'}')" style="padding: 8px 12px; font-size: 12px;" title="Ordner öffnen">
+                        <i class="bi bi-folder"></i>
+                    </button>
+                    <input id="server-content-upload" type="file" accept=".jar" style="display:none;" onchange="uploadServerContentFile('${safeId}', '${server.mode === 'plugins' ? 'plugins' : 'mods'}', this)">
+                    <button class="server-add-content-btn" onclick="openServerContentBrowser('${safeId}')">
+                        + Add ${label}
+                    </button>
+                </div>
+            </div>
+
+            <div id="server-content-updates" style="display:none;"></div>
+
+            <div style="position: relative; margin-bottom: 12px;">
+                <i class="bi bi-search" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-secondary); font-size: 13px; pointer-events: none;"></i>
+                <input type="text" id="server-content-search" class="server-content-search"
+                       placeholder="Installierte ${label} durchsuchen..."
+                       oninput="filterServerInstalledContent(this.value)">
+            </div>
+
+            <div id="server-content-bulk-bar" class="server-bulk-bar" style="display:none;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-secondary);">
+                    <input type="checkbox" id="server-content-select-all" onchange="toggleSelectAllServerContent()" style="width: 16px; height: 16px; cursor: pointer; accent-color: var(--gold);">
+                    <span id="server-content-selected-count">0 ausgewählt</span>
+                </label>
+                <div style="flex: 1;"></div>
+                <button class="btn btn-secondary" onclick="bulkToggleServerContent('${safeId}', true)" style="padding: 6px 12px; font-size: 11px;">
+                    <i class="bi bi-check-circle"></i> Aktivieren
+                </button>
+                <button class="btn btn-secondary" onclick="bulkToggleServerContent('${safeId}', false)" style="padding: 6px 12px; font-size: 11px;">
+                    <i class="bi bi-pause-circle"></i> Deaktivieren
+                </button>
+                <button class="btn btn-secondary" onclick="bulkDeleteServerContent('${safeId}')" style="padding: 6px 12px; font-size: 11px; color: #f44336;">
+                    <i class="bi bi-trash"></i> Delete
+                </button>
+            </div>
+
+            <div id="server-content-list" class="profile-scroll-box" style="display: grid; gap: 8px; align-content:start; height: 420px; max-height: 420px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
+                <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                    <div class="spinner" style="margin: 0 auto 15px;"></div>
+                    <p>Lade ${label}...</p>
+                </div>
+            </div>
+            <div style="margin-top:10px; font-size:12px; color:var(--text-secondary);">
+                <i class="bi bi-info-circle"></i> Änderungen an ${label} werden erst nach einem Server-Neustart aktiv.
+            </div>
+        </div>
+    `;
+}
+
+function triggerServerContentUpload() {
+    const el = document.getElementById('server-content-upload');
+    if (el) el.click();
+}
+
+async function uploadServerContentFile(serverId, contentType, input) {
+    const file = input.files?.[0];
+    if (!file) return;
 
     try {
-        const files = await invoke('get_server_content', { serverId, contentType });
-        if (!files.length) {
-            list.innerHTML = `<div style="color:var(--text-secondary); padding:20px;">No ${contentType} installed yet.</div>`;
+        const base64 = await fileToBase64(file);
+        await invoke('import_server_content_file', {
+            serverId,
+            contentType,
+            fileName: file.name,
+            fileBase64: base64,
+        });
+        showToast(`${file.name} hinzugefügt`, 'success', 2500);
+        await loadServerInstalledContent(serverId);
+    } catch (error) {
+        showToast('Upload fehlgeschlagen: ' + error, 'error', 4000);
+    } finally {
+        input.value = '';
+    }
+}
+
+async function loadServerInstalledContent(serverId) {
+    const list = document.getElementById('server-content-list');
+    if (!list) return;
+
+    selectedServerContent.clear();
+    updateServerContentBulkBar();
+
+    try {
+        const items = await invoke('get_server_installed_content', { serverId });
+        serverInstalledContentCache = items || [];
+        serverInstalledProjectIds = new Set(serverInstalledContentCache.map(i => i.project_id).filter(Boolean));
+        serverInstalledProjectIdsServerId = serverId;
+
+        const search = document.getElementById('server-content-search');
+        if (search) search.value = '';
+
+        const bulkBar = document.getElementById('server-content-bulk-bar');
+        if (bulkBar) bulkBar.style.display = serverInstalledContentCache.length ? 'flex' : 'none';
+
+        renderServerInstalledContent(serverInstalledContentCache, serverId);
+    } catch (error) {
+        list.innerHTML = `
+            <div style="text-align: center; padding: 40px; color: #f44336;">
+                <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-x-circle-fill"></i></div>
+                <p>Fehler beim Laden</p>
+                <p style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(String(error))}</p>
+            </div>
+        `;
+    }
+}
+
+function filterServerInstalledContent(query) {
+    const q = String(query || '').trim().toLowerCase();
+    const filtered = q
+        ? serverInstalledContentCache.filter(item =>
+            [item.name, item.filename, item.version].some(v => String(v || '').toLowerCase().includes(q)))
+        : serverInstalledContentCache;
+    if (currentServerProfile) {
+        renderServerInstalledContent(filtered, currentServerProfile.id, q.length > 0);
+    }
+}
+
+function renderServerInstalledContent(items, serverId, isFiltered = false) {
+    const list = document.getElementById('server-content-list');
+    if (!list) return;
+    const server = serverProfiles.find(s => s.id === serverId) || currentServerProfile;
+    const label = getServerContentLabel(server);
+    const safeId = escapeAttr(serverId);
+
+    if (!items.length) {
+        list.innerHTML = isFiltered
+            ? `<div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                   <i class="bi bi-search" style="font-size: 32px; display: block; margin-bottom: 12px;"></i>
+                   <p>Keine ${label} gefunden</p>
+               </div>`
+            : `<div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
+                   <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-box"></i></div>
+                   <p>Noch keine ${label} installiert</p>
+                   <p style="font-size: 14px; margin-top: 10px;">
+                       Klicke auf <a href="#" onclick="openServerContentBrowser('${safeId}'); return false;" style="color: var(--gold);">+ Add ${label}</a>, um ${label} zu installieren
+                   </p>
+               </div>`;
+        return;
+    }
+
+    const defaultIcon = server?.mode === 'plugins' ? 'bi-plug' : 'bi-box';
+    list.innerHTML = items.map(item => {
+        const file = escapeAttr(item.filename);
+        const jsFile = escapeAttr(String(item.filename).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+        const clickable = !!item.project_id;
+        const checked = selectedServerContent.has(item.filename) ? 'checked' : '';
+        const icon = item.icon_url
+            ? `<img src="${escapeAttr(item.icon_url)}" style="width: 100%; height: 100%; object-fit: cover;" onerror="handleIconError(this)">`
+            : `<span style="font-size: 22px;"><i class="bi ${defaultIcon}"></i></span>`;
+
+        return `
+            <div class="installed-mod-card server-content-card ${item.disabled ? 'disabled' : ''}" data-filename="${file}"
+                 ${clickable ? `onclick="if(!event.target.closest('input, button')) { showServerContentDetails('${safeId}', '${escapeAttr(item.project_id)}'); }"` : ''}
+                 style="cursor: ${clickable ? 'pointer' : 'default'};">
+                <input type="checkbox" class="server-content-checkbox" data-filename="${file}" ${checked}
+                       onchange="toggleServerContentSelection('${jsFile}')"
+                       onclick="event.stopPropagation();"
+                       style="width: 18px; height: 18px; cursor: pointer; flex-shrink: 0; accent-color: var(--gold);">
+                <div class="server-content-icon">${icon}</div>
+                <div style="flex: 1; min-width: 0;">
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                        <h4 style="margin: 0; color: var(--text-primary); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px;">${escapeHtml(item.name)}</h4>
+                        ${item.disabled ? '<span class="server-content-tag danger">DEAKTIVIERT</span>' : ''}
+                        ${item.has_update ? '<span class="server-content-tag accent">UPDATE</span>' : ''}
+                    </div>
+                    <p style="margin: 3px 0 0 0; color: var(--text-secondary); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        ${escapeHtml(item.filename)} • ${formatBytes(item.size || 0)}
+                    </p>
+                    ${item.version ? `<p style="margin: 2px 0 0 0; color: var(--gold); font-size: 10px;">v${escapeHtml(item.version)}</p>` : ''}
+                </div>
+                <div style="display: flex; gap: 6px; flex-shrink: 0;">
+                    <button class="btn btn-secondary" onclick="event.stopPropagation(); toggleServerContentItem('${safeId}', '${jsFile}', ${item.disabled})"
+                            style="padding: 5px 10px; font-size: 11px;" title="${item.disabled ? 'Aktivieren' : 'Deaktivieren'}">
+                        ${item.disabled ? '<i class="bi bi-check"></i>' : '<i class="bi bi-pause-fill"></i>'}
+                    </button>
+                    <button class="btn btn-secondary" onclick="event.stopPropagation(); deleteServerContentItem('${safeId}', '${jsFile}')"
+                            style="padding: 5px 10px; font-size: 11px; color: #f44336;" title="Löschen">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function toggleServerContentSelection(filename) {
+    if (selectedServerContent.has(filename)) {
+        selectedServerContent.delete(filename);
+    } else {
+        selectedServerContent.add(filename);
+    }
+    updateServerContentBulkBar();
+}
+
+function toggleSelectAllServerContent() {
+    const selectAll = document.getElementById('server-content-select-all');
+    const checkboxes = document.querySelectorAll('.server-content-checkbox');
+    checkboxes.forEach(cb => {
+        cb.checked = !!selectAll?.checked;
+        if (selectAll?.checked) selectedServerContent.add(cb.dataset.filename);
+    });
+    if (!selectAll?.checked) selectedServerContent.clear();
+    updateServerContentBulkBar();
+}
+
+function updateServerContentBulkBar() {
+    const countEl = document.getElementById('server-content-selected-count');
+    if (countEl) countEl.textContent = `${selectedServerContent.size} ausgewählt`;
+    const selectAll = document.getElementById('server-content-select-all');
+    if (selectAll && selectedServerContent.size === 0) selectAll.checked = false;
+}
+
+async function toggleServerContentItem(serverId, filename, isDisabled) {
+    try {
+        await invoke('toggle_server_content', { serverId, filenames: [filename], enable: isDisabled });
+        showToast(isDisabled ? 'Aktiviert' : 'Deaktiviert', 'success', 1800);
+        await loadServerInstalledContent(serverId);
+    } catch (error) {
+        showToast('Umschalten fehlgeschlagen: ' + error, 'error', 3500);
+    }
+}
+
+async function deleteServerContentItem(serverId, filename) {
+    const item = serverInstalledContentCache.find(i => i.filename === filename);
+    const confirmed = await showConfirmModal({
+        title: 'Löschen?',
+        message: 'Möchtest du ',
+        highlight: item?.name || filename,
+        suffix: ' wirklich löschen?',
+        details: 'Die Datei wird aus dem Server-Ordner entfernt.',
+    });
+    if (!confirmed) return;
+    try {
+        await invoke('delete_server_content', { serverId, filenames: [filename] });
+        showToast(`${filename} gelöscht`, 'success', 2200);
+        await loadServerInstalledContent(serverId);
+    } catch (error) {
+        showToast('Löschen fehlgeschlagen: ' + error, 'error', 3500);
+    }
+}
+
+async function bulkToggleServerContent(serverId, enable) {
+    if (selectedServerContent.size === 0) {
+        showToast('Bitte wähle zuerst Einträge aus', 'warning', 2500);
+        return;
+    }
+    const count = selectedServerContent.size;
+    try {
+        await invoke('toggle_server_content', { serverId, filenames: Array.from(selectedServerContent), enable });
+        showToast(`${count} ${enable ? 'aktiviert' : 'deaktiviert'}`, 'success', 2500);
+        await loadServerInstalledContent(serverId);
+    } catch (error) {
+        showToast('Fehler: ' + error, 'error', 3500);
+    }
+}
+
+async function bulkDeleteServerContent(serverId) {
+    if (selectedServerContent.size === 0) {
+        showToast('Bitte wähle zuerst Einträge aus', 'warning', 2500);
+        return;
+    }
+    const count = selectedServerContent.size;
+    const confirmed = await showConfirmModal({
+        title: 'Löschen?',
+        message: 'Möchtest du ',
+        highlight: `${count} ausgewählte Dateien`,
+        suffix: ' wirklich löschen?',
+        details: 'Die Dateien werden aus dem Server-Ordner entfernt.',
+    });
+    if (!confirmed) return;
+    try {
+        await invoke('delete_server_content', { serverId, filenames: Array.from(selectedServerContent) });
+        showToast(`${count} gelöscht`, 'success', 2500);
+        await loadServerInstalledContent(serverId);
+    } catch (error) {
+        showToast('Fehler beim Löschen: ' + error, 'error', 3500);
+    }
+}
+
+async function checkServerContentUpdates(serverId) {
+    const panel = document.getElementById('server-content-updates');
+    if (!panel) return;
+    panel.style.display = 'block';
+    panel.innerHTML = `<div class="server-updates-panel"><div class="spinner" style="margin: 0 auto 10px;"></div><p style="text-align:center; margin:0; color:var(--text-secondary);">Suche nach Updates...</p></div>`;
+
+    try {
+        const updates = await invoke('check_server_content_updates', { serverId });
+        if (!updates.length) {
+            panel.innerHTML = `
+                <div class="server-updates-panel" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                    <span><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> Alles ist auf dem neuesten Stand</span>
+                    <button class="btn btn-secondary" style="padding:5px 10px; font-size:11px;" onclick="document.getElementById('server-content-updates').style.display='none'">×</button>
+                </div>`;
             return;
         }
 
-        list.innerHTML = files.map(file => {
-            const escapedJsFile = String(file).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            return `
-            <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; padding:8px 10px; background:var(--bg-light); border-radius:8px; margin-bottom:8px;">
-                <span style="overflow:hidden; text-overflow:ellipsis;">${escapeHtml(file)}</span>
-                <button class="btn btn-secondary" style="padding:6px 10px; color:#f44336;" onclick="removeServerContentFile('${serverId}','${contentType}','${escapedJsFile}')">
-                    <i class="bi bi-trash"></i>
-                </button>
+        const updatedFiles = new Set(updates.map(u => u.filename));
+        serverInstalledContentCache.forEach(item => { item.has_update = updatedFiles.has(item.filename); });
+        renderServerInstalledContent(serverInstalledContentCache, serverId);
+
+        window._serverContentUpdates = updates;
+        panel.innerHTML = `
+            <div class="server-updates-panel">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
+                    <strong style="color:var(--gold);">${updates.length} Update${updates.length === 1 ? '' : 's'} verfügbar</strong>
+                    <div style="display:flex; gap:6px;">
+                        <button class="btn" style="padding:6px 12px; font-size:12px;" onclick="applyServerContentUpdates('${escapeAttr(serverId)}')"><i class="bi bi-download"></i> Alle updaten</button>
+                        <button class="btn btn-secondary" style="padding:6px 10px; font-size:12px;" onclick="document.getElementById('server-content-updates').style.display='none'">×</button>
+                    </div>
+                </div>
+                ${updates.map((u, index) => `
+                    <div class="server-update-row">
+                        <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(u.name)}</span>
+                        <span style="color:var(--text-secondary); font-size:12px;">${escapeHtml(u.current_version || '?')} → <span style="color:var(--gold);">${escapeHtml(u.latest_version)}</span></span>
+                        <button class="btn btn-secondary" style="padding:4px 10px; font-size:11px;" onclick="applyServerContentUpdates('${escapeAttr(serverId)}', ${index})">Update</button>
+                    </div>
+                `).join('')}
             </div>
         `;
-        }).join('');
     } catch (error) {
-        list.innerHTML = `<div style="color:#f44336;">Failed to load content: ${escapeHtml(String(error))}</div>`;
+        panel.innerHTML = `<div class="server-updates-panel" style="color:#f44336;">Update-Prüfung fehlgeschlagen: ${escapeHtml(String(error))}</div>`;
     }
 }
 
-async function removeServerContentFile(serverId, contentType, fileName) {
-    if (!confirm(`Remove ${fileName}?`)) return;
+async function applyServerContentUpdates(serverId, onlyIndex = null) {
+    const all = window._serverContentUpdates || [];
+    const updates = onlyIndex === null ? all : [all[onlyIndex]].filter(Boolean);
+    if (!updates.length) return;
+
+    let success = 0;
+    for (const update of updates) {
+        try {
+            await invoke('install_server_content', {
+                serverId,
+                projectId: update.project_id,
+                versionId: update.latest_version_id,
+            });
+            success += 1;
+        } catch (error) {
+            showToast(`${update.name}: ${error}`, 'error', 4000);
+        }
+    }
+
+    showToast(`${success}/${updates.length} aktualisiert`, success === updates.length ? 'success' : 'warning', 3000);
+    await loadServerInstalledContent(serverId);
+    await checkServerContentUpdates(serverId);
+}
+
+async function loadServerInstalledProjectIds(force = false) {
+    if (!serverBrowserContext) return;
+    const serverId = serverBrowserContext.serverId;
+    if (!force && serverInstalledProjectIdsServerId === serverId) return;
     try {
-        await invoke('remove_server_content_file', { serverId, contentType, fileName });
-        await loadServerContent(serverId, contentType);
+        const items = await invoke('get_server_installed_content', { serverId });
+        serverInstalledContentCache = items || [];
+        serverInstalledProjectIds = new Set(serverInstalledContentCache.map(i => i.project_id).filter(Boolean));
+        serverInstalledProjectIdsServerId = serverId;
     } catch (error) {
-        showToast('Failed to remove file: ' + error, 'error', 3500);
+        debugLog('Could not load installed server content: ' + error, 'error');
     }
 }
+
+async function createServerBrowserContext(serverId) {
+    const server = serverProfiles.find(s => s.id === serverId) || currentServerProfile;
+    const context = await invoke('get_server_content_context', { serverId });
+    return {
+        serverId,
+        serverName: server?.name || 'Server',
+        software: server?.software || '',
+        contentType: context.content_type,
+        projectType: context.project_type,
+        loaders: context.loaders || [],
+        minecraftVersion: context.minecraft_version,
+    };
+}
+
+async function openServerContentBrowser(serverId) {
+    try {
+        const context = await createServerBrowserContext(serverId);
+        if (context.contentType === 'none') {
+            showToast('Vanilla-Server unterstützen keine Plugins oder Mods', 'warning', 3000);
+            return;
+        }
+
+        serverBrowserContext = context;
+        serverInstalledProjectIdsServerId = null;
+        browserResultsCache.clear();
+        currentProfile = null;
+        clearServerHubIntervals();
+
+        serverBrowserNavigation = true;
+        switchPage('mods');
+        applyServerBrowserMode();
+        switchContentType('mods', { force: true });
+    } catch (error) {
+        showToast('Content Browser konnte nicht geöffnet werden: ' + error, 'error', 3500);
+    }
+}
+
+function applyServerBrowserMode() {
+    const ctx = serverBrowserContext;
+    if (!ctx) return;
+    const isPlugin = ctx.projectType === 'plugin';
+
+    document.querySelectorAll('[data-content-type]').forEach(btn => {
+        btn.style.display = btn.dataset.contentType === 'mods' ? '' : 'none';
+    });
+    const modsBtn = document.querySelector('[data-content-type="mods"]');
+    if (modsBtn) {
+        if (browserModeBackup.modsBtnText === null) browserModeBackup.modsBtnText = modsBtn.innerHTML;
+        modsBtn.innerHTML = isPlugin ? 'Plugins' : 'Mods';
+    }
+
+    const loaderSelect = document.getElementById('filter-loader');
+    if (loaderSelect) {
+        if (browserModeBackup.loaderOptions === null) browserModeBackup.loaderOptions = loaderSelect.innerHTML;
+        const names = ctx.loaders.map(l => SERVER_SOFTWARE[l]?.label || (l.charAt(0).toUpperCase() + l.slice(1)));
+        loaderSelect.innerHTML = `<option value="" title="${escapeAttr(names.join(', '))}">Alle kompatiblen</option>` +
+            ctx.loaders.map((l, i) => `<option value="${escapeAttr(l)}">${escapeHtml(names[i])}</option>`).join('');
+        loaderSelect.value = '';
+    }
+    const loaderHeader = document.querySelector('#loader-filter-section .filter-header span');
+    if (loaderHeader) loaderHeader.textContent = isPlugin ? 'Plattform' : 'Mod Loader';
+
+    const envSection = document.getElementById('environment-filter-section');
+    if (envSection) envSection.style.display = 'none';
+
+    const versionFilter = document.getElementById('filter-version');
+    if (versionFilter && ctx.minecraftVersion) {
+        if (![...versionFilter.options].some(o => o.value === ctx.minecraftVersion)) {
+            const option = document.createElement('option');
+            option.value = ctx.minecraftVersion;
+            option.textContent = ctx.minecraftVersion;
+            versionFilter.appendChild(option);
+        }
+        versionFilter.value = ctx.minecraftVersion;
+    }
+
+    selectedFilters.loader = '';
+    selectedFilters.version = ctx.minecraftVersion || '';
+    selectedFilters.categories = [];
+
+    const backBtn = document.getElementById('back-to-profile-btn');
+    if (backBtn) {
+        if (browserModeBackup.backBtnText === null) browserModeBackup.backBtnText = backBtn.innerHTML;
+        backBtn.innerHTML = `← Back to ${escapeHtml(ctx.serverName)}`;
+        backBtn.style.display = 'block';
+    }
+
+    const searchInput = document.getElementById('mod-search');
+    if (searchInput) searchInput.placeholder = isPlugin ? 'Search plugins...' : 'Search mods...';
+}
+
+function restoreDefaultBrowserMode() {
+    document.querySelectorAll('[data-content-type]').forEach(btn => {
+        btn.style.display = '';
+    });
+    const modsBtn = document.querySelector('[data-content-type="mods"]');
+    if (modsBtn && browserModeBackup.modsBtnText !== null) modsBtn.innerHTML = browserModeBackup.modsBtnText;
+
+    const loaderSelect = document.getElementById('filter-loader');
+    if (loaderSelect && browserModeBackup.loaderOptions !== null) {
+        loaderSelect.innerHTML = browserModeBackup.loaderOptions;
+        loaderSelect.value = '';
+    }
+    const loaderHeader = document.querySelector('#loader-filter-section .filter-header span');
+    if (loaderHeader) loaderHeader.textContent = typeof t === 'function' ? t('mod_loader') : 'Mod Loader';
+
+    const envSection = document.getElementById('environment-filter-section');
+    if (envSection) envSection.style.display = '';
+
+    const backBtn = document.getElementById('back-to-profile-btn');
+    if (backBtn && browserModeBackup.backBtnText !== null) backBtn.innerHTML = browserModeBackup.backBtnText;
+
+    browserModeBackup.modsBtnText = null;
+    browserModeBackup.loaderOptions = null;
+    browserModeBackup.backBtnText = null;
+    selectedFilters.loader = '';
+    browserResultsCache.clear();
+}
+
+function backToServerFromBrowser(tab = 'content') {
+    const serverId = serverBrowserContext?.serverId || serverModDetailsReturn;
+    serverModDetailsReturn = null;
+    pendingServerDetailOpen = serverId ? { id: serverId, tab } : null;
+    switchPage('servers-hub');
+}
+
+async function searchServerContent(query, page = 0) {
+    const ctx = serverBrowserContext;
+    const modList = document.getElementById('mod-list');
+    if (!ctx || !modList) return;
+
+    currentModSearchQuery = query || '';
+    currentModPage = page;
+    const label = ctx.projectType === 'plugin' ? 'Plugins' : 'Mods';
+    modList.innerHTML = `<div class="loading"><div class="spinner" style="margin: 20px auto;"></div><p>Lade ${label}...</p></div>`;
+
+    await loadServerInstalledProjectIds();
+
+    const cacheKey = buildBrowserCacheKey(`server-${ctx.serverId}`, query || '', page);
+    const cached = getCachedBrowserResults(cacheKey);
+    if (cached) {
+        renderMods(cached, page);
+        return;
+    }
+
+    try {
+        const results = await invoke('search_server_content', {
+            projectType: ctx.projectType,
+            query: query || '',
+            gameVersion: selectedFilters.version || null,
+            loaders: selectedFilters.loader ? [selectedFilters.loader] : ctx.loaders,
+            categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
+            sortBy: query ? (selectedFilters.sort || 'relevance') : (selectedFilters.sort || 'downloads'),
+            offset: page * getEffectiveLimit(),
+            limit: getEffectiveLimit(),
+        });
+        // Nutzer könnte den Browser inzwischen verlassen haben
+        if (serverBrowserContext !== ctx) return;
+        setCachedBrowserResults(cacheKey, results);
+        renderMods(results, page);
+    } catch (error) {
+        modList.innerHTML = `<div class="loading">Suche fehlgeschlagen: ${escapeHtml(String(error))}</div>`;
+    }
+}
+
+async function installServerContentFromBrowser(projectId, _source) {
+    const ctx = serverBrowserContext;
+    if (!ctx) return;
+    const btn = event?.target?.closest('button');
+    const originalText = btn?.innerHTML;
+    if (btn) {
+        btn.textContent = '...';
+        btn.disabled = true;
+    }
+
+    try {
+        const result = await invoke('install_server_content', {
+            serverId: ctx.serverId,
+            projectId,
+            versionId: null,
+        });
+        if (btn) {
+            btn.innerHTML = '<i class="bi bi-check"></i> Installiert';
+            btn.style.background = 'var(--bg-light)';
+            btn.style.color = 'var(--text-secondary)';
+            btn.style.opacity = '0.7';
+            btn.style.cursor = 'not-allowed';
+        }
+        await loadServerInstalledProjectIds(true);
+        browserResultsCache.clear();
+
+        const extra = result.installed.length > 1 ? ` (inkl. ${result.installed.slice(1).join(', ')})` : '';
+        showToast(`${result.installed[0] || 'Inhalt'} zu "${ctx.serverName}" hinzugefügt${extra}`, 'success', 3500);
+        (result.warnings || []).forEach(w => showToast(w, 'warning', 5000));
+    } catch (error) {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        showToast('Installation fehlgeschlagen: ' + error, 'error', 4500);
+    }
+}
+
+async function showServerContentDetails(serverId, projectId) {
+    try {
+        serverBrowserContext = await createServerBrowserContext(serverId);
+        serverModDetailsReturn = serverId;
+        clearServerHubIntervals();
+        currentProfile = null;
+        modDetailsFromBrowser = false;
+        await showModDetails(projectId, 'modrinth');
+    } catch (error) {
+        showToast('Details konnten nicht geladen werden: ' + error, 'error', 3500);
+    }
+}
+
+// ==================== SERVER CONSOLE ====================
 
 async function loadServerConsole(serverId) {
     const el = document.getElementById('server-console-output');
@@ -5291,7 +6398,9 @@ async function loadServerConsole(serverId) {
         || Math.abs((el.scrollHeight - el.scrollTop) - el.clientHeight) < 20;
     try {
         const output = await invoke('get_server_console_output', { serverId });
-        el.textContent = output || '';
+        if (el.textContent !== (output || '')) {
+            el.textContent = output || '';
+        }
         if (shouldStickToBottom) {
             el.scrollTop = el.scrollHeight;
         }
@@ -5318,6 +6427,151 @@ async function sendServerConsoleCommand(serverId) {
         showToast('Command konnte nicht gesendet werden: ' + error, 'error', 3000);
     }
 }
+
+// ==================== SERVER BACKUPS ====================
+
+function renderServerBackupsTab(server) {
+    const safeId = escapeAttr(server.id);
+    return `
+        <div class="server-panel">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+                <div>
+                    <h3 style="color: var(--gold); margin: 0;">Backups</h3>
+                    <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">
+                        Läuft der Server, wird das automatische Speichern während des Backups kurz pausiert.
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="btn" data-backup-action onclick="createServerBackup('${safeId}', false)"><i class="bi bi-archive"></i> Backup erstellen</button>
+                    <button class="btn btn-secondary" data-backup-action onclick="createServerBackup('${safeId}', true)"><i class="bi bi-globe"></i> Nur Welten</button>
+                    <button class="btn btn-secondary" onclick="loadServerBackups('${safeId}')" title="Aktualisieren"><i class="bi bi-arrow-clockwise"></i></button>
+                    <button class="btn btn-secondary" onclick="openServerFolder('${safeId}', 'backups')" title="Ordner öffnen"><i class="bi bi-folder"></i></button>
+                </div>
+            </div>
+            <div id="server-backup-status"></div>
+            <div id="server-backups-list" class="profile-scroll-box" style="display:grid; gap:8px; align-content:start; max-height:460px; overflow-y:auto; padding-right:5px;">
+                <div style="text-align:center; padding:40px; color:var(--text-secondary);"><div class="spinner" style="margin:0 auto 15px;"></div><p>Lade Backups...</p></div>
+            </div>
+        </div>
+    `;
+}
+
+async function loadServerBackups(serverId) {
+    const list = document.getElementById('server-backups-list');
+    if (!list) return;
+
+    try {
+        const backups = await invoke('list_server_backups', { serverId });
+        if (!backups.length) {
+            list.innerHTML = `
+                <div style="text-align:center; padding:50px 20px; color:var(--text-secondary);">
+                    <div style="font-size:44px; margin-bottom:12px;"><i class="bi bi-archive"></i></div>
+                    <p style="margin:0;">Noch keine Backups vorhanden</p>
+                </div>`;
+            return;
+        }
+
+        const safeId = escapeAttr(serverId);
+        list.innerHTML = backups.map(backup => {
+            const name = escapeAttr(backup.file_name);
+            const isWorlds = backup.kind === 'worlds';
+            return `
+                <div class="server-backup-row">
+                    <div class="server-content-icon"><i class="bi ${isWorlds ? 'bi-globe' : 'bi-archive-fill'}" style="font-size:20px; color:var(--gold);"></i></div>
+                    <div style="flex:1; min-width:0;">
+                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                            <strong style="font-size:14px;">${new Date(backup.created_unix * 1000).toLocaleString()}</strong>
+                            <span class="server-content-tag">${isWorlds ? 'Welten' : 'Komplett'}</span>
+                        </div>
+                        <div style="font-size:11px; color:var(--text-secondary); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                            ${escapeHtml(backup.file_name)} • ${formatBytes(backup.size || 0)}
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:6px; flex-shrink:0;">
+                        <button class="btn btn-secondary" data-backup-action style="padding:6px 12px; font-size:12px;" onclick="restoreServerBackup('${safeId}', '${name}')"><i class="bi bi-arrow-counterclockwise"></i> Wiederherstellen</button>
+                        <button class="btn btn-secondary" data-backup-action style="padding:6px 10px; font-size:12px; color:#f44336;" onclick="deleteServerBackup('${safeId}', '${name}')" title="Löschen"><i class="bi bi-trash"></i></button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        setServerBackupBusy(serverBackupBusy);
+    } catch (error) {
+        list.innerHTML = `<div style="color:#f44336; padding:20px;">Backups konnten nicht geladen werden: ${escapeHtml(String(error))}</div>`;
+    }
+}
+
+function setServerBackupBusy(busy, message = '') {
+    serverBackupBusy = busy;
+    document.querySelectorAll('[data-backup-action]').forEach(btn => { btn.disabled = busy; });
+    const status = document.getElementById('server-backup-status');
+    if (status) {
+        status.innerHTML = busy
+            ? `<div class="server-updates-panel" style="display:flex; align-items:center; gap:10px;"><div class="spinner" style="width:18px; height:18px; margin:0;"></div><span>${escapeHtml(message)}</span></div>`
+            : '';
+    }
+}
+
+async function createServerBackup(serverId, worldsOnly) {
+    if (serverBackupBusy) return;
+    setServerBackupBusy(true, worldsOnly ? 'Welten werden gesichert...' : 'Backup wird erstellt – das kann bei großen Welten etwas dauern...');
+    try {
+        const backup = await invoke('create_server_backup', { serverId, worldsOnly });
+        showToast(`Backup erstellt (${formatBytes(backup.size || 0)})`, 'success', 3000);
+    } catch (error) {
+        showToast('Backup fehlgeschlagen: ' + error, 'error', 4500);
+    } finally {
+        setServerBackupBusy(false);
+        loadServerBackups(serverId);
+    }
+}
+
+async function restoreServerBackup(serverId, fileName) {
+    if (serverBackupBusy) return;
+    const worlds = fileName.toLowerCase().endsWith('-worlds.zip');
+    const warning = worlds
+        ? 'Die im Backup enthaltenen Welten werden durch den Stand des Backups ersetzt.'
+        : 'Alle Serverdateien (außer Backups) werden durch den Stand des Backups ersetzt.';
+    const confirmed = await showConfirmModal({
+        title: 'Backup wiederherstellen?',
+        message: 'Möchtest du das Backup ',
+        highlight: fileName,
+        suffix: ' wirklich wiederherstellen?',
+        details: warning,
+        confirmText: 'Wiederherstellen',
+        icon: 'bi-arrow-counterclockwise',
+    });
+    if (!confirmed) return;
+
+    setServerBackupBusy(true, 'Backup wird wiederhergestellt...');
+    try {
+        await invoke('restore_server_backup', { serverId, fileName });
+        showToast('Backup wiederhergestellt', 'success', 3000);
+    } catch (error) {
+        showToast('Wiederherstellen fehlgeschlagen: ' + error, 'error', 5000);
+    } finally {
+        setServerBackupBusy(false);
+        loadServerBackups(serverId);
+    }
+}
+
+async function deleteServerBackup(serverId, fileName) {
+    const confirmed = await showConfirmModal({
+        title: 'Backup löschen?',
+        message: 'Möchtest du das Backup ',
+        highlight: fileName,
+        suffix: ' endgültig löschen?',
+    });
+    if (!confirmed) return;
+    try {
+        await invoke('delete_server_backup', { serverId, fileName });
+        showToast('Backup gelöscht', 'success', 2000);
+        loadServerBackups(serverId);
+    } catch (error) {
+        showToast('Löschen fehlgeschlagen: ' + error, 'error', 3500);
+    }
+}
+
+// ==================== SERVER SETTINGS ====================
 
 async function loadServerSettings(serverId) {
     const shell = document.getElementById('server-settings-content');
@@ -5645,8 +6899,14 @@ async function saveServerFileEditor(serverId) {
 }
 
 async function deleteServerPathEntry(serverId, relativePath, isDir) {
-    const label = isDir ? 'diesen Ordner' : 'diese Datei';
-    if (!confirm(`Wirklich ${label} loeschen?\n${relativePath}`)) return;
+    const confirmed = await showConfirmModal({
+        title: isDir ? 'Ordner löschen?' : 'Datei löschen?',
+        message: `Möchtest du ${isDir ? 'den Ordner' : 'die Datei'} `,
+        highlight: relativePath,
+        suffix: ' wirklich löschen?',
+        details: isDir ? 'Der komplette Inhalt des Ordners wird ebenfalls gelöscht.' : '',
+    });
+    if (!confirmed) return;
 
     try {
         await invoke('delete_server_path', { serverId, relativePath });
@@ -5705,7 +6965,14 @@ async function openServerFolder(serverId, subfolder = null) {
 }
 
 async function deleteServerProfile(serverId) {
-    if (!confirm('Delete this local server profile and all its files?')) return;
+    const server = serverProfiles.find(s => s.id === serverId);
+    const confirmed = await showConfirmModal({
+        title: 'Delete server?',
+        message: 'Do you really want to delete ',
+        highlight: server ? server.name : 'this server',
+        details: 'All server files including worlds, plugins/mods and backups will be removed permanently.',
+    });
+    if (!confirmed) return;
     try {
         clearServerHubIntervals();
         await invoke('delete_server_profile', { serverId });
@@ -6587,7 +7854,9 @@ function switchContentType(type, options = {}) {
             shaderpacks: 'Search shader packs...',
             modpacks: 'Search modpacks...'
         };
-        searchInput.placeholder = placeholders[type] || 'Search content...';
+        searchInput.placeholder = serverBrowserContext?.projectType === 'plugin'
+            ? 'Search plugins...'
+            : (placeholders[type] || 'Search content...');
         searchInput.value = '';
     }
 
@@ -7295,6 +8564,9 @@ async function searchModpacks(query, page = 0) {
 
 // Lädt beliebte Mods (ohne Suchbegriff, sortiert nach Downloads)
 async function loadPopularMods(page = 0) {
+    if (serverBrowserContext) {
+        return searchServerContent('', page);
+    }
     const modList = document.getElementById('mod-list');
     if (!modList) return;
 
@@ -7434,6 +8706,9 @@ async function loadInstalledShaderPackNames(force = false) {
 }
 
 async function searchMods(query, page = 0) {
+    if (serverBrowserContext) {
+        return searchServerContent(query, page);
+    }
     const modList = document.getElementById('mod-list');
     if (!modList) return;
 
@@ -7488,7 +8763,9 @@ function renderMods(mods, page = 0) {
     const originalCount = mods.length;
 
     // Wenn "Hide Installed" aktiv ist, installierte vorher herausfiltern
-    if (selectedFilters.hideInstalled && currentProfile) {
+    if (selectedFilters.hideInstalled && serverBrowserContext) {
+        mods = mods.filter(mod => !serverInstalledProjectIds.has(mod.id));
+    } else if (selectedFilters.hideInstalled && currentProfile) {
         const beforeCount = mods.length;
         mods = mods.filter(mod => {
             const modSlug = normalizePackKey(mod.slug);
@@ -7541,7 +8818,9 @@ function renderMods(mods, page = 0) {
     const modsHTML = mods.map(mod => {
         // Prüfe ob bereits installiert ist - NUR wenn ein Profil ausgewählt ist
         let isInstalled = false;
-        if (currentProfile) {
+        if (serverBrowserContext) {
+            isInstalled = serverInstalledProjectIds.has(mod.id);
+        } else if (currentProfile) {
             const modSlug = normalizePackKey(mod.slug);
             const modName = normalizePackKey(mod.name);
             const modId = normalizePackKey(mod.id);
@@ -7567,11 +8846,12 @@ function renderMods(mods, page = 0) {
         }
 
         // Zeige Profil-Info im Button wenn kein Profil ausgewählt
-        const installButtonText = currentProfile ? 'Install' : 'Installieren...';
-        const installFunc = getInstallFunction();
+        const installButtonText = (currentProfile || serverBrowserContext) ? 'Install' : 'Installieren...';
+        const installFunc = serverBrowserContext ? 'installServerContentFromBrowser' : getInstallFunction();
 
         // Icon basierend auf Content-Typ
-        const defaultIcon = currentContentType === 'resourcepacks' ? '<i class="bi bi-palette"></i>' :
+        const defaultIcon = serverBrowserContext?.projectType === 'plugin' ? '<i class="bi bi-plug"></i>' :
+            currentContentType === 'resourcepacks' ? '<i class="bi bi-palette"></i>' :
             currentContentType === 'shaderpacks' ? '<i class="bi bi-stars"></i>' :
                 currentContentType === 'modpacks' ? '<i class="bi bi-collection"></i>' : '<i class="bi bi-puzzle"></i>';
         const fallbackIconClass = currentContentType === 'resourcepacks' ? 'bi-palette' :
@@ -7846,7 +9126,7 @@ function showProfileSelectDialog() {
                     </div>
                     <button class="btn btn-secondary" onclick="cancelProfileSelect()" 
                             style="width: 100%; margin-top: 20px; padding: 12px;">
-                        Abbrechen
+                        Cancel
                     </button>
                 </div>
             </div>
@@ -8267,7 +9547,7 @@ async function startMicrosoftLogin() {
                     </div>
                     
                     <button class="btn btn-secondary" onclick="cancelMicrosoftLogin()" style="padding: 10px 30px;">
-                        Abbrechen
+                        Cancel
                     </button>
                 </div>
             </div>
@@ -8352,7 +9632,7 @@ function showOfflineAccountModal() {
                 </div>
                 <div style="display: flex; gap: 10px;">
                     <button class="btn btn-secondary" onclick="document.getElementById('offline-account-modal').remove()" style="flex: 1;">
-                        Abbrechen
+                        Cancel
                     </button>
                     <button class="btn" onclick="createOfflineAccount()" style="flex: 1;">
                         Erstellen
@@ -9177,6 +10457,7 @@ function handleModCardClick(event, modId, source) {
     }
 
     // Ansonsten öffne Mod-Details
+    modDetailsFromBrowser = true;
     showModDetails(modId, source);
 }
 
@@ -9197,8 +10478,14 @@ async function showModDetails(modId, source = 'modrinth') {
     // Setze Tab zurück auf Description und Filter zurück
     currentModDetailsTab = 'description';
 
-    // Initialisiere Filter mit Profil-Werten wenn vorhanden
-    if (currentProfile) {
+    // Initialisiere Filter mit Profil-/Server-Werten wenn vorhanden
+    if (serverBrowserContext) {
+        modDetailsVersionFilter = {
+            loader: '',
+            mcVersion: serverBrowserContext.minecraftVersion || '',
+            includeSnapshots: false,
+        };
+    } else if (currentProfile) {
         debugLog(`Current Profile: ${currentProfile.name}, MC: ${currentProfile.minecraft_version}, Loader: ${currentProfile.loader?.loader}`, 'info');
 
         modDetailsVersionFilter.mcVersion = currentProfile.minecraft_version || '';
@@ -9468,7 +10755,13 @@ async function renderVersionsTab(mod, versions, allLoaders, sortedMcVersions) {
     let installedMods = [];
     let installedVersion = null;
 
-    if (currentProfile) {
+    if (serverBrowserContext) {
+        await loadServerInstalledProjectIds(true);
+        const installedItem = serverInstalledContentCache.find(item => item.project_id === mod.id);
+        if (installedItem && installedItem.version) {
+            installedVersion = installedItem.version;
+        }
+    } else if (currentProfile) {
         try {
             installedMods = await invoke('get_installed_mods', { profileId: currentProfile.id });
             // Finde installierte Version dieser Mod
@@ -9590,7 +10883,7 @@ async function renderVersionsTab(mod, versions, allLoaders, sortedMcVersions) {
                                     </div>
                                     <span style="color: var(--text-secondary); font-size: 12px;">${version.version_number}</span>
                                 </div>
-                                ${currentProfile ? 
+                                ${(currentProfile || serverBrowserContext) ?
                                     (isInstalled ? 
                                         `<button class="btn btn-secondary" disabled style="padding: 8px 20px; font-size: 13px; opacity: 0.6;">
                                             <i class="bi bi-check"></i> Installed
@@ -9850,6 +11143,25 @@ function formatMarkdown(text) {
 }
 
 async function installModVersion(modId, versionId) {
+    if (serverBrowserContext) {
+        const ctx = serverBrowserContext;
+        try {
+            const result = await invoke('install_server_content', {
+                serverId: ctx.serverId,
+                projectId: modId,
+                versionId,
+            });
+            showToast(`${result.installed[0] || 'Inhalt'} zu "${ctx.serverName}" hinzugefügt`, 'success', 3000);
+            (result.warnings || []).forEach(w => showToast(w, 'warning', 5000));
+            browserResultsCache.clear();
+            if (currentModDetails) {
+                await showModDetails(modId, currentModDetails.source);
+            }
+        } catch (error) {
+            showToast('Installation fehlgeschlagen: ' + error, 'error', 4500);
+        }
+        return;
+    }
     if (!currentProfile) {
         alert('Please select a profile first');
         return;
@@ -9879,6 +11191,15 @@ async function installModVersion(modId, versionId) {
 }
 
 function backFromModDetails() {
+    if (serverBrowserContext && !modDetailsFromBrowser && serverModDetailsReturn) {
+        // Kam aus dem Content-Tab eines lokalen Servers
+        currentModDetails = null;
+        backToServerFromBrowser('content');
+        return;
+    }
+    if (serverBrowserContext && modDetailsFromBrowser) {
+        serverBrowserNavigation = true;
+    }
     if (modDetailsFromBrowser) {
         // Kam vom Mod Browser
         switchPage('mods');
@@ -9886,13 +11207,13 @@ function backFromModDetails() {
     } else {
         // Kam vom Profile Content Menu - verwende gleiche Logik wie backToProfileFromModBrowser
         if (currentProfile && currentProfile.id) {
-            const profileId = currentProfile.id; // Speichere ID bevor currentProfile gelöscht wird
-            skipLoadProfiles = true; // Überspringe loadProfiles() um Flash zu vermeiden
+            const profileId = currentProfile.id; // Save the ID before currentProfile is cleared
+            skipLoadProfiles = true; // Skip loadProfiles() to avoid a flash
             switchPage('profiles');
-            // Zeige direkt die Detail-Ansicht (kein setTimeout mehr nötig!)
+            // Show the detail view directly (no setTimeout needed anymore!)
             showProfileDetails(profileId);
         } else {
-            // Kein Profil gesetzt, gehe zur Hauptübersicht
+            // No profile set, go to the main overview
             switchPage('profiles');
         }
     }

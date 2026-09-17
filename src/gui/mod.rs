@@ -2,6 +2,8 @@ pub mod auth;
 pub mod components;
 pub mod mod_browser;
 pub mod profile_manager;
+pub mod server_backups;
+pub mod server_content;
 pub mod server_manager;
 pub mod settings;
 pub mod themes;
@@ -460,6 +462,8 @@ pub async fn clear_profile_cache(profile_id: String) -> Result<(), String> {
 // Re-export commands for convenience
 pub use mod_browser::*;
 pub use profile_manager::*;
+pub use server_backups::*;
+pub use server_content::*;
 pub use server_manager::*;
 pub use settings::*;
 
