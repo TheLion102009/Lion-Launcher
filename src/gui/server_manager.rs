@@ -532,7 +532,7 @@ fn sample_network_kbps() -> (f32, f32) {
 }
 
 async fn resolve_java_binary() -> String {
-    match crate::gui::settings::get_config().await {
+    match crate::gui::settings::load_config().await {
         Ok(cfg) => cfg
             .game_settings
             .java_path
@@ -683,11 +683,11 @@ async fn resolve_latest_neoforge_version(minecraft_version: &str) -> Result<Stri
         .collect();
 
     let build_key = |v: &str| -> Vec<u64> {
-        v.split(|c: char| c == '.' || c == '-')
+        v.split(['.', '-'])
             .map(|p| p.parse::<u64>().unwrap_or(0))
             .collect()
     };
-    matching.sort_by(|a, b| build_key(b).cmp(&build_key(a)));
+    matching.sort_by_key(|a| std::cmp::Reverse(build_key(a)));
 
     matching
         .iter()
@@ -697,7 +697,7 @@ async fn resolve_latest_neoforge_version(minecraft_version: &str) -> Result<Stri
         .ok_or_else(|| format!("Keine NeoForge-Version fuer Minecraft {} gefunden", minecraft_version))
 }
 
-async fn fetch_json<T: serde::de::DeserializeOwned>(url: &str, label: &str) -> Result<T, String> {
+async fn fetch_json<T: for<'de> Deserialize<'de>>(url: &str, label: &str) -> Result<T, String> {
     crate::core::http::HTTP_CLIENT
         .get(url)
         .send()
@@ -713,6 +713,10 @@ async fn fetch_json<T: serde::de::DeserializeOwned>(url: &str, label: &str) -> R
 /// Liefert alle Minecraft-Versionen, fuer die es die Server-Software wirklich gibt (neueste zuerst).
 #[tauri::command]
 pub async fn get_server_software_versions(software: String) -> Result<Vec<String>, String> {
+    fetch_server_software_versions(software).await
+}
+
+async fn fetch_server_software_versions(software: String) -> Result<Vec<String>, String> {
     #[derive(Deserialize)]
     struct GameVersionEntry {
         version: String,
@@ -806,7 +810,7 @@ pub async fn get_server_software_versions(software: String) -> Result<Vec<String
 /// Prueft vor dem Download, ob es die Software fuer die Minecraft-Version gibt.
 /// Ist die Versionsliste nicht erreichbar (offline), wird der Download trotzdem versucht.
 async fn ensure_software_supports_version(profile: &ServerProfile) -> Result<(), String> {
-    match get_server_software_versions(profile.software.clone()).await {
+    match fetch_server_software_versions(profile.software.clone()).await {
         Ok(versions) if !versions.is_empty() && !versions.contains(&profile.minecraft_version) => {
             Err(format!(
                 "{} gibt es nicht fuer Minecraft {}. Verfuegbar sind z.B.: {}",

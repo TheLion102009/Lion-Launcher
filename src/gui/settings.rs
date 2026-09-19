@@ -127,6 +127,10 @@ pub async fn ensure_java_runtime_for_settings(major: u32) -> Result<String, Stri
 
 #[tauri::command]
 pub async fn get_config() -> Result<LauncherConfig, String> {
+    load_config().await
+}
+
+pub async fn load_config() -> Result<LauncherConfig, String> {
     let config_path = crate::config::defaults::launcher_dir().join("config.json");
 
     if !config_path.exists() {

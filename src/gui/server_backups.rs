@@ -207,7 +207,7 @@ pub async fn list_server_backups(server_id: String) -> Result<Vec<ServerBackupEn
         .filter(|p| p.extension().map(|ext| ext == "zip").unwrap_or(false))
         .filter_map(|p| entry_for(&p))
         .collect();
-    backups.sort_by(|a, b| b.created_unix.cmp(&a.created_unix));
+    backups.sort_by_key(|a| std::cmp::Reverse(a.created_unix));
     Ok(backups)
 }
 
