@@ -35,6 +35,19 @@
       "icons/icon.png"
     ],
     "category": "Game",
+    "fileAssociations": [
+      {
+        "ext": ["lion"],
+        "name": "Lion Profile",
+        "description": "Lion Launcher Profil",
+        "role": "Editor",
+        "mimeType": "application/x-lion-profile",
+        "exportedType": {
+          "identifier": "com.lionlauncher.dev.profile",
+          "conformsTo": ["public.json"]
+        }
+      }
+    ],
     "shortDescription": "Ein moderner Minecraft Launcher",
     "longDescription": "Lion Launcher ist ein moderner, schneller Minecraft Launcher mit Unterstützung für Fabric, Quilt, Forge und NeoForge. Er bietet eine intuitive Benutzeroberfläche, einfache Mod-Installation und umfassende Profilverwaltung.",
     "publisher": "Thorben Hess",
@@ -45,11 +58,25 @@
       "deb": {
         "depends": ["libgtk-3-0", "libwebkit2gtk-4.1-0", "libayatana-appindicator3-1"],
         "section": "games",
-        "priority": "optional"
+        "priority": "optional",
+        "desktopTemplate": "pkg/linux/lion-launcher.desktop.hbs",
+        "files": {
+          "/usr/share/mime/packages/lion-launcher.xml": "pkg/linux/lion-launcher-mime.xml",
+          "/usr/share/icons/hicolor/32x32/mimetypes/application-x-lion-profile.png": "icons/32x32.png",
+          "/usr/share/icons/hicolor/128x128/mimetypes/application-x-lion-profile.png": "icons/128x128.png",
+          "/usr/share/icons/hicolor/256x256/mimetypes/application-x-lion-profile.png": "icons/128x128@2x.png"
+        }
       },
       "rpm": {
         "release": "1",
-        "epoch": 0
+        "epoch": 0,
+        "desktopTemplate": "pkg/linux/lion-launcher.desktop.hbs",
+        "files": {
+          "/usr/share/mime/packages/lion-launcher.xml": "pkg/linux/lion-launcher-mime.xml",
+          "/usr/share/icons/hicolor/32x32/mimetypes/application-x-lion-profile.png": "icons/32x32.png",
+          "/usr/share/icons/hicolor/128x128/mimetypes/application-x-lion-profile.png": "icons/128x128.png",
+          "/usr/share/icons/hicolor/256x256/mimetypes/application-x-lion-profile.png": "icons/128x128@2x.png"
+        }
       }
     },
     "windows": {

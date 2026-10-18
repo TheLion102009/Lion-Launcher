@@ -377,6 +377,56 @@ pub async fn save_lion_file_with_dialog(
     }
 }
 
+/// `.lion`-Datei, mit der der Launcher geöffnet wurde (Doppelklick / "Öffnen mit").
+static PENDING_LION_FILE: once_cell::sync::Lazy<std::sync::Mutex<Option<std::path::PathBuf>>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(None));
+
+fn is_lion_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("lion"))
+        && path.is_file()
+}
+
+pub fn queue_lion_file(path: std::path::PathBuf) {
+    if is_lion_file(&path) {
+        *PENDING_LION_FILE.lock().unwrap_or_else(|e| e.into_inner()) = Some(path);
+    }
+}
+
+/// Windows/Linux übergeben die geöffnete Datei als Startargument (`%1` / `%f`).
+pub fn queue_lion_file_from_args() {
+    for arg in std::env::args().skip(1) {
+        let path = match url::Url::parse(&arg) {
+            Ok(url) if url.scheme() == "file" => match url.to_file_path() {
+                Ok(path) => path,
+                Err(_) => continue,
+            },
+            _ => std::path::PathBuf::from(&arg),
+        };
+        if is_lion_file(&path) {
+            queue_lion_file(path);
+            return;
+        }
+    }
+}
+
+/// Liefert den Inhalt der beim Start übergebenen `.lion`-Datei (nur einmal).
+#[tauri::command]
+pub async fn take_pending_lion_file() -> Result<Option<String>, String> {
+    let path = PENDING_LION_FILE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
+    match path {
+        Some(path) => tokio::fs::read_to_string(&path)
+            .await
+            .map(Some)
+            .map_err(|e| format!("{} konnte nicht gelesen werden: {}", path.display(), e)),
+        None => Ok(None),
+    }
+}
+
 struct LaunchProgressGuard;
 
 impl Drop for LaunchProgressGuard {

@@ -90,17 +90,28 @@ package() {
     install -Dm644 icons/icon.png \
         "$pkgdir/usr/share/pixmaps/lion-launcher.png"
 
+    # .lion-Dateityp: Lion-Launcher-Icon für Profil-Dateien + "Öffnen mit Lion Launcher"
+    install -Dm644 pkg/linux/lion-launcher-mime.xml \
+        "$pkgdir/usr/share/mime/packages/lion-launcher.xml"
+    install -Dm644 icons/32x32.png \
+        "$pkgdir/usr/share/icons/hicolor/32x32/mimetypes/application-x-lion-profile.png"
+    install -Dm644 icons/128x128.png \
+        "$pkgdir/usr/share/icons/hicolor/128x128/mimetypes/application-x-lion-profile.png"
+    install -Dm644 icons/128x128@2x.png \
+        "$pkgdir/usr/share/icons/hicolor/256x256/mimetypes/application-x-lion-profile.png"
+
     # Desktop-Eintrag
     install -Dm644 /dev/stdin \
         "$pkgdir/usr/share/applications/lion-launcher.desktop" << EOF
 [Desktop Entry]
 Name=Lion Launcher
 Comment=Ein moderner Minecraft Launcher
-Exec=/usr/bin/lion-launcher
+Exec=/usr/bin/lion-launcher %f
 Icon=lion-launcher
 Type=Application
 Categories=Game;
 Keywords=minecraft;launcher;mods;fabric;forge;neoforge;quilt;
+MimeType=application/x-lion-profile;
 StartupNotify=true
 StartupWMClass=lion-launcher
 EOF

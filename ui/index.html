@@ -46,6 +46,17 @@
 
         <!-- Main Content -->
         <div class="main-content">
+            <!-- Zurück / Vorwärts wie im Browser (global für alle Seiten) -->
+            <div id="history-nav" class="history-nav">
+                <button id="history-back-btn" class="history-nav-btn" type="button" data-i18n-title="nav_back" title="Back" disabled>
+                    <i class="bi bi-arrow-left"></i>
+                </button>
+                <span class="history-nav-divider"></span>
+                <button id="history-forward-btn" class="history-nav-btn" type="button" data-i18n-title="nav_forward" title="Forward" disabled>
+                    <i class="bi bi-arrow-right"></i>
+                </button>
+            </div>
+
             <div id="session-widget" class="session-widget" aria-live="polite">
                 <div class="session-widget-main">
                     <div id="session-indicator" class="session-indicator idle">
@@ -56,6 +67,7 @@
                     </button>
                     <div class="session-widget-meta">
                         <div id="session-profile-name" class="session-profile-name">No Session Aktiv</div>
+                        <div id="session-status" class="session-status hidden"></div>
                     </div>
                 </div>
             </div>
@@ -87,11 +99,6 @@
             <!-- Content Browser Page -->
             <div id="page-mods" class="page hidden">
                 <div class="header">
-                    <button id="back-to-profile-btn" class="btn btn-secondary" onclick="backToProfileFromModBrowser()"
-                            style="display: none; position: absolute; left: 0; padding: 8px 16px;"
-                            data-i18n="btn_back_to_profile">
-                        ← Back to Profile
-                    </button>
                     <h1 data-i18n="nav_content_browser">Content Browser</h1>
                 </div>
                 <div class="content">
@@ -240,11 +247,6 @@
             <!-- Mod Details Page -->
             <div id="page-mod-details" class="page hidden">
                 <div class="header">
-                    <button class="btn btn-secondary" onclick="backFromModDetails()"
-                            style="position: absolute; left: 0; padding: 8px 16px;"
-                            data-i18n="btn_back">
-                        ← Back
-                    </button>
                     <h1 id="mod-details-name" data-i18n="mod_details_title">Mod Details</h1>
                 </div>
                 <div class="content" style="overflow-y: auto; max-height: calc(100vh - 140px);">

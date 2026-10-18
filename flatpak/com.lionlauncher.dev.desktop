@@ -1,11 +1,12 @@
 [Desktop Entry]
 Name=Lion Launcher
 Comment=Ein moderner Minecraft Launcher
-Exec=lion-launcher
+Exec=lion-launcher %f
 Icon=com.lionlauncher.dev
 Type=Application
 Categories=Game;
 Keywords=minecraft;launcher;mods;fabric;forge;
+MimeType=application/x-lion-profile;
 StartupNotify=true
 StartupWMClass=lion-launcher
 

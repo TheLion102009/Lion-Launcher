@@ -24,6 +24,8 @@ const TRANSLATIONS = {
         nav_content_browser: 'Content Browser',
         nav_skins: 'Skins',
         nav_settings: 'Settings',
+        nav_back: 'Back',
+        nav_forward: 'Forward',
 
         // Profiles page
         loading_profiles: 'Loading profiles...',
@@ -143,6 +145,8 @@ const TRANSLATIONS = {
         nav_content_browser: 'Content-Browser',
         nav_skins: 'Skins',
         nav_settings: 'Einstellungen',
+        nav_back: 'Zurück',
+        nav_forward: 'Vorwärts',
 
         loading_profiles: 'Profile werden geladen...',
         btn_new_profile: '+ Neues Profil',
@@ -254,6 +258,8 @@ const TRANSLATIONS = {
         nav_content_browser: '内容浏览器',
         nav_skins: '皮肤',
         nav_settings: '设置',
+        nav_back: '返回',
+        nav_forward: '前进',
 
         loading_profiles: '正在加载档案...',
         btn_new_profile: '+ 新建档案',
@@ -365,6 +371,8 @@ const TRANSLATIONS = {
         nav_content_browser: 'コンテンツブラウザ',
         nav_skins: 'スキン',
         nav_settings: '設定',
+        nav_back: '戻る',
+        nav_forward: '進む',
 
         loading_profiles: 'プロフィールを読み込み中...',
         btn_new_profile: '+ 新しいプロフィール',
@@ -476,6 +484,8 @@ const TRANSLATIONS = {
         nav_content_browser: 'Браузер контента',
         nav_skins: 'Скины',
         nav_settings: 'Настройки',
+        nav_back: 'Назад',
+        nav_forward: 'Вперёд',
 
         loading_profiles: 'Загрузка профилей...',
         btn_new_profile: '+ Новый профиль',
@@ -587,6 +597,8 @@ const TRANSLATIONS = {
         nav_content_browser: 'Navigateur de contenu',
         nav_skins: 'Skins',
         nav_settings: 'Paramètres',
+        nav_back: 'Précédent',
+        nav_forward: 'Suivant',
 
         loading_profiles: 'Chargement des profils...',
         btn_new_profile: '+ Nouveau profil',
@@ -698,6 +710,8 @@ const TRANSLATIONS = {
         nav_content_browser: 'Explorador de contenido',
         nav_skins: 'Skins',
         nav_settings: 'Configuración',
+        nav_back: 'Atrás',
+        nav_forward: 'Adelante',
 
         loading_profiles: 'Cargando perfiles...',
         btn_new_profile: '+ Nuevo perfil',
@@ -809,6 +823,8 @@ const TRANSLATIONS = {
         nav_content_browser: 'Navegador de Conteúdo',
         nav_skins: 'Skins',
         nav_settings: 'Configurações',
+        nav_back: 'Voltar',
+        nav_forward: 'Avançar',
 
         loading_profiles: 'Carregando perfis...',
         btn_new_profile: '+ Novo perfil',
@@ -920,6 +936,8 @@ const TRANSLATIONS = {
         nav_content_browser: '콘텐츠 브라우저',
         nav_skins: '스킨',
         nav_settings: '설정',
+        nav_back: '뒤로',
+        nav_forward: '앞으로',
 
         loading_profiles: '프로필 불러오는 중...',
         btn_new_profile: '+ 새 프로필',
@@ -1031,6 +1049,8 @@ const TRANSLATIONS = {
         nav_content_browser: 'Przeglądarka zawartości',
         nav_skins: 'Skiny',
         nav_settings: 'Ustawienia',
+        nav_back: 'Wstecz',
+        nav_forward: 'Dalej',
 
         loading_profiles: 'Ładowanie profili...',
         btn_new_profile: '+ Nowy profil',

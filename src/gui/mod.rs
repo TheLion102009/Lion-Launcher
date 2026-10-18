@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod components;
 pub mod mod_browser;
+pub mod mod_updates;
 pub mod profile_manager;
 pub mod server_backups;
 pub mod server_content;
@@ -461,6 +462,7 @@ pub async fn clear_profile_cache(profile_id: String) -> Result<(), String> {
 
 // Re-export commands for convenience
 pub use mod_browser::*;
+pub use mod_updates::*;
 pub use profile_manager::*;
 pub use server_backups::*;
 pub use server_content::*;
@@ -740,15 +742,14 @@ pub async fn delete_mod(profile_id: String, filename: String) -> Result<(), Stri
     std::fs::remove_file(&mod_path).map_err(|e| e.to_string())?;
     tracing::info!("Mod deleted: {}", filename);
 
-    // Lösche auch die Metadaten-Datei aus modinfos/
-    let meta_filename = filename.trim_end_matches(".jar").to_string() + ".json";
-    let meta_path = profile.game_dir.join("modinfos").join(&meta_filename);
+    // Lösche auch die Metadaten-Datei aus modinfos/ (auch für deaktivierte .jar.disabled)
+    let meta_path = mod_updates::mod_meta_path(&profile.game_dir, &filename);
 
     if meta_path.exists() {
         if let Err(e) = std::fs::remove_file(&meta_path) {
             tracing::warn!("Failed to delete metadata file: {}", e);
         } else {
-            tracing::info!("Metadata deleted: {}", meta_filename);
+            tracing::info!("Metadata deleted: {:?}", meta_path);
         }
     }
 
@@ -859,232 +860,6 @@ pub async fn bulk_delete_mods(profile_id: String, filenames: Vec<String>) -> Res
         delete_mod(profile_id.clone(), filename).await?;
     }
     Ok(())
-}
-
-#[tauri::command]
-pub async fn check_mod_updates(
-    profile_id: String,
-    mc_version: String,
-    loader: String,
-) -> Result<Vec<ModUpdateInfo>, String> {
-    use crate::core::profiles::ProfileManager;
-
-    let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    let profiles = profile_manager
-        .load_profiles()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let profile = profiles
-        .get_profile(&profile_id)
-        .ok_or_else(|| "Profile not found".to_string())?;
-
-    let profile_mc_version = if mc_version.is_empty() {
-        profile.minecraft_version.clone()
-    } else {
-        mc_version
-    };
-    let profile_loader = if loader.is_empty() {
-        profile.loader.loader.to_string().to_lowercase()
-    } else {
-        loader.to_lowercase()
-    };
-
-    let mods = get_installed_mods(profile_id.clone()).await?;
-    let mut updates = Vec::new();
-    let client = crate::core::http::HTTP_CLIENT.clone();
-
-    // Für jede installierte Mod: finde kompatible Updates oder inkompatible neuere Releases
-    for mod_info in mods {
-        if let Some(mod_id) = &mod_info.mod_id {
-            let mut resolved_mod_id = mod_id.clone();
-            let mut resolved_name = mod_info.name.clone();
-            let mut resolved_icon = mod_info.icon_url.clone();
-
-            let mut versions = fetch_modrinth_versions(&client, &resolved_mod_id)
-                .await
-                .unwrap_or_default();
-
-            if versions.is_empty() {
-                if let Ok(Some(found)) = search_modrinth_by_name(&client, mod_id).await {
-                    resolved_mod_id = found.mod_id;
-                    if resolved_name.is_none() {
-                        resolved_name = found.title;
-                    }
-                    if resolved_icon.is_none() {
-                        resolved_icon = found.icon_url;
-                    }
-                    versions = fetch_modrinth_versions(&client, &resolved_mod_id)
-                        .await
-                        .unwrap_or_default();
-                }
-            }
-
-            if versions.is_empty() {
-                continue;
-            }
-
-            let newest = &versions[0];
-            let latest_compatible = versions
-                .iter()
-                .find(|v| is_version_compatible(v, &profile_mc_version, &profile_loader));
-
-            let can_update = latest_compatible
-                .map(|v| mod_info.version.as_deref() != Some(v.version_number.as_str()))
-                .unwrap_or(false);
-
-            let latest_is_compatible =
-                is_version_compatible(newest, &profile_mc_version, &profile_loader);
-            let newest_differs_from_current = mod_info
-                .version
-                .as_deref()
-                .map(|v| v != newest.version_number.as_str())
-                .unwrap_or(true);
-            let should_show_incompatible_notice =
-                !latest_is_compatible && newest_differs_from_current;
-
-            if can_update || should_show_incompatible_notice {
-                updates.push(ModUpdateInfo {
-                    filename: mod_info.filename.clone(),
-                    mod_name: resolved_name,
-                    current_version: mod_info.version.clone(),
-                    latest_version: if can_update {
-                        latest_compatible.map(|v| v.version_number.clone())
-                    } else {
-                        Some(newest.version_number.clone())
-                    },
-                    mod_id: resolved_mod_id,
-                    icon_url: resolved_icon,
-                    can_update,
-                    update_version_id: if can_update {
-                        latest_compatible.map(|v| v.id.clone())
-                    } else {
-                        None
-                    },
-                    latest_compatible_version: latest_compatible.map(|v| v.version_number.clone()),
-                    newest_version: Some(newest.version_number.clone()),
-                    newest_game_versions: newest.game_versions.clone(),
-                    latest_is_compatible,
-                });
-            }
-        }
-    }
-
-    updates.sort_by(|a, b| {
-        b.can_update
-            .cmp(&a.can_update)
-            .then_with(|| a.filename.to_lowercase().cmp(&b.filename.to_lowercase()))
-    });
-
-    Ok(updates)
-}
-
-#[derive(serde::Serialize)]
-pub struct ModUpdateInfo {
-    pub filename: String,
-    pub mod_name: Option<String>,
-    pub current_version: Option<String>,
-    pub latest_version: Option<String>,
-    pub mod_id: String,
-    pub icon_url: Option<String>,
-    pub can_update: bool,
-    pub update_version_id: Option<String>,
-    pub latest_compatible_version: Option<String>,
-    pub newest_version: Option<String>,
-    pub newest_game_versions: Vec<String>,
-    pub latest_is_compatible: bool,
-}
-
-struct ModrinthSearchResult {
-    mod_id: String,
-    icon_url: Option<String>,
-    title: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct ModrinthVersionInfo {
-    id: String,
-    version_number: String,
-    game_versions: Vec<String>,
-    loaders: Vec<String>,
-}
-
-async fn fetch_modrinth_versions(
-    client: &reqwest::Client,
-    mod_id: &str,
-) -> Result<Vec<ModrinthVersionInfo>, String> {
-    let url = format!("https://api.modrinth.com/v2/project/{}/version", mod_id);
-    let response = client
-        .get(&url)
-        .header("User-Agent", "Lion-Launcher/1.0")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !response.status().is_success() {
-        return Ok(Vec::new());
-    }
-
-    let versions: Vec<ModrinthVersionInfo> = response.json().await.map_err(|e| e.to_string())?;
-    Ok(versions)
-}
-
-fn is_version_compatible(version: &ModrinthVersionInfo, mc_version: &str, loader: &str) -> bool {
-    let has_mc_version = version.game_versions.iter().any(|gv| gv == mc_version);
-    if !has_mc_version {
-        return false;
-    }
-
-    version.loaders.iter().any(|l| {
-        let normalized = l.to_lowercase();
-        normalized == loader || (loader == "quilt" && normalized == "fabric")
-    })
-}
-
-async fn search_modrinth_by_name(
-    client: &reqwest::Client,
-    name: &str,
-) -> Result<Option<ModrinthSearchResult>, String> {
-    // Einfache Modrinth-Suche
-    let url = format!(
-        "https://api.modrinth.com/v2/search?query={}&limit=1",
-        urlencoding::encode(name)
-    );
-
-    let response = client
-        .get(&url)
-        .header("User-Agent", "Lion-Launcher/1.0")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !response.status().is_success() {
-        return Ok(None);
-    }
-
-    #[derive(serde::Deserialize)]
-    struct SearchResponse {
-        hits: Vec<SearchHit>,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct SearchHit {
-        project_id: String,
-        title: Option<String>,
-        icon_url: Option<String>,
-    }
-
-    let result: SearchResponse = response.json().await.map_err(|e| e.to_string())?;
-
-    if let Some(hit) = result.hits.first() {
-        Ok(Some(ModrinthSearchResult {
-            mod_id: hit.project_id.clone(),
-            icon_url: hit.icon_url.clone(),
-            title: hit.title.clone(),
-        }))
-    } else {
-        Ok(None)
-    }
 }
 
 // ==================== RESOURCE PACKS ====================

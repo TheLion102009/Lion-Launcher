@@ -185,6 +185,63 @@ body {
     position: relative;
 }
 
+/* Zurück / Vorwärts oben links neben dem Logo (Gegenstück zum Aktivitäts-Kasten) */
+.history-nav {
+    position: absolute;
+    top: 30px;
+    left: 22px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    background: linear-gradient(160deg, rgba(28, 28, 28, 0.96), rgba(40, 40, 40, 0.9));
+    border-radius: 10px;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.36);
+    z-index: 300;
+}
+
+.history-nav::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 1px solid var(--gold);
+    border-radius: 10px;
+    opacity: 0.28;
+    pointer-events: none;
+}
+
+.history-nav-btn {
+    width: 28px;
+    height: 22px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.history-nav-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--gold);
+}
+
+.history-nav-btn:disabled {
+    color: #b0b0b0;
+    opacity: 0.35;
+    cursor: default;
+}
+
+.history-nav-divider {
+    width: 1px;
+    height: 14px;
+    background: rgba(255, 255, 255, 0.14);
+}
+
 .session-widget {
     position: absolute;
     top: 30px;
@@ -283,7 +340,21 @@ body {
 .session-widget-meta {
     min-width: 0;
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.session-status {
+    color: var(--text-secondary);
+    font-size: 9px;
+    max-width: 150px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.session-status.hidden {
+    display: none;
 }
 
 .session-stop-btn {
@@ -1593,4 +1664,41 @@ button.server-address-badge:hover {
     display: flex;
     align-items: center;
     gap: 12px;
+}
+
+/* Mod-Updates im Profil */
+.mod-update-btn {
+    padding: 5px 10px;
+    font-size: 11px;
+    color: var(--gold);
+    box-shadow: inset 0 0 0 1px var(--gold);
+}
+
+.mod-update-btn:hover {
+    background-color: var(--gold);
+    color: var(--bg-dark);
+}
+
+.mod-update-btn:disabled {
+    cursor: wait;
+    transform: none;
+}
+
+.mod-update-count {
+    display: inline-block;
+    min-width: 16px;
+    padding: 0 5px;
+    margin-left: 2px;
+    border-radius: 999px;
+    background: var(--gold);
+    color: var(--bg-dark);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+}
+
+.lion-spin {
+    display: inline-block;
+    animation: sessionSpin 0.9s linear infinite;
 }

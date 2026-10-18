@@ -191,7 +191,9 @@ const sessionWidgetState = {
     phase: 'idle',
     status: 'Idle',
     percent: null,
-    canStop: false
+    canStop: false,
+    // z.B. 'import': Aktivität ohne (bzw. vor der) Profil-ID, die nicht überschrieben werden darf
+    activity: null
 };
 let sessionWidgetInitialized = false;
 
@@ -207,23 +209,25 @@ function setSessionWidgetState(nextState = {}) {
 }
 
 function syncSessionWidgetWithRunningProfiles() {
-    if (runningProfiles.size === 0) {
-        const hasActiveTransientState = !!sessionWidgetState.profileId && (
-            sessionWidgetState.phase === 'spin' ||
-            sessionWidgetState.phase === 'progress' ||
-            sessionWidgetState.phase === 'queued'
-        );
-        if (hasActiveTransientState) {
-            return;
-        }
+    // Ein laufender Start, Download oder Import hat Vorrang vor der Anzeige laufender Instanzen
+    const hasActiveTransientState = !!(sessionWidgetState.profileId || sessionWidgetState.activity) && (
+        sessionWidgetState.phase === 'spin' ||
+        sessionWidgetState.phase === 'progress' ||
+        sessionWidgetState.phase === 'queued'
+    );
+    if (hasActiveTransientState) {
+        return;
+    }
 
+    if (runningProfiles.size === 0) {
         setSessionWidgetState({
             profileId: null,
             profileName: 'No Session Active',
             phase: 'idle',
             status: 'Idle',
             percent: null,
-            canStop: false
+            canStop: false,
+            activity: null
         });
         return;
     }
@@ -236,7 +240,8 @@ function syncSessionWidgetWithRunningProfiles() {
         phase: 'running',
         status: 'Minecraft gestartet',
         percent: null,
-        canStop: true
+        canStop: true,
+        activity: null
     });
 }
 
@@ -268,6 +273,16 @@ function renderSessionWidget() {
     }
 
     nameEl.textContent = sessionWidgetState.profileName || 'No Session Active';
+
+    // Statuszeile (z.B. "Importing mods... (3/40)") nur während laufender Aktivitäten
+    const statusEl = document.getElementById('session-status');
+    const isBusy = phase === 'spin' || phase === 'progress' || phase === 'queued';
+    const statusText = isBusy ? String(sessionWidgetState.status || '') : '';
+    if (statusEl) {
+        statusEl.textContent = statusText;
+        statusEl.classList.toggle('hidden', !statusText);
+    }
+    widget.title = statusText;
 
     const canStop = !!sessionWidgetState.profileId && !!sessionWidgetState.canStop;
     stopBtn.classList.toggle('hidden', !canStop);
@@ -453,6 +468,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Load environment icons
         loadEnvironmentIcons();
 
+        // Per Doppelklick geöffnete .lion-Datei importieren (macOS meldet sie zur Laufzeit per Event)
+        try {
+            await window.__TAURI__.event.listen('lion-file-opened', () => openPendingLionFile());
+        } catch (_e) {
+            // Event API not available
+        }
+        openPendingLionFile();
+
         debugLog('Lion Launcher ready!', 'success');
     } catch (error) {
         debugLog('Initialization error: ' + error, 'error');
@@ -559,13 +582,215 @@ function toggleFilterSection(sectionName) {
 function setupNavigation() {
     document.querySelectorAll('.nav-item[data-page]').forEach(item => {
         item.addEventListener('click', () => {
-            const page = item.dataset.page;
-            switchPage(page);
+            navigateToPage(item.dataset.page);
         });
     });
+    initHistoryNav();
 }
 
-function switchPage(page) {
+/** Seitenwechsel über die Sidebar */
+function navigateToPage(page) {
+    if (page === 'mods') {
+        recordNavigation({ type: 'browser', context: 'global' });
+        showGlobalContentBrowser();
+        return;
+    }
+    // Profile und Server tragen sich beim Laden der Übersicht selbst ein
+    if (page !== 'profiles' && page !== 'servers-hub') {
+        recordNavigation({ type: 'page', page });
+    }
+    switchPage(page);
+}
+
+// ==================== VERLAUF (Zurück / Vorwärts) ====================
+// Jede Ansicht ist ein "Ort" ({ type, ... }), den die Navigationsfunktionen selbst eintragen.
+// Zurück/Vorwärts stellen einen Ort über dieselben Funktionen wieder her; deren erneuter
+// Eintrag trifft dann den aktuellen Ort und wird ignoriert.
+const NAV_HISTORY_LIMIT = 50;
+const navHistory = [];
+let navHistoryIndex = -1;
+/** Für welchen Kontext die Ergebnisse im Content Browser gerade geladen sind */
+let browserViewKey = 'browser:global';
+
+function navLocationKey(location) {
+    switch (location?.type) {
+        case 'profile': return `profile:${location.profileId}`;
+        case 'server': return `server:${location.serverId}`;
+        case 'browser': return `browser:${location.context}${location.profileId || location.serverId ? ':' + (location.profileId || location.serverId) : ''}`;
+        case 'mod': return `mod:${location.modId}`;
+        default: return `page:${location?.page}`;
+    }
+}
+
+function recordNavigation(location) {
+    const current = navHistory[navHistoryIndex];
+    if (current && navLocationKey(current) === navLocationKey(location)) return;
+
+    // Wie im Browser: nach "Zurück" verwirft eine neue Navigation den Vorwärts-Verlauf
+    navHistory.splice(navHistoryIndex + 1);
+    navHistory.push({ ...location });
+    if (navHistory.length > NAV_HISTORY_LIMIT) navHistory.shift();
+    navHistoryIndex = navHistory.length - 1;
+    updateHistoryNavButtons();
+}
+
+/** Merkt sich Tab-Wechsel innerhalb der aktuellen Ansicht (ohne neuen Verlaufseintrag). */
+function patchCurrentNavLocation(matches, patch) {
+    const entry = navHistory[navHistoryIndex];
+    if (entry && matches(entry)) Object.assign(entry, patch);
+}
+
+function isNavLocationAvailable(location) {
+    if (location.profileId && (location.type === 'profile' || location.type === 'browser')) {
+        return profiles.some(p => p.id === location.profileId);
+    }
+    if (location.serverId && (location.type === 'server' || location.type === 'browser')) {
+        return serverProfiles.some(s => s.id === location.serverId);
+    }
+    return true;
+}
+
+async function navigateHistory(step) {
+    let target = navHistoryIndex + step;
+    // Gelöschte Profile/Server und doppelte Einträge überspringen
+    while (navHistory[target] && (!isNavLocationAvailable(navHistory[target]) ||
+        navLocationKey(navHistory[target]) === navLocationKey(navHistory[navHistoryIndex]))) {
+        navHistory.splice(target, 1);
+        if (step < 0) {
+            navHistoryIndex -= 1;
+            target -= 1;
+        }
+    }
+    if (!navHistory[target]) {
+        updateHistoryNavButtons();
+        return;
+    }
+
+    navHistoryIndex = target;
+    updateHistoryNavButtons();
+    try {
+        await restoreNavLocation(navHistory[target]);
+    } catch (error) {
+        debugLog('History navigation failed: ' + error, 'error');
+    }
+}
+
+function historyBack() {
+    return navigateHistory(-1);
+}
+
+function historyForward() {
+    return navigateHistory(1);
+}
+
+async function restoreNavLocation(location) {
+    switch (location.type) {
+        case 'profile':
+            skipLoadProfiles = true;
+            switchPage('profiles');
+            showProfileDetails(location.profileId, { mainCategory: location.mainCategory, subTab: location.subTab });
+            break;
+        case 'browser':
+            await restoreContentBrowser(location);
+            break;
+        case 'mod':
+            if (location.serverId) {
+                if (serverBrowserContext?.serverId !== location.serverId) {
+                    serverBrowserContext = await createServerBrowserContext(location.serverId);
+                }
+                currentProfile = null;
+            } else {
+                if (serverBrowserContext) {
+                    serverBrowserContext = null;
+                    restoreDefaultBrowserMode();
+                }
+                currentProfile = profiles.find(p => p.id === location.profileId) || null;
+            }
+            await showModDetails(location.modId, location.source || 'modrinth');
+            break;
+        case 'server':
+            pendingServerDetailOpen = { id: location.serverId, tab: location.tab || 'console' };
+            switchPage('servers-hub');
+            break;
+        default:
+            switchPage(location.page);
+    }
+}
+
+/** Zeigt den Content Browser wieder an – ohne Neuladen, wenn Suche/Seite noch zum Kontext gehören. */
+async function restoreContentBrowser(location) {
+    const sameView = browserViewKey === navLocationKey(location);
+
+    if (location.context === 'profile') {
+        const profile = profiles.find(p => p.id === location.profileId);
+        if (sameView && profile) {
+            currentProfile = profile;
+            openedFromProfile = true;
+            switchPage('mods');
+        } else {
+            currentProfileSubTab = location.contentType || 'mods';
+            openContentBrowser(location.profileId);
+        }
+    } else if (location.context === 'server') {
+        if (sameView && serverBrowserContext?.serverId === location.serverId) {
+            serverBrowserNavigation = true;
+            switchPage('mods');
+        } else {
+            await openServerContentBrowser(location.serverId);
+        }
+    } else {
+        showGlobalContentBrowser(location.contentType);
+    }
+}
+
+/** Content Browser ohne Profil/Server; lädt neu, falls noch Ergebnisse eines anderen Kontexts angezeigt werden. */
+function showGlobalContentBrowser(contentType = null) {
+    const sameView = browserViewKey === 'browser:global';
+    switchPage('mods', { keepBrowserFilters: sameView });
+    if (!sameView) {
+        resetFiltersToDefault();
+        switchContentType(contentType || currentContentType || 'mods', { force: true });
+        browserViewKey = 'browser:global';
+    } else if (contentType && contentType !== currentContentType) {
+        switchContentType(contentType);
+    }
+}
+
+function updateHistoryNavButtons() {
+    const backBtn = document.getElementById('history-back-btn');
+    const forwardBtn = document.getElementById('history-forward-btn');
+    if (backBtn) backBtn.disabled = navHistoryIndex <= 0;
+    if (forwardBtn) forwardBtn.disabled = navHistoryIndex >= navHistory.length - 1;
+}
+
+function initHistoryNav() {
+    document.getElementById('history-back-btn')?.addEventListener('click', historyBack);
+    document.getElementById('history-forward-btn')?.addEventListener('click', historyForward);
+
+    // Wie im Browser: Maus-Seitentasten und Alt+←/→
+    window.addEventListener('mouseup', (event) => {
+        if (event.button === 3) {
+            event.preventDefault();
+            historyBack();
+        } else if (event.button === 4) {
+            event.preventDefault();
+            historyForward();
+        }
+    });
+    window.addEventListener('keydown', (event) => {
+        if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        if (event.key === 'ArrowLeft') {
+            event.preventDefault();
+            historyBack();
+        } else if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            historyForward();
+        }
+    });
+    updateHistoryNavButtons();
+}
+
+function switchPage(page, options = {}) {
     // Stop mods watcher when the page changes
     if (typeof stopModsWatcher === 'function') {
         stopModsWatcher();
@@ -609,10 +834,12 @@ function switchPage(page) {
         if (!openedFromProfile) {
             // Opened from main menu - clear currentProfile and reset filters
             currentProfile = null;
-            // Reset filters to default ("All Loaders")
-            setTimeout(() => {
-                resetFiltersToDefault();
-            }, 100);
+            // Reset filters to default ("All Loaders") – außer bei Zurück in denselben Browser
+            if (!options.keepBrowserFilters) {
+                setTimeout(() => {
+                    resetFiltersToDefault();
+                }, 100);
+            }
             debugLog('Content Browser opened from main menu - filters reset to default', 'info');
         } else {
             // Opened from a profile - currentProfile is kept for auto-filter
@@ -620,16 +847,6 @@ function switchPage(page) {
         }
         // Reset flag for next time
         openedFromProfile = false;
-    }
-
-    // Show back button in the mod browser when coming from a profile
-    const backBtn = document.getElementById('back-to-profile-btn');
-    if (backBtn) {
-        if (page === 'mods' && (currentProfile || serverBrowserContext)) {
-            backBtn.style.display = 'block';
-        } else {
-            backBtn.style.display = 'none';
-        }
     }
 
     // Initialize skin viewer when the skins page is opened
@@ -754,25 +971,9 @@ function resetFiltersToDefault() {
     debugLog('Filters reset complete', 'info');
 }
 
-function backToProfileFromModBrowser() {
-    if (serverBrowserContext) {
-        backToServerFromBrowser('content');
-        return;
-    }
-    if (currentProfile && currentProfile.id) {
-        const profileId = currentProfile.id; // Save the ID before currentProfile is cleared
-        skipLoadProfiles = true; // Skip loadProfiles() to avoid a flash
-        switchPage('profiles');
-        // Show the detail view directly (no setTimeout needed anymore!)
-        showProfileDetails(profileId);
-    } else {
-        // No profile set, go to the main overview
-        switchPage('profiles');
-    }
-}
-
 // Profiles
 async function loadProfiles() {
+    recordNavigation({ type: 'page', page: 'profiles' });
     if (typeof stopModsWatcher === 'function') stopModsWatcher();
     if (typeof stopLiveLog === 'function') stopLiveLog();
     currentProfile = null;
@@ -1185,16 +1386,25 @@ function buildImportSelectionFromModal() {
     return getCheckedValues(root, 'input[type="checkbox"]');
 }
 
-async function prepareProfileDownloadFlow(profileId, profileName) {
+/**
+ * Lädt Minecraft + Loader eines Profils herunter. Mit `progressRange` ({ from, to, activity })
+ * wird der Download-Fortschritt in einen übergeordneten Fortschritt (z.B. Import) eingebettet.
+ */
+async function prepareProfileDownloadFlow(profileId, profileName, progressRange = null) {
+    const from = progressRange?.from ?? 0;
+    const to = progressRange?.to ?? 100;
+    const activity = progressRange?.activity ?? null;
+    const scalePercent = value => from + (Math.max(0, Math.min(100, value)) / 100) * (to - from);
     let unlistenPrepareProgress = null;
     try {
         setSessionWidgetState({
             profileId,
             profileName,
-            phase: 'spin',
+            phase: progressRange ? 'progress' : 'spin',
             status: 'Preparing download...',
-            percent: null,
-            canStop: false
+            percent: progressRange ? from : null,
+            canStop: false,
+            activity
         });
 
         try {
@@ -1205,10 +1415,11 @@ async function prepareProfileDownloadFlow(profileId, profileName) {
                 setSessionWidgetState({
                     profileId,
                     profileName,
-                    phase: hasPercent ? 'progress' : 'spin',
+                    phase: hasPercent || progressRange ? 'progress' : 'spin',
                     status: status || 'Download wird vorbereitet...',
-                    percent: hasPercent ? progressValue : null,
-                    canStop: false
+                    percent: hasPercent ? scalePercent(progressValue) : (progressRange ? sessionWidgetState.percent : null),
+                    canStop: false,
+                    activity
                 });
             });
         } catch (_e) {
@@ -1224,7 +1435,8 @@ async function prepareProfileDownloadFlow(profileId, profileName) {
             phase: 'idle',
             status: 'Download complete - ready to launch.',
             percent: null,
-            canStop: false
+            canStop: false,
+            activity: null
         });
     } catch (prepareError) {
         if (typeof unlistenPrepareProgress === 'function') unlistenPrepareProgress();
@@ -1234,9 +1446,21 @@ async function prepareProfileDownloadFlow(profileId, profileName) {
             phase: 'idle',
             status: 'Download failed: ' + prepareError,
             percent: null,
-            canStop: false
+            canStop: false,
+            activity: null
         });
         throw prepareError;
+    }
+}
+
+/** Lädt die Profilliste neu, ohne eine geöffnete Profil-Detailansicht zu verlassen. */
+async function refreshProfilesInBackground() {
+    try {
+        const profileList = await invoke('get_profiles');
+        profiles = profileList.profiles || [];
+        if (currentPage === 'profiles' && !currentProfile) renderProfiles();
+    } catch (error) {
+        debugLog('Failed to refresh profiles: ' + error, 'error');
     }
 }
 
@@ -1250,15 +1474,28 @@ async function runLionImport() {
         return;
     }
 
-    const importBtn = document.getElementById('import-lion-run-btn');
-    if (importBtn) {
-        importBtn.disabled = true;
-        importBtn.textContent = 'Import...';
-    }
+    // Der Import läuft im Hintergrund weiter, der Fortschritt steht im Aktivitäts-Kasten oben rechts
+    closeImportLionModal();
+    const createModal = document.getElementById('create-profile-modal');
+    if (createModal) createModal.classList.remove('active');
+
+    const profileData = payload.profile || {};
+    const profileName = String(profileData.name || 'Imported Profile').slice(0, 60);
+    let importedProfileId = null;
+    const setImportProgress = (percent, status) => setSessionWidgetState({
+        profileId: importedProfileId,
+        profileName,
+        phase: 'progress',
+        status,
+        percent,
+        canStop: false,
+        activity: 'import'
+    });
+
+    setImportProgress(0, 'Importing profile...');
+    animateSessionFlyIn(profileName);
 
     try {
-        const profileData = payload.profile || {};
-        const profileName = String(profileData.name || 'Imported Profile').slice(0, 60);
         const mcVersion = profileData.minecraft_version || 'latest';
         const loader = profileData.loader || 'fabric';
         const loaderVersion = profileData.loader_version || 'latest';
@@ -1272,18 +1509,20 @@ async function runLionImport() {
             loaderVersion
         });
         profiles = profileList.profiles || [];
-        renderProfiles();
+        if (currentPage === 'profiles' && !currentProfile) renderProfiles();
 
         const createdProfile = profiles.find(p => !knownProfileIds.has(p.id)) ||
             profiles.find(p => p.name === profileName && p.minecraft_version === mcVersion);
         if (!createdProfile) {
             throw new Error('Imported profile was not created');
         }
+        importedProfileId = createdProfile.id;
 
         const content = payload.content || {};
 
         const report = createImportReport();
 
+        setImportProgress(3, 'Applying settings...');
         if (selections.includes('settings')) {
             await invoke('update_profile', {
                 profileId: createdProfile.id,
@@ -1304,6 +1543,7 @@ async function runLionImport() {
             await invoke('toggle_settings_sync', { profileId: createdProfile.id, enabled: !!profileData.settings_sync });
         }
 
+        setImportProgress(6, selections.includes('worlds') ? 'Importing worlds...' : 'Importing profile data...');
         const shareData = content.share_data || {};
         await invoke('import_profile_share_data', {
             profileId: createdProfile.id,
@@ -1315,7 +1555,6 @@ async function runLionImport() {
         report.worldsApplied = selections.includes('worlds') && !!shareData?.worlds_archive_base64;
         report.logsApplied = selections.includes('logs') && !!shareData?.logs_archive_base64;
 
-        let tasksDone = 0;
         const tasks = [];
 
         if (selections.includes('mods') && Array.isArray(content.mods)) {
@@ -1335,6 +1574,7 @@ async function runLionImport() {
         }
 
         if (selections.includes('servers') && Array.isArray(content.servers)) {
+            setImportProgress(10, 'Adding servers...');
             for (const server of content.servers) {
                 if (!server?.ip) continue;
                 try {
@@ -1378,9 +1618,18 @@ async function runLionImport() {
             }
         };
 
+        // Gesamtfortschritt: 0-12% Profil/Daten, 12-65% Inhalte, Rest Minecraft-Download
+        const contentStart = 12;
+        const contentEnd = tasks.length > 0 ? 65 : contentStart;
+        const taskLabels = { mod: 'mods', resourcepack: 'resource packs', shaderpack: 'shader packs' };
+        let completed = 0;
+        const reportTaskProgress = (task) => {
+            const pct = contentStart + (completed / Math.max(tasks.length, 1)) * (contentEnd - contentStart);
+            setImportProgress(pct, `Installing ${taskLabels[task.kind] || 'content'}... (${completed}/${tasks.length})`);
+        };
+
         if (fastImport && tasks.length > 0) {
-            let completed = 0;
-            const results = await Promise.allSettled(tasks.map(async (task) => {
+            await Promise.allSettled(tasks.map(async (task) => {
                 try {
                     await runInstallTask(task);
                     applyTaskResult(task.kind, true);
@@ -1388,53 +1637,35 @@ async function runLionImport() {
                     applyTaskResult(task.kind, false);
                 } finally {
                     completed += 1;
-                    const pct = Math.round((completed / tasks.length) * 100);
-                    setSessionWidgetState({
-                        profileId: createdProfile.id,
-                        profileName: createdProfile.name,
-                        phase: 'progress',
-                        status: 'Importing content... (' + completed + '/' + tasks.length + ')',
-                        percent: pct,
-                        canStop: false
-                    });
+                    reportTaskProgress(task);
                 }
             }));
-            void results;
         } else {
             for (const task of tasks) {
-                tasksDone += 1;
-                const pct = Math.round((tasksDone / Math.max(tasks.length, 1)) * 100);
-                setSessionWidgetState({
-                    profileId: createdProfile.id,
-                    profileName: createdProfile.name,
-                    phase: 'progress',
-                    status: 'Importing content... (' + tasksDone + '/' + tasks.length + ')',
-                    percent: pct,
-                    canStop: false
-                });
-
+                reportTaskProgress(task);
                 try {
                     await runInstallTask(task);
                     applyTaskResult(task.kind, true);
                 } catch (_installErr) {
                     applyTaskResult(task.kind, false);
                 }
+                completed += 1;
             }
         }
 
-        await prepareProfileDownloadFlow(createdProfile.id, createdProfile.name);
-        closeImportLionModal();
-        const createModal = document.getElementById('create-profile-modal');
-        if (createModal) createModal.classList.remove('active');
+        await prepareProfileDownloadFlow(createdProfile.id, createdProfile.name, {
+            from: contentEnd,
+            to: 100,
+            activity: 'import'
+        });
+        await refreshProfilesInBackground();
         showToast('Import complete. ' + formatImportReport(report), 'success', 5200);
 
     } catch (error) {
+        setSessionWidgetState({ phase: 'idle', percent: null, canStop: false, activity: null });
+        syncSessionWidgetWithRunningProfiles();
+        await refreshProfilesInBackground();
         showToast('Import failed: ' + error, 'error', 5000);
-    } finally {
-        if (importBtn) {
-            importBtn.disabled = false;
-            importBtn.textContent = 'Start Import';
-        }
     }
 }
 
@@ -1487,8 +1718,21 @@ function openLionImportModal(payload) {
 async function handleLionImportInputChange(event) {
     const file = event?.target?.files?.[0];
     if (!file) return;
+    openLionImportFromText(await file.text().catch(() => ''));
+}
+
+/** Öffnet eine per Doppelklick / "Öffnen mit" übergebene .lion-Datei im Import-Dialog. */
+async function openPendingLionFile() {
     try {
-        const text = await file.text();
+        const text = await invoke('take_pending_lion_file');
+        if (text) openLionImportFromText(text);
+    } catch (error) {
+        showToast('Could not read import file: ' + error, 'error', 4500);
+    }
+}
+
+function openLionImportFromText(text) {
+    try {
         const payload = JSON.parse(text);
         if (payload?.format !== 'lion-profile') {
             throw new Error('Invalid .lion format');
@@ -2054,15 +2298,20 @@ async function launchProfile(profileId) {
         runningProfiles.add(profileId);
         updateAllPlayStopButtons(profileId);
 
-        await waitForMinecraftMenuReady(profileId, profileName);
-        setSessionWidgetState({
-            profileId,
-            profileName,
-            phase: 'running',
-            status: 'Minecraft started',
-            percent: null,
-            canStop: true
-        });
+        const stillRunning = await waitForMinecraftMenuReady(profileId, profileName);
+        if (stillRunning) {
+            setSessionWidgetState({
+                profileId,
+                profileName,
+                phase: 'running',
+                status: 'Minecraft started',
+                percent: null,
+                canStop: true
+            });
+        } else {
+            setSessionWidgetState({ phase: 'idle', percent: null, canStop: false });
+            syncSessionWidgetWithRunningProfiles();
+        }
         if (liveLogProfileId === profileId) {
             const el = getLogContentElement();
             if (el) refreshLiveLog(profileId, el);
@@ -2070,6 +2319,7 @@ async function launchProfile(profileId) {
     } catch (error) {
         if (typeof unlistenProgress === 'function') unlistenProgress();
         debugLog('Launch failed: ' + error, 'error');
+        setSessionWidgetState({ phase: 'idle', percent: null, canStop: false });
         syncSessionWidgetWithRunningProfiles();
         showToast('Launch failed: ' + error, 'error', 5000);
     }
@@ -2089,6 +2339,9 @@ async function waitForMinecraftMenuReady(profileId, profileName) {
     let tick = 0;
 
     while (Date.now() - start < timeoutMs) {
+        // Instanz wurde gestoppt oder ist beim Start abgestürzt
+        if (!runningProfiles.has(profileId)) return false;
+
         tick += 1;
         const elapsedRatio = Math.min((Date.now() - start) / timeoutMs, 1);
         const percent = 92 + Math.round(elapsedRatio * 7);
@@ -2107,7 +2360,7 @@ async function waitForMinecraftMenuReady(profileId, profileName) {
             const lower = String(logText || '').toLowerCase();
             const matched = readyMarkers.some(marker => lower.includes(marker.toLowerCase()));
             if (matched && tick >= 2) {
-                return;
+                return true;
             }
         } catch (_e) {
             // latest.log may briefly be missing right after startup.
@@ -2115,6 +2368,7 @@ async function waitForMinecraftMenuReady(profileId, profileName) {
 
         await new Promise(r => setTimeout(r, pollMs));
     }
+    return runningProfiles.has(profileId);
 }
 
 function showMicrosoftLoginInfo() {
@@ -2228,7 +2482,8 @@ function showDeleteProfileConfirmModal(profileId) {
 }
 
 // Profile Details View
-function showProfileDetails(profileId) {
+// `view` ({ mainCategory, subTab }) stellt beim Zurück/Vorwärts den zuletzt offenen Tab wieder her
+function showProfileDetails(profileId, view = {}) {
     debugLog('Opening profile details: ' + profileId, 'info');
 
     const profile = profiles.find(p => p.id === profileId);
@@ -2237,6 +2492,7 @@ function showProfileDetails(profileId) {
         return;
     }
 
+    recordNavigation({ type: 'profile', profileId });
     currentProfile = profile;
     currentProfileSubTab = 'mods'; // Reset auf Mods beim Öffnen eines Profils
 
@@ -2249,41 +2505,38 @@ function showProfileDetails(profileId) {
         ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover; border-radius: 12px;" onerror="this.onerror=null; this.src='${LION_LOGO_URL}';">`
         : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover; border-radius: 12px;">`;
 
+    const loaderLabel = SERVER_SOFTWARE[profile.loader.loader]?.label || profile.loader.loader;
+
     grid.innerHTML = `
         <div style="grid-column: 1 / -1;">
-            <!-- Profil Header -->
-            <div style="display: flex; align-items: flex-end; margin-bottom: 25px; gap: 22px; padding-top: 34px; position: relative;">
-                <button class="btn btn-secondary" onclick="loadProfiles()" style="position:absolute; left:0; top:0; padding: 8px 14px;">
-                    ← Back
-                </button>
+            <!-- Profil Header: das Icon reicht über beide Zeilen bis an den Content-Kasten -->
+            <div style="display: grid; grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto;
+                        column-gap: 22px; row-gap: 16px; margin-bottom: 20px;">
+                <!-- Icon -->
+                <div style="grid-column: 1; grid-row: 1 / span 2; width: 230px; height: 230px; display: flex; align-items: center; justify-content: center;
+                            border-radius: 14px; overflow: hidden; background: var(--bg-light);">
+                    ${iconHTML}
+                </div>
 
-                <!-- Linke Spalte: Groesseres Icon -->
-                <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; flex-shrink: 0;">
-                    <div style="width: 150px; height: 150px; font-size: 150px; display: flex; align-items: center; justify-content: center;
-                                flex-shrink: 0; border-radius: 14px; overflow: hidden; background: var(--bg-light);">
-                        ${iconHTML}
+                <!-- Rechts neben dem Icon: Play oben, Profil-Info unten -->
+                <div style="grid-column: 2; grid-row: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 12px;">
+                    <div style="display: flex; justify-content: flex-end;">
+                        <button class="btn" data-play-btn="${profile.id}" onclick="launchProfile('${profile.id}')" style="padding: 15px 40px; font-size: 18px; flex-shrink: 0;">
+                            <i class="bi bi-play-fill"></i> Play
+                        </button>
+                    </div>
+                    <div style="min-width: 0; display: flex; flex-direction: column; gap: 8px;">
+                        <h2 style="color: var(--gold); margin: 0; font-size: 24px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeAttr(profile.name)}">${escapeHtml(profile.name)}</h2>
+                        <p style="margin: 0; color: var(--text-secondary); font-size: 14px;">
+                            Minecraft ${escapeHtml(profile.minecraft_version)} • ${escapeHtml(loaderLabel)} ${escapeHtml(profile.loader.version || '')}
+                        </p>
                     </div>
                 </div>
 
-                <!-- Profil Info (rechts vom Icon) -->
-                <div style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; min-height: 150px;">
-                    <h2 style="color: var(--gold); margin: 0; font-size: 24px; font-weight: 700;">${profile.name}</h2>
-                    <p style="margin: 0; color: var(--text-secondary); font-size: 14px;">
-                        Minecraft ${profile.minecraft_version} • ${profile.loader.loader} ${profile.loader.version}
-                    </p>
-                </div>
-
-                <!-- Play Button -->
-                <button class="btn" data-play-btn="${profile.id}" onclick="launchProfile('${profile.id}')" style="padding: 15px 40px; font-size: 18px; flex-shrink: 0;">
-                    <i class="bi bi-play-fill"></i> Play
-                </button>
-            </div>
-
-            <!-- Hauptkategorien-Kasten - Zentriert, größer -->
-            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; position: relative;">
-                <!-- Hauptkategorien zentriert -->
-                <div style="flex: 1; display: flex; justify-content: center;">
-                    <div style="background: var(--bg-medium); border-radius: 10px; padding: 8px; display: flex; gap: 8px; max-width: 650px;">
+                <!-- Hauptkategorien: mittig über dem Content-Kasten; ist das Fenster zu schmal,
+                     schiebt die linke Spalte (Icon-Breite) sie gerade so weit nach rechts wie nötig -->
+                <div style="grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-columns: minmax(252px, 1fr) auto minmax(0, 1fr);">
+                    <div style="grid-column: 2; background: var(--bg-medium); border-radius: 10px; padding: 8px; display: flex; gap: 8px;">
                         <button class="main-category-tab active" data-maincategory="content" onclick="switchMainCategory('content')" 
                                 onmouseover="if(!this.classList.contains('active')) this.style.background='rgba(218, 165, 32, 0.1)'"
                                 onmouseout="if(!this.classList.contains('active')) this.style.background='transparent'"
@@ -2331,8 +2584,14 @@ function showProfileDetails(profileId) {
 
     // Lade Content automatisch nach dem Rendern
     setTimeout(() => {
-        loadInstalledMods(profile.id);
-        startModsWatcher(profile.id);
+        if (view.mainCategory && view.mainCategory !== 'content') {
+            switchMainCategory(view.mainCategory);
+        } else if (view.subTab && view.subTab !== 'mods') {
+            switchContentSubTab(view.subTab);
+        } else {
+            loadInstalledMods(profile.id);
+            startModsWatcher(profile.id);
+        }
         updateProfileScrollableBoxes();
         // Play/Stop-Button-State korrekt setzen
         updateAllPlayStopButtons(profile.id);
@@ -2341,6 +2600,7 @@ function showProfileDetails(profileId) {
 
 function switchMainCategory(categoryName) {
     debugLog('Switching to main category: ' + categoryName, 'info');
+    patchCurrentNavLocation(e => e.type === 'profile' && e.profileId === currentProfile?.id, { mainCategory: categoryName });
 
     // Update button styles mit Animation
     document.querySelectorAll('.main-category-tab').forEach(btn => {
@@ -2472,6 +2732,7 @@ function switchContentSubTab(subtabName) {
 
     // Speichere aktuellen Sub-Tab
     currentProfileSubTab = subtabName;
+    patchCurrentNavLocation(e => e.type === 'profile' && e.profileId === currentProfile?.id, { subTab: subtabName });
 
     // Update button styles
     document.querySelectorAll('.content-sub-tab').forEach(btn => {
@@ -2624,7 +2885,7 @@ function renderProfileTabContent(tabName, profile) {
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                     <h3 style="color: var(--gold); margin: 0;">Installierte Mods</h3>
                     <div style="display: flex; gap: 8px;">
-                        <button class="btn btn-secondary" onclick="checkForModUpdates('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
+                        <button id="mod-updates-btn" class="btn btn-secondary" onclick="checkForModUpdates('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
                             <i class="bi bi-search"></i> Updates
                         </button>
                         <button class="btn btn-secondary" onclick="refreshInstalledMods('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
@@ -3360,6 +3621,18 @@ let modUpdateCandidates = [];
 let selectedModUpdates = new Set();
 let currentModUpdateProfileId = null;
 
+// Mod-Updates werden per Datei-Hash bei Modrinth geprüft (check_mod_updates).
+// Die zuerst sichtbaren Mods kommen in den ersten Batch, der Rest läuft parallel hinterher.
+const MOD_UPDATE_FIRST_BATCH = 12;
+const MOD_UPDATE_BATCH_SIZE = 40;
+const MOD_UPDATE_PARALLEL_BATCHES = 3;
+const MOD_UPDATE_FRESH_MS = 60 * 1000;
+/** profileId -> { minecraftVersion, loader, checkedAt, results: Map<filename, status> } */
+const modUpdateStatusCache = new Map();
+/** profileId -> laufende Hintergrund-Prüfung */
+const modUpdateChecksInFlight = new Map();
+const modUpdateRecheckQueued = new Set();
+
 // Startet Auto-Refresh für Mods-Ordner
 function startModsWatcher(profileId) {
     // Stoppe vorherigen Watcher falls vorhanden
@@ -3435,7 +3708,7 @@ async function loadInstalledMods(profileId, options = {}) {
         document.getElementById('bulk-actions-bar').style.display = 'flex';
         renderInstalledModsList(cached, profileId);
         updateProfileScrollableBoxes();
-        loadModIcons(cached);
+        refreshModUpdateStatuses(profileId, cached);
         return;
     }
 
@@ -3477,8 +3750,8 @@ async function loadInstalledMods(profileId, options = {}) {
 
         updateProfileScrollableBoxes();
 
-        // Versuche Icons von Modrinth zu laden (asynchron)
-        loadModIcons(mods);
+        // Updates, echte Namen und Icons kommen asynchron per Hash-Abgleich mit Modrinth
+        refreshModUpdateStatuses(profileId, mods, { force: !!options.recheckUpdates });
 
     } catch (error) {
         debugLog('Failed to load installed mods: ' + error, 'error');
@@ -3533,48 +3806,50 @@ function renderInstalledModsList(mods, profileId) {
 
     modsList.innerHTML = mods.map(mod => {
         const iconUrl = mod.icon_url || null;
-        const hasUpdate = mod.has_update;
+        const file = escapeAttr(mod.filename);
+        const jsFile = escapeAttr(String(mod.filename).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+        const updateStatus = getModUpdateStatus(profileId, mod.filename);
 
         return `
-        <div class="installed-mod-card" data-filename="${mod.filename}" 
-             onclick="if(!event.target.closest('input, button')) { showModDetailsFromProfile('${mod.mod_id || ''}', '${mod.source || 'modrinth'}'); }"
+        <div class="installed-mod-card" data-filename="${file}" data-mod-id="${escapeAttr(updateStatus?.project_id || mod.mod_id || '')}"
+             onclick="if(!event.target.closest('input, button')) { showModDetailsFromProfile(this.dataset.modId, 'modrinth'); }"
              style="background: var(--bg-dark); border: 1px solid ${mod.disabled ? '#666' : 'var(--bg-light)'}; border-radius: 8px; padding: 12px; display: flex; align-items: center; gap: 12px; ${mod.disabled ? 'opacity: 0.6;' : ''} transition: all 0.2s; cursor: pointer;">
             <!-- Checkbox -->
-            <input type="checkbox" class="mod-checkbox" data-filename="${mod.filename}" 
-                   onchange="toggleModSelection('${mod.filename}')"
+            <input type="checkbox" class="mod-checkbox" data-filename="${file}"
+                   onchange="toggleModSelection('${jsFile}')"
                    onclick="event.stopPropagation();"
                    style="width: 18px; height: 18px; cursor: pointer; flex-shrink: 0; accent-color: var(--gold);">
-            
+
             <!-- Icon -->
-            <div style="width: 44px; height: 44px; background: var(--bg-light); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden;">
+            <div class="mod-card-icon" style="width: 44px; height: 44px; background: var(--bg-light); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden;">
                 ${iconUrl
-                ? `<img src="${iconUrl}" style="width: 100%; height: 100%; object-fit: cover;" onerror="handleIconError(this)">`
+                ? `<img src="${escapeAttr(iconUrl)}" style="width: 100%; height: 100%; object-fit: cover;" onerror="handleIconError(this)">`
                 : `<span style="font-size: 22px;"><i class="bi bi-box"></i></span>`
             }
             </div>
-            
+
             <!-- Info -->
             <div style="flex: 1; min-width: 0;">
                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                    <h4 style="margin: 0; color: var(--text-primary); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;">
-                        ${mod.name || mod.filename}
+                    <h4 class="mod-card-name" style="margin: 0; color: var(--text-primary); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;">
+                        ${escapeHtml(mod.name || mod.filename)}
                     </h4>
                     ${mod.disabled ? '<span style="background: #f44336; color: white; font-size: 9px; padding: 2px 5px; border-radius: 3px;">DEAKTIVIERT</span>' : ''}
-                    ${hasUpdate ? '<span style="background: var(--gold); color: var(--bg-dark); font-size: 9px; padding: 2px 5px; border-radius: 3px;">UPDATE</span>' : ''}
                 </div>
                 <p style="margin: 3px 0 0 0; color: var(--text-secondary); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    ${mod.filename}
+                    ${escapeHtml(mod.filename)}
                 </p>
-                ${mod.version ? `<p style="margin: 2px 0 0 0; color: var(--gold); font-size: 10px;">v${mod.version}</p>` : ''}
+                <p class="mod-card-version" style="margin: 2px 0 0 0; color: var(--gold); font-size: 10px;">${renderModVersionLine(mod, updateStatus)}</p>
             </div>
-            
+
             <!-- Actions -->
             <div style="display: flex; gap: 6px; flex-shrink: 0;">
-                <button class="btn btn-secondary" onclick="event.stopPropagation(); toggleMod('${profileId}', '${mod.filename}', ${mod.disabled})" 
+                <span class="mod-update-slot" style="display: contents;">${renderModUpdateButton(updateStatus)}</span>
+                <button class="btn btn-secondary" onclick="event.stopPropagation(); toggleMod('${escapeAttr(profileId)}', '${jsFile}', ${mod.disabled})"
                         style="padding: 5px 10px; font-size: 11px;" title="${mod.disabled ? 'Aktivieren' : 'Deaktivieren'}">
                     ${mod.disabled ? '<i class="bi bi-check"></i>' : '||'}
                 </button>
-                <button class="btn btn-secondary" onclick="event.stopPropagation(); deleteMod('${profileId}', '${mod.filename}')" 
+                <button class="btn btn-secondary" onclick="event.stopPropagation(); deleteMod('${escapeAttr(profileId)}', '${jsFile}')"
                         style="padding: 5px 10px; font-size: 11px; color: #f44336;" title="Löschen">
                     ×
                 </button>
@@ -3583,9 +3858,28 @@ function renderInstalledModsList(mods, profileId) {
     `}).join('');
 }
 
+function renderModVersionLine(mod, updateStatus) {
+    const current = updateStatus?.current_version || mod.version;
+    if (updateStatus?.status === 'update' && updateStatus.latest_version) {
+        return `v${escapeHtml(current || '?')} <strong>→ ${escapeHtml(updateStatus.latest_version)}</strong>`;
+    }
+    return current ? `v${escapeHtml(current)}` : '';
+}
+
+function renderModUpdateButton(updateStatus) {
+    if (updateStatus?.status !== 'update' || !updateStatus.latest_version_id) return '';
+    const title = updateStatus.current_compatible
+        ? `Update auf ${updateStatus.latest_version} installieren`
+        : `Auf ${updateStatus.latest_version} wechseln (passend für die Minecraft-Version des Profils)`;
+    return `
+        <button class="btn btn-secondary mod-update-btn" onclick="event.stopPropagation(); updateSingleMod(this)" title="${escapeAttr(title)}">
+            <i class="bi bi-download"></i>
+        </button>`;
+}
+
 function refreshInstalledMods(profileId) {
     invalidateProfileContentCaches(profileId);
-    loadInstalledMods(profileId, { force: true });
+    loadInstalledMods(profileId, { force: true, recheckUpdates: true });
 }
 
 // Mod-Auswahl für Bulk-Operationen
@@ -3702,32 +3996,238 @@ async function bulkDeleteMods(profileId) {
     }
 }
 
-// Icon-Loading von Modrinth
-async function loadModIcons(mods) {
-    for (const mod of mods) {
-        if (mod.mod_id) {
+// ==================== MOD-UPDATES ====================
+
+/** Cache-Eintrag eines Profils, verworfen sobald MC-Version oder Loader nicht mehr passen. */
+function getModUpdateEntry(profileId) {
+    const entry = modUpdateStatusCache.get(profileId);
+    const profile = profiles.find(p => p.id === profileId);
+    if (entry && profile && (entry.minecraftVersion !== profile.minecraft_version || entry.loader !== profile.loader?.loader)) {
+        modUpdateStatusCache.delete(profileId);
+        return null;
+    }
+    return entry || null;
+}
+
+function getModUpdateStatus(profileId, filename) {
+    return getModUpdateEntry(profileId)?.results.get(filename) || null;
+}
+
+function storeModUpdateResults(profileId, check) {
+    let entry = modUpdateStatusCache.get(profileId);
+    if (!entry || entry.minecraftVersion !== check.minecraft_version || entry.loader !== check.loader) {
+        entry = { minecraftVersion: check.minecraft_version, loader: check.loader, checkedAt: 0, results: new Map() };
+        modUpdateStatusCache.set(profileId, entry);
+    }
+
+    const mods = profileModsCache.get(profileId) || [];
+    (check.results || []).forEach(result => {
+        entry.results.set(result.filename, result);
+        // Echte Namen/Icons/Projekt-IDs auch für Suche und Detailansicht übernehmen
+        const mod = mods.find(m => m.filename === result.filename);
+        if (mod && result.project_id) {
+            mod.mod_id = result.project_id;
+            if (result.mod_name) mod.name = result.mod_name;
+            if (!mod.icon_url && result.icon_url) mod.icon_url = result.icon_url;
+        }
+    });
+    return entry;
+}
+
+function splitModUpdateBatches(filenames) {
+    const batches = [];
+    if (filenames.length > 0) batches.push(filenames.slice(0, MOD_UPDATE_FIRST_BATCH));
+    for (let i = MOD_UPDATE_FIRST_BATCH; i < filenames.length; i += MOD_UPDATE_BATCH_SIZE) {
+        batches.push(filenames.slice(i, i + MOD_UPDATE_BATCH_SIZE));
+    }
+    return batches;
+}
+
+/** Prüft Dateien batchweise: den ersten (sichtbaren) Batch sofort, den Rest parallel danach. */
+async function runModUpdateCheck(profileId, filenames, onBatch) {
+    const [firstBatch, ...remaining] = splitModUpdateBatches(filenames);
+    if (!firstBatch) return;
+    onBatch(await invoke('check_mod_updates', { profileId, filenames: firstBatch }));
+
+    let nextIndex = 0;
+    let firstError = null;
+    const worker = async () => {
+        while (nextIndex < remaining.length) {
+            const batch = remaining[nextIndex++];
             try {
-                const response = await fetch(`https://api.modrinth.com/v2/search?query=${encodeURIComponent(mod.mod_id)}&limit=1`);
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.hits && data.hits.length > 0 && data.hits[0].icon_url) {
-                        const card = document.querySelector(`.installed-mod-card[data-filename="${mod.filename}"]`);
-                        if (card) {
-                            const iconContainer = card.querySelector('div[style*="44px"]');
-                            if (iconContainer) {
-                                iconContainer.innerHTML = `<img src="${data.hits[0].icon_url}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;" onerror="handleIconError(this)">`;
-                            }
-                        }
-                    }
-                }
-            } catch (e) {
-                // Ignoriere Icon-Ladefehler
+                onBatch(await invoke('check_mod_updates', { profileId, filenames: batch }));
+            } catch (error) {
+                firstError = firstError || error;
             }
         }
+    };
+    const workerCount = Math.min(MOD_UPDATE_PARALLEL_BATCHES, remaining.length);
+    await Promise.all(Array.from({ length: workerCount }, worker));
+    if (firstError) throw firstError;
+}
+
+/**
+ * Hält die Update-Symbole der Mod-Liste aktuell: Ergebnisse der letzten Minute werden
+ * sofort angezeigt (neue Dateien direkt nachgeprüft), sonst wird alles neu geprüft.
+ */
+function refreshModUpdateStatuses(profileId, mods, { force = false } = {}) {
+    const filenames = (mods || []).map(mod => mod.filename);
+    const entry = getModUpdateEntry(profileId);
+    if (entry) {
+        const present = new Set(filenames);
+        for (const filename of entry.results.keys()) {
+            if (!present.has(filename)) entry.results.delete(filename);
+        }
+    }
+    applyModUpdateStatusesToList(profileId);
+
+    if (modUpdateChecksInFlight.has(profileId)) {
+        modUpdateRecheckQueued.add(profileId);
+        return;
+    }
+
+    const isFresh = !!entry && Date.now() - entry.checkedAt < MOD_UPDATE_FRESH_MS;
+    const toCheck = isFresh && !force ? filenames.filter(name => !entry.results.has(name)) : filenames;
+    if (toCheck.length === 0) {
+        updateModUpdatesButton(profileId);
+        return;
+    }
+
+    const isFullCheck = toCheck.length === filenames.length;
+    const startedAt = Date.now();
+    const check = runModUpdateCheck(profileId, toCheck, result => {
+        storeModUpdateResults(profileId, result);
+        applyModUpdateStatusesToList(profileId, result.results);
+    })
+        .then(() => {
+            const current = modUpdateStatusCache.get(profileId);
+            if (current && isFullCheck) current.checkedAt = startedAt;
+        })
+        .catch(error => debugLog('Mod update check failed: ' + error, 'error'))
+        .finally(() => {
+            modUpdateChecksInFlight.delete(profileId);
+            updateModUpdatesButton(profileId);
+            if (modUpdateRecheckQueued.delete(profileId) && cachedModsProfileId === profileId) {
+                refreshModUpdateStatuses(profileId, installedModsCache);
+            }
+        });
+    modUpdateChecksInFlight.set(profileId, check);
+    updateModUpdatesButton(profileId);
+}
+
+function applyModUpdateStatusesToList(profileId, results = null) {
+    const list = document.getElementById('profile-mods-list');
+    if (!list || cachedModsProfileId !== profileId) return;
+
+    const statuses = results || Array.from(getModUpdateEntry(profileId)?.results.values() || []);
+    statuses.forEach(status => {
+        const card = list.querySelector(`.installed-mod-card[data-filename="${CSS.escape(status.filename)}"]`);
+        if (card) applyModUpdateStatusToCard(card, status);
+    });
+    updateModUpdatesButton(profileId);
+}
+
+function applyModUpdateStatusToCard(card, status) {
+    const slot = card.querySelector('.mod-update-slot');
+    if (slot) slot.innerHTML = renderModUpdateButton(status);
+
+    const versionLine = card.querySelector('.mod-card-version');
+    if (versionLine && status.current_version) versionLine.innerHTML = renderModVersionLine({}, status);
+
+    if (status.project_id) card.dataset.modId = status.project_id;
+
+    const nameEl = card.querySelector('.mod-card-name');
+    if (nameEl && status.mod_name && nameEl.textContent.trim() !== status.mod_name) {
+        nameEl.textContent = status.mod_name;
+    }
+
+    const iconEl = card.querySelector('.mod-card-icon');
+    if (iconEl && status.icon_url && !iconEl.querySelector('img') && iconEl.dataset.iconTried !== status.icon_url) {
+        iconEl.dataset.iconTried = status.icon_url;
+        iconEl.innerHTML = `<img src="${escapeAttr(status.icon_url)}" style="width: 100%; height: 100%; object-fit: cover;" onerror="handleIconError(this)">`;
     }
 }
 
-// Update-Check
+function updateModUpdatesButton(profileId) {
+    const button = document.getElementById('mod-updates-btn');
+    if (!button || currentProfile?.id !== profileId) return;
+
+    const checking = modUpdateChecksInFlight.has(profileId);
+    const entry = getModUpdateEntry(profileId);
+    const count = entry
+        ? Array.from(entry.results.values()).filter(s => s.status === 'update' && s.latest_version_id).length
+        : 0;
+    const icon = checking ? 'bi-arrow-repeat lion-spin' : count > 0 ? 'bi-download' : 'bi-search';
+
+    button.innerHTML = `<i class="bi ${icon}"></i> Updates${count > 0 ? ` <span class="mod-update-count">${count}</span>` : ''}`;
+    button.title = checking
+        ? 'Suche nach Updates...'
+        : count > 0 ? `${count} Update${count === 1 ? '' : 's'} verfügbar` : 'Nach Updates suchen';
+}
+
+/** Installiert das Update einer Mod und trägt die neue Datei als aktuell in den Cache ein. */
+async function installModUpdate(profileId, status) {
+    const newFilename = await invoke('update_mod', {
+        profileId,
+        filename: status.filename,
+        versionId: status.latest_version_id
+    });
+
+    const entry = modUpdateStatusCache.get(profileId);
+    if (entry) {
+        entry.results.delete(status.filename);
+        entry.results.set(newFilename, {
+            ...status,
+            filename: newFilename,
+            status: 'up_to_date',
+            current_version: status.latest_version,
+            current_game_versions: status.latest_game_versions || [],
+            current_compatible: true,
+            latest_version: null,
+            latest_version_id: null,
+            latest_game_versions: []
+        });
+    }
+    return newFilename;
+}
+
+async function updateSingleMod(button) {
+    const card = button.closest('.installed-mod-card');
+    const profileId = currentProfile?.id;
+    const filename = card?.dataset.filename;
+    const status = profileId && filename ? getModUpdateStatus(profileId, filename) : null;
+    if (!status?.latest_version_id) return;
+
+    button.disabled = true;
+    button.innerHTML = '<i class="bi bi-arrow-repeat lion-spin"></i>';
+
+    try {
+        await installModUpdate(profileId, status);
+        const name = status.mod_name || card.querySelector('.mod-card-name')?.textContent.trim() || filename;
+        showToast(`${escapeHtml(name)} aktualisiert (${escapeHtml(status.current_version || '?')} → ${escapeHtml(status.latest_version)})`, 'success', 3000);
+        await loadInstalledModIds(true);
+        invalidateProfileContentCaches(profileId);
+        loadInstalledMods(profileId, { force: true });
+    } catch (error) {
+        debugLog('Mod update failed: ' + error, 'error');
+        button.disabled = false;
+        button.innerHTML = '<i class="bi bi-download"></i>';
+        showToast('Update fehlgeschlagen: ' + escapeHtml(String(error)), 'error', 4500);
+    }
+}
+
+function formatGameVersionList(versions) {
+    const list = Array.isArray(versions) ? versions : [];
+    if (list.length === 0) return 'unbekannt';
+    if (list.length <= 5) return list.join(', ');
+    return `${list[0]} – ${list[list.length - 1]}`;
+}
+
+function formatLoaderList(loaders) {
+    return (loaders || []).map(l => SERVER_SOFTWARE[l]?.label || l).join(', ');
+}
+
+// Update-Dialog ("Updates"-Button im Profil)
 async function checkForModUpdates(profileId) {
     debugLog('Checking for mod updates...', 'info');
 
@@ -3747,24 +4247,46 @@ async function checkForModUpdates(profileId) {
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 
     try {
-        const updates = await invoke('check_mod_updates', {
-            profileId,
-            mcVersion: profile.minecraft_version,
-            loader: profile.loader.loader
-        });
+        // Läuft die Hintergrund-Prüfung noch, deren Ergebnis nutzen statt doppelt zu fragen
+        await modUpdateChecksInFlight.get(profileId);
 
-        document.getElementById('update-check-modal').remove();
+        const mods = await invoke('get_installed_mods', { profileId });
+        const filenames = (mods || []).map(mod => mod.filename);
+        let entry = getModUpdateEntry(profileId);
+        const isFresh = !!entry && Date.now() - entry.checkedAt < MOD_UPDATE_FRESH_MS &&
+            filenames.every(name => entry.results.has(name));
 
-        if (!updates || updates.length === 0) {
-            alert('Alle Mods sind aktuell!');
-            return;
+        if (!isFresh) {
+            const startedAt = Date.now();
+            await runModUpdateCheck(profileId, filenames, result => {
+                storeModUpdateResults(profileId, result);
+                applyModUpdateStatusesToList(profileId, result.results);
+            });
+            entry = modUpdateStatusCache.get(profileId);
+            if (entry) entry.checkedAt = startedAt;
         }
 
-        const updatable = updates.filter(u => u.can_update && u.update_version_id);
-        const incompatible = updates.filter(u => !u.can_update);
+        document.getElementById('update-check-modal')?.remove();
+        updateModUpdatesButton(profileId);
+
+        const modsByFile = new Map((mods || []).map(mod => [mod.filename, mod]));
+        const results = filenames
+            .map(name => entry?.results.get(name))
+            .filter(Boolean)
+            .map(result => ({
+                ...result,
+                display_name: result.mod_name || modsByFile.get(result.filename)?.name || result.filename,
+                display_icon: result.icon_url || modsByFile.get(result.filename)?.icon_url || null
+            }));
+        const updatable = results.filter(r => r.status === 'update' && r.latest_version_id);
+        // Nur Mods, deren installierte Version nicht zum Profil passt UND für die es keine passende gibt
+        const incompatible = results.filter(r => r.status === 'incompatible');
+        const unknownCount = results.filter(r => r.status === 'unknown').length;
 
         if (updatable.length === 0 && incompatible.length === 0) {
-            alert('Keine verwertbaren Update-Informationen gefunden.');
+            showToast(unknownCount > 0
+                ? `Alle Mods sind aktuell! (${unknownCount} nicht auf Modrinth gefunden)`
+                : 'Alle Mods sind aktuell!', 'success', 3500);
             return;
         }
 
@@ -3772,19 +4294,27 @@ async function checkForModUpdates(profileId) {
         selectedModUpdates = new Set(updatable.map(u => u.filename));
         currentModUpdateProfileId = profileId;
 
+        const mcVersion = entry?.minecraftVersion || profile.minecraft_version;
+        const loaderLabel = formatLoaderList([entry?.loader || profile.loader?.loader]);
+        const summary = [
+            `${updatable.length} updatebar`,
+            incompatible.length > 0 ? `${incompatible.length} ohne passende Version` : '',
+            unknownCount > 0 ? `${unknownCount} nicht auf Modrinth` : ''
+        ].filter(Boolean).join(' · ');
+
         // Zeige Updates mit Vorauswahl
         const updateModalHTML = `
             <div id="updates-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;" onclick="if(event.target === this) this.remove()">
                 <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 10px; padding: 25px; width: min(760px, 94vw); max-height: 80vh; overflow-y: auto;" onclick="event.stopPropagation()">
-                    <h3 style="color: var(--gold); margin: 0 0 16px 0;">↻ Mod-Updates</h3>
+                    <h3 style="color: var(--gold); margin: 0 0 6px 0;">↻ Mod-Updates</h3>
                     <p style="color: var(--text-secondary); font-size: 12px; margin: 0 0 16px 0;">
-                        ${updatable.length} updatbar${incompatible.length > 0 ? ` · ${incompatible.length} nicht kompatibel mit deinem Profil` : ''}
+                        Minecraft ${escapeHtml(mcVersion)} · ${escapeHtml(loaderLabel)} — ${summary}
                     </p>
                     ${updatable.length > 0 ? `
                     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
                         <label style="display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 12px; cursor: pointer;">
                             <input id="select-all-update-mods" type="checkbox" checked onchange="toggleSelectAllModUpdates()" style="width: 16px; height: 16px; cursor: pointer; accent-color: var(--gold);">
-                            Alle updatbaren auswählen
+                            Alle updatebaren auswählen
                         </label>
                         <div style="flex: 1;"></div>
                         <span id="updates-selected-count" style="color: var(--gold); font-size: 12px;">0 ausgewählt</span>
@@ -3799,35 +4329,37 @@ async function checkForModUpdates(profileId) {
                                        checked
                                        onchange="toggleModUpdateSelection(this.dataset.filename)"
                                        style="width: 17px; height: 17px; cursor: pointer; accent-color: var(--gold); flex-shrink: 0;">
-                                <div style="width: 40px; height: 40px; background: var(--bg-dark); border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
-                                    ${u.icon_url ? `<img src="${escapeAttr(u.icon_url)}" style="width: 100%; height: 100%; object-fit: cover;">` : '<span style="font-size: 18px;"><i class="bi bi-box"></i></span>'}
+                                <div style="width: 40px; height: 40px; background: var(--bg-dark); border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;">
+                                    ${u.display_icon ? `<img src="${escapeAttr(u.display_icon)}" style="width: 100%; height: 100%; object-fit: cover;" onerror="handleIconError(this)">` : '<span style="font-size: 18px;"><i class="bi bi-box"></i></span>'}
                                 </div>
-                                <div style="flex: 1;">
-                                    <p style="margin: 0; color: var(--text-primary); font-size: 13px;">${escapeHtml(u.mod_name || u.filename)}</p>
-                                    <p style="margin: 2px 0 0 0; color: var(--text-secondary); font-size: 11px;">${escapeHtml(u.filename)}</p>
+                                <div style="flex: 1; min-width: 0;">
+                                    <p style="margin: 0; color: var(--text-primary); font-size: 13px;">${escapeHtml(u.display_name)}</p>
+                                    <p style="margin: 2px 0 0 0; color: var(--text-secondary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(u.filename)}</p>
                                     <p style="margin: 3px 0 0 0; font-size: 11px;">
                                         <span style="color: var(--text-secondary);">${escapeHtml(u.current_version || '?')}</span>
                                         <span style="color: var(--gold);"> → ${escapeHtml(u.latest_version || '?')}</span>
+                                        ${u.current_compatible ? '' : `<span style="color: #ffb74d;" title="Die installierte Version ist für MC ${escapeAttr(formatGameVersionList(u.current_game_versions))} markiert"> · nötig für MC ${escapeHtml(mcVersion)}</span>`}
                                     </p>
                                 </div>
                             </div>
                         `).join('')}
                     </div>
                     ${incompatible.length > 0 ? `
-                    <h4 style="margin: 16px 0 8px 0; color: #ffb74d; font-size: 13px;">Nicht kompatible neuere Versionen</h4>
+                    <h4 style="margin: 16px 0 4px 0; color: #ffb74d; font-size: 13px;">Keine passende Version für Minecraft ${escapeHtml(mcVersion)} (${escapeHtml(loaderLabel)})</h4>
+                    <p style="margin: 0 0 8px 0; color: var(--text-secondary); font-size: 11px;">
+                        Die installierte Version ist laut Modrinth nicht für diese Minecraft-Version markiert, und es gibt auch keine, die es ist. Sie kann trotzdem funktionieren – sonst entfernen oder ersetzen.
+                    </p>
                     <div style="display: grid; gap: 8px;">
                         ${incompatible.map(u => `
                             <div style="background: rgba(255, 183, 77, 0.1); border: 1px solid rgba(255, 183, 77, 0.35); border-radius: 8px; padding: 10px; display: flex; align-items: start; gap: 10px;">
                                 <div style="font-size: 15px; color: #ffb74d; margin-top: 1px;"><i class="bi bi-exclamation-triangle-fill"></i></div>
-                                <div style="flex: 1;">
-                                    <p style="margin: 0; color: var(--text-primary); font-size: 13px;">${escapeHtml(u.mod_name || u.filename)}</p>
-                                    <p style="margin: 2px 0 0 0; color: var(--text-secondary); font-size: 11px;">${escapeHtml(u.filename)}</p>
+                                <div style="flex: 1; min-width: 0;">
+                                    <p style="margin: 0; color: var(--text-primary); font-size: 13px;">${escapeHtml(u.display_name)}</p>
+                                    <p style="margin: 2px 0 0 0; color: var(--text-secondary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(u.filename)}</p>
                                     <p style="margin: 4px 0 0 0; color: var(--text-secondary); font-size: 11px;">
-                                        Neueste Version <span style="color: #ffb74d;">${escapeHtml(u.newest_version || u.latest_version || '?')}</span>
-                                        ist für MC ${escapeHtml((u.newest_game_versions && u.newest_game_versions.length > 0) ? u.newest_game_versions.join(', ') : 'unbekannt')}
-                                        (${escapeHtml(profile.minecraft_version)} aktiv)
+                                        Installiert: <span style="color: #ffb74d;">${escapeHtml(u.current_version || '?')}</span>
+                                        für MC ${escapeHtml(formatGameVersionList(u.current_game_versions))}${u.current_loaders?.length ? ` (${escapeHtml(formatLoaderList(u.current_loaders))})` : ''}
                                     </p>
-                                    ${u.latest_compatible_version ? `<p style="margin: 2px 0 0 0; color: var(--text-secondary); font-size: 10px;">Kompatibel für dein Profil: ${escapeHtml(u.latest_compatible_version)}</p>` : ''}
                                 </div>
                             </div>
                         `).join('')}
@@ -3911,8 +4443,9 @@ async function applySelectedModUpdates() {
         return;
     }
 
+    const profileId = currentModUpdateProfileId;
     const selectedUpdates = modUpdateCandidates.filter(u =>
-        selectedModUpdates.has(u.filename) && u.update_version_id
+        selectedModUpdates.has(u.filename) && u.latest_version_id
     );
     if (selectedUpdates.length === 0) {
         showToast('Keine gültigen Updates ausgewählt', 'warning', 2500);
@@ -3920,31 +4453,35 @@ async function applySelectedModUpdates() {
     }
 
     const updateBtn = document.getElementById('update-selected-btn');
-    if (updateBtn) {
+    let done = 0;
+    const showProgress = () => {
+        if (!updateBtn) return;
         updateBtn.disabled = true;
-        updateBtn.textContent = 'Aktualisiere...';
-    }
+        updateBtn.textContent = `Aktualisiere ${done}/${selectedUpdates.length}...`;
+    };
+    showProgress();
 
     let successCount = 0;
     const failed = [];
-
-    for (const update of selectedUpdates) {
-        try {
-            await invoke('install_mod', {
-                profileId: currentModUpdateProfileId,
-                modId: update.mod_id,
-                versionId: update.update_version_id,
-                source: 'modrinth'
-            });
-            successCount++;
-        } catch (e) {
-            failed.push(`${update.mod_name || update.filename}: ${e}`);
+    let nextIndex = 0;
+    const worker = async () => {
+        while (nextIndex < selectedUpdates.length) {
+            const update = selectedUpdates[nextIndex++];
+            try {
+                await installModUpdate(profileId, update);
+                successCount++;
+            } catch (e) {
+                failed.push(`${update.display_name || update.filename}: ${e}`);
+            }
+            done++;
+            showProgress();
         }
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, selectedUpdates.length) }, worker));
 
     await loadInstalledModIds(true);
-    invalidateProfileContentCaches(currentModUpdateProfileId);
-    loadInstalledMods(currentModUpdateProfileId, { force: true });
+    invalidateProfileContentCaches(profileId);
+    loadInstalledMods(profileId, { force: true });
 
     document.getElementById('updates-modal')?.remove();
     selectedModUpdates.clear();
@@ -3958,6 +4495,7 @@ async function applySelectedModUpdates() {
         alert(`Einige Updates konnten nicht installiert werden:\n\n${failed.join('\n')}`);
     }
 }
+
 async function toggleMod(profileId, filename, isCurrentlyDisabled) {
     debugLog('Toggling mod: ' + filename + ' (currently disabled: ' + isCurrentlyDisabled + ')', 'info');
 
@@ -4151,6 +4689,7 @@ function openContentBrowser(profileId) {
     // Speichere aktuelles Profil und setze Flag VOR switchPage
     const profile = profiles.find(p => p.id === profileId);
     if (profile) {
+        recordNavigation({ type: 'browser', context: 'profile', profileId });
         currentProfile = profile;
         openedFromProfile = true; // Setze Flag BEVOR switchPage aufgerufen wird
         debugLog('Opening Content Browser from profile: ' + profile.name + ', SubTab: ' + currentProfileSubTab, 'info');
@@ -4158,6 +4697,7 @@ function openContentBrowser(profileId) {
 
     // Wechsle zum Content Browser
     switchPage('mods');
+    if (profile) browserViewKey = `browser:profile:${profileId}`;
 
     // Setze Filter ZUERST (bevor Content geladen wird!)
     if (currentProfile) {
@@ -4636,7 +5176,7 @@ let serverBrowserContext = null;
 let serverBrowserNavigation = false;
 let pendingServerDetailOpen = null;
 let serverModDetailsReturn = null;
-const browserModeBackup = { loaderOptions: null, modsBtnText: null, backBtnText: null };
+const browserModeBackup = { loaderOptions: null, modsBtnText: null };
 
 /**
  * Bestätigungsfenster im Stil des "Profil löschen"-Dialogs.
@@ -4843,6 +5383,7 @@ async function loadServerHub() {
             return;
         }
         pendingServerDetailOpen = null;
+        recordNavigation({ type: 'page', page: 'servers-hub' });
 
         if (!serverProfiles || serverProfiles.length === 0) {
             root.innerHTML = `
@@ -5054,6 +5595,7 @@ function openServerProfileDetails(serverId, initialTab = 'console') {
     const server = serverProfiles.find(s => s.id === serverId);
     if (!server) return;
 
+    recordNavigation({ type: 'server', serverId, tab: initialTab });
     clearServerHubIntervals();
     currentServerProfile = server;
     currentServerFilesPath = '';
@@ -5066,7 +5608,6 @@ function openServerProfileDetails(serverId, initialTab = 'console') {
     const safeId = escapeAttr(server.id);
     root.innerHTML = `
         <div class="server-detail-header">
-            <button class="btn btn-secondary" onclick="loadServerHub()" style="margin-bottom:12px;">← Back</button>
             <div class="server-detail-top">
                 <div class="server-detail-icon"><i class="bi ${getServerIcon(server)}"></i></div>
                 <div style="flex:1; min-width:0;">
@@ -5121,6 +5662,7 @@ async function copyServerAddress(serverId) {
 }
 
 function switchServerDetailTab(tab, serverId) {
+    patchCurrentNavLocation(e => e.type === 'server' && e.serverId === serverId, { tab });
     document.querySelectorAll('.server-detail-tab').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.serverTab === tab);
     });
@@ -6194,6 +6736,7 @@ async function openServerContentBrowser(serverId) {
             return;
         }
 
+        recordNavigation({ type: 'browser', context: 'server', serverId });
         serverBrowserContext = context;
         serverInstalledProjectIdsServerId = null;
         browserResultsCache.clear();
@@ -6202,6 +6745,7 @@ async function openServerContentBrowser(serverId) {
 
         serverBrowserNavigation = true;
         switchPage('mods');
+        browserViewKey = `browser:server:${serverId}`;
         applyServerBrowserMode();
         switchContentType('mods', { force: true });
     } catch (error) {
@@ -6252,13 +6796,6 @@ function applyServerBrowserMode() {
     selectedFilters.version = ctx.minecraftVersion || '';
     selectedFilters.categories = [];
 
-    const backBtn = document.getElementById('back-to-profile-btn');
-    if (backBtn) {
-        if (browserModeBackup.backBtnText === null) browserModeBackup.backBtnText = backBtn.innerHTML;
-        backBtn.innerHTML = `← Back to ${escapeHtml(ctx.serverName)}`;
-        backBtn.style.display = 'block';
-    }
-
     const searchInput = document.getElementById('mod-search');
     if (searchInput) searchInput.placeholder = isPlugin ? 'Search plugins...' : 'Search mods...';
 }
@@ -6281,21 +6818,12 @@ function restoreDefaultBrowserMode() {
     const envSection = document.getElementById('environment-filter-section');
     if (envSection) envSection.style.display = '';
 
-    const backBtn = document.getElementById('back-to-profile-btn');
-    if (backBtn && browserModeBackup.backBtnText !== null) backBtn.innerHTML = browserModeBackup.backBtnText;
-
     browserModeBackup.modsBtnText = null;
     browserModeBackup.loaderOptions = null;
-    browserModeBackup.backBtnText = null;
     selectedFilters.loader = '';
     browserResultsCache.clear();
-}
-
-function backToServerFromBrowser(tab = 'content') {
-    const serverId = serverBrowserContext?.serverId || serverModDetailsReturn;
-    serverModDetailsReturn = null;
-    pendingServerDetailOpen = serverId ? { id: serverId, tab } : null;
-    switchPage('servers-hub');
+    // Die angezeigten Ergebnisse gehören zu keinem Kontext mehr
+    browserViewKey = null;
 }
 
 async function searchServerContent(query, page = 0) {
@@ -7821,6 +8349,7 @@ function switchContentType(type, options = {}) {
     }
 
     currentContentType = type;
+    patchCurrentNavLocation(e => e.type === 'browser', { contentType: type });
 
     debugLog('currentContentType AFTER: ' + currentContentType, 'warn');
 
@@ -10469,6 +10998,13 @@ async function showModDetailsFromProfile(modId, source = 'modrinth') {
 
 async function showModDetails(modId, source = 'modrinth') {
     debugLog(`Opening mod details for ${modId} from ${source}`);
+    recordNavigation({
+        type: 'mod',
+        modId,
+        source,
+        serverId: serverBrowserContext?.serverId || null,
+        profileId: !serverBrowserContext && currentProfile ? currentProfile.id : null
+    });
 
     // Standardmäßig vom Mod Browser (wird von showModDetailsFromProfile überschrieben)
     if (typeof modDetailsFromBrowser === 'undefined') {

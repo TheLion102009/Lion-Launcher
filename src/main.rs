@@ -23,6 +23,7 @@ fn main() {
     }
 
     utils::logging::init_logging();
+    gui::queue_lion_file_from_args();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -68,6 +69,7 @@ fn main() {
             gui::export_profile_share_data,
             gui::import_profile_share_data,
             gui::save_lion_file_with_dialog,
+            gui::take_pending_lion_file,
             // Mods - Browser
             gui::get_modrinth_categories,
             gui::search_mods,
@@ -82,6 +84,7 @@ fn main() {
             gui::bulk_toggle_mods,
             gui::bulk_delete_mods,
             gui::check_mod_updates,
+            gui::update_mod,
             // Resource Packs
             gui::get_installed_resourcepacks,
             gui::search_resourcepacks,
@@ -175,6 +178,19 @@ fn main() {
             gui::toggle_settings_sync,
             gui::get_settings_sync_status,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, _event| {
+            // macOS übergibt per Doppelklick geöffnete Dateien als Event statt als Argument
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
+                use tauri::Emitter;
+                for url in urls {
+                    if let Ok(path) = url.to_file_path() {
+                        gui::queue_lion_file(path);
+                    }
+                }
+                let _ = _app.emit("lion-file-opened", ());
+            }
+        });
 }

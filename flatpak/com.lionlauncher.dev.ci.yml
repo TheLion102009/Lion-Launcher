@@ -39,6 +39,8 @@ modules:
       - install -Dm644 icon-256.png /app/share/icons/hicolor/256x256/apps/com.lionlauncher.dev.png
       - install -Dm644 com.lionlauncher.dev.desktop /app/share/applications/com.lionlauncher.dev.desktop
       - install -Dm644 com.lionlauncher.dev.metainfo.xml /app/share/metainfo/com.lionlauncher.dev.metainfo.xml
+      # .lion-Dateityp (nutzt das App-Icon)
+      - install -Dm644 com.lionlauncher.dev.mime.xml /app/share/mime/packages/com.lionlauncher.dev.xml
     sources:
       # Vorgebautes Binary (wird vom CI in dieses Verzeichnis kopiert)
       - type: file
@@ -55,4 +57,6 @@ modules:
         path: com.lionlauncher.dev.desktop
       - type: file
         path: com.lionlauncher.dev.metainfo.xml
+      - type: file
+        path: com.lionlauncher.dev.mime.xml
 

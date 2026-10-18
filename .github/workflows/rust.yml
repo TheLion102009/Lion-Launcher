@@ -341,6 +341,7 @@ jobs:
           cp icons/32x32.png /tmp/pkgbuild-ws/icon-32.png
           cp icons/128x128.png /tmp/pkgbuild-ws/icon-128.png
           cp icons/icon.png /tmp/pkgbuild-ws/icon-256.png
+          cp pkg/linux/lion-launcher-mime.xml /tmp/pkgbuild-ws/lion-launcher-mime.xml
           [ -f LICENSE ] && cp LICENSE /tmp/pkgbuild-ws/ || true
           [ -f README.md ] && cp README.md /tmp/pkgbuild-ws/ || true
 
@@ -348,11 +349,12 @@ jobs:
           [Desktop Entry]
           Name=Lion Launcher
           Comment=Ein moderner Minecraft Launcher
-          Exec=/usr/bin/lion-launcher
+          Exec=/usr/bin/lion-launcher %f
           Icon=lion-launcher
           Type=Application
           Categories=Game;
           Keywords=minecraft;launcher;mods;fabric;forge;neoforge;quilt;
+          MimeType=application/x-lion-profile;
           StartupNotify=true
           StartupWMClass=lion-launcher
           DESKTOP_EOF
@@ -370,9 +372,9 @@ jobs:
               'jdk17-openjdk: Minecraft 1.17+'
               'jdk21-openjdk: Minecraft 1.21+'
           )
-          source=('lion-launcher-bin' 'icon-32.png' 'icon-128.png' 'icon-256.png' 'lion-launcher.desktop')
-          sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
-          noextract=('lion-launcher-bin' 'icon-32.png' 'icon-128.png' 'icon-256.png' 'lion-launcher.desktop')
+          source=('lion-launcher-bin' 'icon-32.png' 'icon-128.png' 'icon-256.png' 'lion-launcher.desktop' 'lion-launcher-mime.xml')
+          sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+          noextract=('lion-launcher-bin' 'icon-32.png' 'icon-128.png' 'icon-256.png' 'lion-launcher.desktop' 'lion-launcher-mime.xml')
 
           build() { true; }
 
@@ -382,6 +384,10 @@ jobs:
               install -Dm644 "$srcdir/icon-128.png" "$pkgdir/usr/share/icons/hicolor/128x128/apps/lion-launcher.png"
               install -Dm644 "$srcdir/icon-256.png" "$pkgdir/usr/share/icons/hicolor/256x256/apps/lion-launcher.png"
               install -Dm644 "$srcdir/lion-launcher.desktop" "$pkgdir/usr/share/applications/lion-launcher.desktop"
+              install -Dm644 "$srcdir/lion-launcher-mime.xml" "$pkgdir/usr/share/mime/packages/lion-launcher.xml"
+              install -Dm644 "$srcdir/icon-32.png" "$pkgdir/usr/share/icons/hicolor/32x32/mimetypes/application-x-lion-profile.png"
+              install -Dm644 "$srcdir/icon-128.png" "$pkgdir/usr/share/icons/hicolor/128x128/mimetypes/application-x-lion-profile.png"
+              install -Dm644 "$srcdir/icon-256.png" "$pkgdir/usr/share/icons/hicolor/256x256/mimetypes/application-x-lion-profile.png"
               [ -f "$startdir/LICENSE" ] && install -Dm644 "$startdir/LICENSE" "$pkgdir/usr/share/licenses/lion-launcher/LICENSE" || true
               [ -f "$startdir/README.md" ] && install -Dm644 "$startdir/README.md" "$pkgdir/usr/share/doc/lion-launcher/README.md" || true
           }
