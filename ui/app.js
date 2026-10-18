@@ -713,6 +713,7 @@ async function restoreNavLocation(location) {
             switchPage('servers-hub');
             break;
         default:
+            if (location.page === 'servers-hub') pendingServerDetailOpen = null;
             switchPage(location.page);
     }
 }
@@ -2251,7 +2252,7 @@ async function launchProfile(profileId) {
 
     if (!currentUsername || currentUsername === 'Guest') {
         alert('Please set your username in Settings first!');
-        switchPage('settings');
+        navigateToPage('settings');
         return;
     }
 
@@ -3696,7 +3697,7 @@ async function loadInstalledMods(profileId, options = {}) {
                     <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-box"></i></div>
                     <p>${t('no_mods_installed')}</p>
                     <p style="font-size: 14px; margin-top: 10px;">
-                        Gehe zum <a href="#" onclick="switchPage('mods'); return false;" style="color: var(--gold);">Mod Browser</a> um Mods zu installieren
+                        Gehe zum <a href="#" onclick="navigateToPage('mods'); return false;" style="color: var(--gold);">Mod Browser</a> um Mods zu installieren
                     </p>
                 </div>
             `;
@@ -3732,7 +3733,7 @@ async function loadInstalledMods(profileId, options = {}) {
                     <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-box"></i></div>
                     <p>${t('no_mods_installed')}</p>
                     <p style="font-size: 14px; margin-top: 10px;">
-                        Gehe zum <a href="#" onclick="switchPage('mods'); return false;" style="color: var(--gold);">Mod Browser</a> um Mods zu installieren
+                        Gehe zum <a href="#" onclick="navigateToPage('mods'); return false;" style="color: var(--gold);">Mod Browser</a> um Mods zu installieren
                     </p>
                 </div>
             `;
@@ -3844,7 +3845,7 @@ function renderInstalledModsList(mods, profileId) {
 
             <!-- Actions -->
             <div style="display: flex; gap: 6px; flex-shrink: 0;">
-                <span class="mod-update-slot" style="display: contents;">${renderModUpdateButton(updateStatus)}</span>
+                <span class="mod-update-slot" style="display: contents;">${renderModUpdateButton(profileId, updateStatus)}</span>
                 <button class="btn btn-secondary" onclick="event.stopPropagation(); toggleMod('${escapeAttr(profileId)}', '${jsFile}', ${mod.disabled})"
                         style="padding: 5px 10px; font-size: 11px;" title="${mod.disabled ? 'Aktivieren' : 'Deaktivieren'}">
                     ${mod.disabled ? '<i class="bi bi-check"></i>' : '||'}
@@ -3866,8 +3867,14 @@ function renderModVersionLine(mod, updateStatus) {
     return current ? `v${escapeHtml(current)}` : '';
 }
 
-function renderModUpdateButton(updateStatus) {
+function renderModUpdateButton(profileId, updateStatus) {
     if (updateStatus?.status !== 'update' || !updateStatus.latest_version_id) return '';
+    if (modsBeingUpdated.has(modUpdateJobKey(profileId, updateStatus.filename))) {
+        return `
+        <button class="btn btn-secondary mod-update-btn" disabled title="Wird aktualisiert...">
+            <i class="bi bi-arrow-repeat lion-spin"></i>
+        </button>`;
+    }
     const title = updateStatus.current_compatible
         ? `Update auf ${updateStatus.latest_version} installieren`
         : `Auf ${updateStatus.latest_version} wechseln (passend für die Minecraft-Version des Profils)`;
@@ -4122,14 +4129,14 @@ function applyModUpdateStatusesToList(profileId, results = null) {
     const statuses = results || Array.from(getModUpdateEntry(profileId)?.results.values() || []);
     statuses.forEach(status => {
         const card = list.querySelector(`.installed-mod-card[data-filename="${CSS.escape(status.filename)}"]`);
-        if (card) applyModUpdateStatusToCard(card, status);
+        if (card) applyModUpdateStatusToCard(card, status, profileId);
     });
     updateModUpdatesButton(profileId);
 }
 
-function applyModUpdateStatusToCard(card, status) {
+function applyModUpdateStatusToCard(card, status, profileId) {
     const slot = card.querySelector('.mod-update-slot');
-    if (slot) slot.innerHTML = renderModUpdateButton(status);
+    if (slot) slot.innerHTML = renderModUpdateButton(profileId, status);
 
     const versionLine = card.querySelector('.mod-card-version');
     if (versionLine && status.current_version) versionLine.innerHTML = renderModVersionLine({}, status);
@@ -4191,29 +4198,162 @@ async function installModUpdate(profileId, status) {
     return newFilename;
 }
 
-async function updateSingleMod(button) {
+// ── Mod-Updates installieren: eine Warteschlange, Fortschritt im Aktivitäts-Kasten ──
+const MOD_UPDATE_PARALLEL_DOWNLOADS = 3;
+const modUpdateQueue = {
+    pending: [],
+    active: 0,
+    done: 0,
+    total: 0,
+    succeeded: [],
+    failed: [],
+    lastError: null,
+    currentName: null,
+    profileIds: new Set(),
+    lastProfileId: null
+};
+/** "profileId/filename" aller Mods, deren Update wartet oder gerade läuft */
+const modsBeingUpdated = new Set();
+
+function modUpdateJobKey(profileId, filename) {
+    return `${profileId}/${filename}`;
+}
+
+function getModDisplayName(profileId, status) {
+    if (status.mod_name || status.display_name) return status.mod_name || status.display_name;
+    const mod = (profileModsCache.get(profileId) || []).find(m => m.filename === status.filename);
+    return mod?.name || status.filename;
+}
+
+/** Stellt Updates in die Warteschlange; Mods, die schon aktualisiert werden, werden übersprungen. */
+function enqueueModUpdates(profileId, statuses) {
+    const jobs = statuses.filter(status => status?.latest_version_id &&
+        !modsBeingUpdated.has(modUpdateJobKey(profileId, status.filename)));
+    if (jobs.length === 0) return;
+
+    jobs.forEach(status => {
+        modsBeingUpdated.add(modUpdateJobKey(profileId, status.filename));
+        modUpdateQueue.pending.push({ profileId, status, name: getModDisplayName(profileId, status) });
+    });
+    modUpdateQueue.total += jobs.length;
+    modUpdateQueue.profileIds.add(profileId);
+    modUpdateQueue.lastProfileId = profileId;
+
+    // Spinner statt Download-Symbol, bis das jeweilige Update fertig ist
+    applyModUpdateStatusesToList(profileId, jobs);
+    pumpModUpdateQueue();
+    renderModUpdateActivity();
+}
+
+function pumpModUpdateQueue() {
+    while (modUpdateQueue.active < MOD_UPDATE_PARALLEL_DOWNLOADS && modUpdateQueue.pending.length > 0) {
+        const job = modUpdateQueue.pending.shift();
+        modUpdateQueue.active += 1;
+        modUpdateQueue.currentName = job.name;
+        runModUpdateJob(job);
+    }
+}
+
+async function runModUpdateJob(job) {
+    let succeeded = false;
+    try {
+        await installModUpdate(job.profileId, job.status);
+        modUpdateQueue.succeeded.push(job);
+        succeeded = true;
+    } catch (error) {
+        debugLog(`Mod update failed (${job.status.filename}): ${error}`, 'error');
+        modUpdateQueue.failed.push(job.name);
+        modUpdateQueue.lastError = String(error);
+    } finally {
+        modsBeingUpdated.delete(modUpdateJobKey(job.profileId, job.status.filename));
+        refreshModCardAfterUpdate(job, succeeded);
+        modUpdateQueue.active -= 1;
+        modUpdateQueue.done += 1;
+        if (modUpdateQueue.active === 0 && modUpdateQueue.pending.length === 0) {
+            finishModUpdateQueue();
+        } else {
+            pumpModUpdateQueue();
+            renderModUpdateActivity();
+        }
+    }
+}
+
+/** Zeigt das Ergebnis sofort an der Karte, ohne auf das Neuladen der Liste zu warten. */
+function refreshModCardAfterUpdate(job, succeeded) {
+    const list = document.getElementById('profile-mods-list');
+    if (!list || cachedModsProfileId !== job.profileId) return;
+    const card = list.querySelector(`.installed-mod-card[data-filename="${CSS.escape(job.status.filename)}"]`);
+    if (!card) return;
+
+    if (!succeeded) {
+        // Download-Symbol wieder anbieten
+        applyModUpdateStatusToCard(card, job.status, job.profileId);
+        return;
+    }
+    const slot = card.querySelector('.mod-update-slot');
+    if (slot) slot.innerHTML = '';
+    const versionLine = card.querySelector('.mod-card-version');
+    if (versionLine) versionLine.innerHTML = `v${escapeHtml(job.status.latest_version || '')} <i class="bi bi-check2"></i>`;
+}
+
+function renderModUpdateActivity() {
+    const { done, total, lastProfileId } = modUpdateQueue;
+    if (total === 0) return;
+    const single = total === 1;
+    setSessionWidgetState({
+        profileId: lastProfileId,
+        profileName: getProfileNameById(lastProfileId),
+        phase: single ? 'spin' : 'progress',
+        status: single ? `Aktualisiere ${modUpdateQueue.currentName}...` : `Aktualisiere Mods... (${done}/${total})`,
+        percent: single ? null : (done / total) * 100,
+        canStop: false,
+        activity: 'mod-update'
+    });
+}
+
+function finishModUpdateQueue() {
+    const succeeded = modUpdateQueue.succeeded;
+    const failed = modUpdateQueue.failed;
+    const lastError = modUpdateQueue.lastError;
+    const profileIds = Array.from(modUpdateQueue.profileIds);
+    Object.assign(modUpdateQueue, {
+        done: 0, total: 0, succeeded: [], failed: [], lastError: null, currentName: null, profileIds: new Set()
+    });
+
+    // Aktivitäts-Kasten freigeben (außer eine andere Aktivität hat ihn inzwischen übernommen)
+    if (sessionWidgetState.activity === 'mod-update') {
+        setSessionWidgetState({ phase: 'idle', percent: null, canStop: false, activity: null });
+        syncSessionWidgetWithRunningProfiles();
+    }
+
+    profileIds.forEach(profileId => {
+        invalidateProfileContentCaches(profileId);
+        if (currentProfile?.id === profileId && document.getElementById('profile-mods-list')) {
+            loadInstalledMods(profileId, { force: true });
+        }
+    });
+    loadInstalledModIds(true);
+
+    if (failed.length === 0) {
+        const message = succeeded.length === 1
+            ? `${succeeded[0].name} aktualisiert (${succeeded[0].status.current_version || '?'} → ${succeeded[0].status.latest_version})`
+            : `${succeeded.length} Mods aktualisiert`;
+        showToast(escapeHtml(message), 'success', 3500);
+    } else {
+        const names = failed.slice(0, 3).join(', ') + (failed.length > 3 ? ` +${failed.length - 3}` : '');
+        const detail = failed.length === 1 && lastError ? `: ${lastError}` : '';
+        showToast(escapeHtml(`${succeeded.length} aktualisiert, ${failed.length} fehlgeschlagen (${names})${detail}`),
+            succeeded.length > 0 ? 'warning' : 'error', 6000);
+    }
+}
+
+function updateSingleMod(button) {
     const card = button.closest('.installed-mod-card');
     const profileId = currentProfile?.id;
     const filename = card?.dataset.filename;
     const status = profileId && filename ? getModUpdateStatus(profileId, filename) : null;
     if (!status?.latest_version_id) return;
-
-    button.disabled = true;
-    button.innerHTML = '<i class="bi bi-arrow-repeat lion-spin"></i>';
-
-    try {
-        await installModUpdate(profileId, status);
-        const name = status.mod_name || card.querySelector('.mod-card-name')?.textContent.trim() || filename;
-        showToast(`${escapeHtml(name)} aktualisiert (${escapeHtml(status.current_version || '?')} → ${escapeHtml(status.latest_version)})`, 'success', 3000);
-        await loadInstalledModIds(true);
-        invalidateProfileContentCaches(profileId);
-        loadInstalledMods(profileId, { force: true });
-    } catch (error) {
-        debugLog('Mod update failed: ' + error, 'error');
-        button.disabled = false;
-        button.innerHTML = '<i class="bi bi-download"></i>';
-        showToast('Update fehlgeschlagen: ' + escapeHtml(String(error)), 'error', 4500);
-    }
+    enqueueModUpdates(profileId, [status]);
 }
 
 function formatGameVersionList(versions) {
@@ -4436,7 +4576,7 @@ function refreshModUpdateSelectionUi() {
     }
 }
 
-async function applySelectedModUpdates() {
+function applySelectedModUpdates() {
     if (!currentModUpdateProfileId) return;
     if (selectedModUpdates.size === 0) {
         showToast('Bitte wähle zuerst Mods aus', 'warning', 2500);
@@ -4452,48 +4592,13 @@ async function applySelectedModUpdates() {
         return;
     }
 
-    const updateBtn = document.getElementById('update-selected-btn');
-    let done = 0;
-    const showProgress = () => {
-        if (!updateBtn) return;
-        updateBtn.disabled = true;
-        updateBtn.textContent = `Aktualisiere ${done}/${selectedUpdates.length}...`;
-    };
-    showProgress();
-
-    let successCount = 0;
-    const failed = [];
-    let nextIndex = 0;
-    const worker = async () => {
-        while (nextIndex < selectedUpdates.length) {
-            const update = selectedUpdates[nextIndex++];
-            try {
-                await installModUpdate(profileId, update);
-                successCount++;
-            } catch (e) {
-                failed.push(`${update.display_name || update.filename}: ${e}`);
-            }
-            done++;
-            showProgress();
-        }
-    };
-    await Promise.all(Array.from({ length: Math.min(3, selectedUpdates.length) }, worker));
-
-    await loadInstalledModIds(true);
-    invalidateProfileContentCaches(profileId);
-    loadInstalledMods(profileId, { force: true });
-
     document.getElementById('updates-modal')?.remove();
     selectedModUpdates.clear();
     modUpdateCandidates = [];
     currentModUpdateProfileId = null;
 
-    if (failed.length === 0) {
-        showToast(`${successCount} Mod(s) aktualisiert`, 'success', 3000);
-    } else {
-        showToast(`${successCount} aktualisiert, ${failed.length} fehlgeschlagen`, 'warning', 4000);
-        alert(`Einige Updates konnten nicht installiert werden:\n\n${failed.join('\n')}`);
-    }
+    // Fortschritt läuft über den Aktivitäts-Kasten oben rechts
+    enqueueModUpdates(profileId, selectedUpdates);
 }
 
 async function toggleMod(profileId, filename, isCurrentlyDisabled) {
@@ -5175,7 +5280,6 @@ let serverInstalledProjectIdsServerId = null;
 let serverBrowserContext = null;
 let serverBrowserNavigation = false;
 let pendingServerDetailOpen = null;
-let serverModDetailsReturn = null;
 const browserModeBackup = { loaderOptions: null, modsBtnText: null };
 
 /**
@@ -6906,10 +7010,8 @@ async function installServerContentFromBrowser(projectId, _source) {
 async function showServerContentDetails(serverId, projectId) {
     try {
         serverBrowserContext = await createServerBrowserContext(serverId);
-        serverModDetailsReturn = serverId;
         clearServerHubIntervals();
         currentProfile = null;
-        modDetailsFromBrowser = false;
         await showModDetails(projectId, 'modrinth');
     } catch (error) {
         showToast('Details konnten nicht geladen werden: ' + error, 'error', 3500);
@@ -10971,7 +11073,6 @@ function formatNumber(num) {
 // ==================== MOD DETAILS ====================
 
 let currentModDetails = null;
-let modDetailsFromBrowser = false;
 
 function handleModCardClick(event, modId, source) {
     // Prüfe ob der Click auf einem Button oder Link war
@@ -10986,13 +11087,11 @@ function handleModCardClick(event, modId, source) {
     }
 
     // Ansonsten öffne Mod-Details
-    modDetailsFromBrowser = true;
     showModDetails(modId, source);
 }
 
 // Funktion zum Öffnen von Mod-Details vom Profile Content aus
 async function showModDetailsFromProfile(modId, source = 'modrinth') {
-    modDetailsFromBrowser = false;  // Kam NICHT vom Browser, sondern vom Profile
     await showModDetails(modId, source);
 }
 
@@ -11005,11 +11104,6 @@ async function showModDetails(modId, source = 'modrinth') {
         serverId: serverBrowserContext?.serverId || null,
         profileId: !serverBrowserContext && currentProfile ? currentProfile.id : null
     });
-
-    // Standardmäßig vom Mod Browser (wird von showModDetailsFromProfile überschrieben)
-    if (typeof modDetailsFromBrowser === 'undefined') {
-        modDetailsFromBrowser = true;
-    }
 
     // Setze Tab zurück auf Description und Filter zurück
     currentModDetailsTab = 'description';
@@ -11724,38 +11818,4 @@ async function installModVersion(modId, versionId) {
         debugLog('Failed to install mod: ' + error, 'error');
         alert('Failed to install mod: ' + error);
     }
-}
-
-function backFromModDetails() {
-    if (serverBrowserContext && !modDetailsFromBrowser && serverModDetailsReturn) {
-        // Kam aus dem Content-Tab eines lokalen Servers
-        currentModDetails = null;
-        backToServerFromBrowser('content');
-        return;
-    }
-    if (serverBrowserContext && modDetailsFromBrowser) {
-        serverBrowserNavigation = true;
-    }
-    if (modDetailsFromBrowser) {
-        // Kam vom Mod Browser
-        switchPage('mods');
-        modDetailsFromBrowser = false;
-    } else {
-        // Kam vom Profile Content Menu - verwende gleiche Logik wie backToProfileFromModBrowser
-        if (currentProfile && currentProfile.id) {
-            const profileId = currentProfile.id; // Save the ID before currentProfile is cleared
-            skipLoadProfiles = true; // Skip loadProfiles() to avoid a flash
-            switchPage('profiles');
-            // Show the detail view directly (no setTimeout needed anymore!)
-            showProfileDetails(profileId);
-        } else {
-            // No profile set, go to the main overview
-            switchPage('profiles');
-        }
-    }
-    currentModDetails = null;
-}
-
-function backToModBrowser() {
-    backFromModDetails();
 }
