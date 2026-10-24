@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Dateityp für geteilte Lion-Launcher-Profile (.lion).
+     Installiert nach /usr/share/mime/packages/lion-launcher.xml; das Icon
+     "application-x-lion-profile" liegt in /usr/share/icons/hicolor/*/mimetypes/. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-lion-profile">
+    <comment>Lion Launcher profile</comment>
+    <comment xml:lang="de">Lion-Launcher-Profil</comment>
+    <sub-class-of type="application/json"/>
+    <icon name="application-x-lion-profile"/>
+    <glob pattern="*.lion"/>
+  </mime-type>
+</mime-info>
