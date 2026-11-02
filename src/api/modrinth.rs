@@ -115,6 +115,7 @@ impl ModrinthClient {
                 wiki_url: None,
                 discord_url: None,
                 gallery: vec![],
+                project_type: None,
             })
             .collect();
 
@@ -153,10 +154,12 @@ impl ModrinthClient {
                 .into_iter()
                 .map(|img| crate::types::mod_info::GalleryImage {
                     url: img.url,
+                    raw_url: img.raw_url,
                     title: img.title,
                     description: img.description,
                 })
                 .collect(),
+            project_type: project.project_type,
         })
     }
 
@@ -266,11 +269,18 @@ struct ModrinthProject {
     discord_url: Option<String>,
     #[serde(default)]
     gallery: Vec<ModrinthGalleryImage>,
+    /// "mod", "resourcepack", "shader", "modpack", ...
+    #[serde(default)]
+    project_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 struct ModrinthGalleryImage {
+    /// Komprimierte Vorschau (z.B. `..._350.webp`)
     url: String,
+    /// Bild in Originalgröße
+    #[serde(default)]
+    raw_url: Option<String>,
     #[serde(default)]
     title: Option<String>,
     #[serde(default)]

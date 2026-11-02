@@ -1,5 +1,7 @@
 pub mod auth;
 pub mod components;
+pub mod content_share;
+pub mod external_links;
 pub mod mod_browser;
 pub mod mod_updates;
 pub mod profile_manager;
@@ -481,6 +483,8 @@ pub struct InstalledMod {
     pub has_update: bool,
     pub latest_version: Option<String>,
     pub mod_id: Option<String>,
+    /// Installierte Modrinth-Version (falls bekannt)
+    pub version_id: Option<String>,
 }
 
 #[tauri::command]
@@ -549,6 +553,7 @@ pub async fn get_installed_mods(profile_id: String) -> Result<Vec<InstalledMod>,
                 let meta_path = modinfos_dir.join(&meta_filename);
 
                 let (mut name, mut version, mut mod_id, mut icon_url) = (None, None, None, None);
+                let mut version_id = None;
 
                 // Versuche Metadaten zu laden aus modinfos/
                 if meta_path.exists() {
@@ -568,6 +573,10 @@ pub async fn get_installed_mods(profile_id: String) -> Result<Vec<InstalledMod>,
                                 .map(|s| s.to_string());
                             icon_url = meta
                                 .get("icon_url")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+                            version_id = meta
+                                .get("version_id")
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string());
                         }
@@ -602,6 +611,7 @@ pub async fn get_installed_mods(profile_id: String) -> Result<Vec<InstalledMod>,
                     has_update: false,
                     latest_version: None,
                     mod_id,
+                    version_id,
                 });
             }
         }
@@ -872,6 +882,8 @@ pub struct InstalledResourcePack {
     pub project_id: Option<String>,
     pub slug: Option<String>,
     pub title: Option<String>,
+    /// Installierte Modrinth-Version (falls bekannt)
+    pub version_id: Option<String>,
     pub is_folder: bool,
     pub size: u64,
 }
@@ -886,6 +898,8 @@ struct InstalledContentMetadata {
     title: Option<String>,
     #[serde(default)]
     icon_url: Option<String>,
+    #[serde(default)]
+    version_id: Option<String>,
 }
 
 fn installed_content_metadata_path(
@@ -1008,6 +1022,7 @@ pub async fn get_installed_resourcepacks(
             project_id: metadata.as_ref().and_then(|m| m.project_id.clone()),
             slug: metadata.as_ref().and_then(|m| m.slug.clone()),
             title: metadata.as_ref().and_then(|m| m.title.clone()),
+            version_id: metadata.as_ref().and_then(|m| m.version_id.clone()),
             is_folder,
             size,
         });
@@ -1071,6 +1086,7 @@ pub async fn get_installed_shaderpacks(
             project_id: metadata.as_ref().and_then(|m| m.project_id.clone()),
             slug: metadata.as_ref().and_then(|m| m.slug.clone()),
             title: metadata.as_ref().and_then(|m| m.title.clone()),
+            version_id: metadata.as_ref().and_then(|m| m.version_id.clone()),
             is_folder,
             size,
         });

@@ -48,6 +48,7 @@ async fn write_installed_content_metadata(
     metadata_dir_name: &str,
     content_filename: &str,
     metadata: &InstalledContentMetadata,
+    version_id: &str,
 ) -> Result<(), String> {
     let metadata_dir = game_dir.join(metadata_dir_name);
     tokio::fs::create_dir_all(&metadata_dir)
@@ -60,7 +61,8 @@ async fn write_installed_content_metadata(
         "slug": metadata.slug,
         "title": metadata.title,
         "icon_url": metadata.icon_url,
-        "filename": content_filename
+        "filename": content_filename,
+        "version_id": version_id
     });
     let content = serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?;
 
@@ -349,6 +351,7 @@ pub async fn install_mod(
         "mod_name": mod_name,
         "icon_url": icon_url,
         "version": version.version_number,
+        "version_id": version.id,
         "source": source,
         "filename": jar_filename,
     });
@@ -510,6 +513,7 @@ pub async fn search_resourcepacks(
                 wiki_url: None,
                 discord_url: None,
                 gallery: vec![],
+                project_type: Some("resourcepack".to_string()),
             }
         })
         .collect())
@@ -626,6 +630,7 @@ pub async fn install_resourcepack(
             "resourcepackinfos",
             &file.filename,
             &metadata,
+            &version.id,
         )
         .await
         {
@@ -746,6 +751,7 @@ pub async fn search_shaderpacks(
                 wiki_url: None,
                 discord_url: None,
                 gallery: vec![],
+                project_type: Some("shader".to_string()),
             }
         })
         .collect())
@@ -843,6 +849,7 @@ pub async fn install_shaderpack(
             "shaderpackinfos",
             &file.filename,
             &metadata,
+            &version.id,
         )
         .await
         {
@@ -1360,6 +1367,7 @@ pub async fn search_modpacks(
                 wiki_url: None,
                 discord_url: None,
                 gallery: vec![],
+                project_type: Some("modpack".to_string()),
             }
         })
         .collect())

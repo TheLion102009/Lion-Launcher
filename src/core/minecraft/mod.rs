@@ -92,35 +92,182 @@ fn get_extra_launch_args() -> Vec<String> {
 static LAUNCH_WARNINGS: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> =
     std::sync::OnceLock::new();
 
-/// Globale Map: Profile-ID → PID der laufenden Minecraft-Instanz
+/// Eine laufende Minecraft-Instanz.
+///
+/// Wird zusätzlich in `running_instances.json` gespeichert, damit der Launcher nach einem
+/// Neustart noch weiß, dass Minecraft läuft (das Spiel überlebt das Schließen des Launchers).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct RunningInstance {
+    pid: u32,
+    /// Startzeit des Prozesses (Sekunden seit Epoch, laut OS). Schützt davor, dass eine
+    /// inzwischen wiederverwendete PID fälschlich als "Minecraft läuft noch" erkannt wird.
+    #[serde(default)]
+    start_time: u64,
+    /// `true` = Prozess stammt aus einer früheren Launcher-Sitzung. Für solche Prozesse gibt
+    /// es keinen Warte-Thread, ihr Ende wird per Prozessabfrage erkannt.
+    #[serde(skip)]
+    adopted: bool,
+}
+
+/// Globale Map: Profile-ID → laufende Minecraft-Instanz
 static RUNNING_PROCESSES: std::sync::OnceLock<
-    std::sync::Mutex<std::collections::HashMap<String, u32>>,
+    std::sync::Mutex<std::collections::HashMap<String, RunningInstance>>,
 > = std::sync::OnceLock::new();
 
-fn running_processes() -> &'static std::sync::Mutex<std::collections::HashMap<String, u32>> {
-    RUNNING_PROCESSES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+fn running_instances_file() -> PathBuf {
+    defaults::launcher_dir().join("running_instances.json")
+}
+
+fn running_processes(
+) -> &'static std::sync::Mutex<std::collections::HashMap<String, RunningInstance>> {
+    RUNNING_PROCESSES.get_or_init(|| std::sync::Mutex::new(load_persisted_running_instances()))
+}
+
+/// Liest Startzeit und Namen eines Prozesses. `None` = Prozess existiert nicht (mehr).
+fn query_process(pid: u32) -> Option<(u64, String)> {
+    use sysinfo::{Pid, ProcessRefreshKind, System};
+    let mut sys = System::new();
+    let pid = Pid::from_u32(pid);
+    if !sys.refresh_process_specifics(pid, ProcessRefreshKind::new()) {
+        return None;
+    }
+    sys.process(pid)
+        .map(|p| (p.start_time(), p.name().to_string()))
+}
+
+/// Unter Windows bleibt ein beendeter Prozess abfragbar, solange irgendein anderes Programm
+/// (z.B. Discord, Virenscanner) noch ein Handle darauf hält – sysinfo meldet ihn dann weiter
+/// als vorhanden. Daher zusätzlich den Exit-Code prüfen.
+#[cfg(windows)]
+fn process_has_exited(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // SAFETY: Handle wird nur innerhalb dieses Blocks benutzt und immer geschlossen.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            // Nicht (mehr) vorhanden oder kein Zugriff → Entscheidung über sysinfo
+            return false;
+        }
+        let mut exit_code: u32 = 0;
+        let queried = GetExitCodeProcess(handle, &mut exit_code) != 0;
+        CloseHandle(handle);
+        queried && exit_code != STILL_ACTIVE as u32
+    }
+}
+
+#[cfg(not(windows))]
+fn process_has_exited(_pid: u32) -> bool {
+    false
+}
+
+/// Prüft, ob die gespeicherte Instanz noch derselbe laufende Prozess ist.
+fn instance_is_alive(instance: &RunningInstance) -> bool {
+    if process_has_exited(instance.pid) {
+        return false;
+    }
+    match query_process(instance.pid) {
+        None => false,
+        Some((start_time, name)) => {
+            if instance.start_time > 0 && start_time > 0 {
+                // Kleine Toleranz für Rundungen der OS-Startzeit
+                start_time.abs_diff(instance.start_time) <= 2
+            } else {
+                name.to_lowercase().contains("java")
+            }
+        }
+    }
+}
+
+/// Lädt beim ersten Zugriff die Instanzen der letzten Sitzung und behält nur die,
+/// deren Prozess noch läuft.
+fn load_persisted_running_instances() -> std::collections::HashMap<String, RunningInstance> {
+    let stored: std::collections::HashMap<String, RunningInstance> =
+        std::fs::read_to_string(running_instances_file())
+            .ok()
+            .and_then(|content| serde_json::from_str(&content).ok())
+            .unwrap_or_default();
+
+    let alive: std::collections::HashMap<String, RunningInstance> = stored
+        .into_iter()
+        .filter(|(_, instance)| instance_is_alive(instance))
+        .map(|(profile_id, mut instance)| {
+            instance.adopted = true;
+            tracing::info!(
+                "Minecraft for profile {} is still running (PID {}) – adopting instance",
+                profile_id,
+                instance.pid
+            );
+            (profile_id, instance)
+        })
+        .collect();
+
+    persist_running_instances(&alive);
+    alive
+}
+
+fn persist_running_instances(map: &std::collections::HashMap<String, RunningInstance>) {
+    let path = running_instances_file();
+    if map.is_empty() {
+        std::fs::remove_file(&path).ok();
+        return;
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    match serde_json::to_string_pretty(map) {
+        Ok(content) => {
+            if let Err(e) = std::fs::write(&path, content) {
+                tracing::warn!("Failed to persist running instances: {}", e);
+            }
+        }
+        Err(e) => tracing::warn!("Failed to serialize running instances: {}", e),
+    }
 }
 
 /// Registriert eine laufende Minecraft-Instanz.
 pub fn register_running_process(profile_id: &str, pid: u32) {
+    let start_time = query_process(pid).map(|(t, _)| t).unwrap_or(0);
     if let Ok(mut map) = running_processes().lock() {
-        map.insert(profile_id.to_string(), pid);
+        map.insert(
+            profile_id.to_string(),
+            RunningInstance {
+                pid,
+                start_time,
+                adopted: false,
+            },
+        );
+        persist_running_instances(&map);
     }
 }
 
 /// Entfernt eine beendete Minecraft-Instanz aus der globalen Map.
 pub fn unregister_running_process(profile_id: &str) {
     if let Ok(mut map) = running_processes().lock() {
-        map.remove(profile_id);
+        if map.remove(profile_id).is_some() {
+            persist_running_instances(&map);
+        }
     }
 }
 
 /// Gibt alle aktuell laufenden Profil-IDs zurück.
+///
+/// Übernommene Instanzen (aus einer früheren Launcher-Sitzung) haben keinen Warte-Thread,
+/// daher wird hier geprüft, ob ihr Prozess noch läuft.
 pub fn get_running_profile_ids() -> Vec<String> {
-    running_processes()
-        .lock()
-        .map(|m| m.keys().cloned().collect())
-        .unwrap_or_default()
+    let Ok(mut map) = running_processes().lock() else {
+        return Vec::new();
+    };
+
+    let before = map.len();
+    map.retain(|_, instance| !instance.adopted || instance_is_alive(instance));
+    if map.len() != before {
+        persist_running_instances(&map);
+    }
+
+    map.keys().cloned().collect()
 }
 
 /// Beendet die laufende Minecraft-Instanz eines Profils.
@@ -129,7 +276,7 @@ pub fn kill_running_process(profile_id: &str) -> bool {
         running_processes()
             .lock()
             .ok()
-            .and_then(|m| m.get(profile_id).copied())
+            .and_then(|m| m.get(profile_id).map(|instance| instance.pid))
     };
     if let Some(pid) = pid {
         tracing::info!(

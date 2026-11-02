@@ -9,6 +9,8 @@
     "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
+        "create": false,
         "title": "Lion Launcher",
         "width": 1280,
         "height": 800,

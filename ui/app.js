@@ -130,6 +130,65 @@ try {
     };
 }
 
+// ── Externe Links ────────────────────────────────────────────────────────────
+// Externe Links (Modrinth, GitHub, Discord, ...) werden IMMER im System-Browser geöffnet,
+// nie im Launcher-Fenster. Das Backend blockiert zusätzlich jede Navigation weg vom Launcher.
+function getExternalUrl(href) {
+    if (!href) return null;
+    let url;
+    try {
+        url = new URL(href, window.location.href);
+    } catch (_e) {
+        return null;
+    }
+    if (!['http:', 'https:', 'mailto:'].includes(url.protocol)) return null;
+    if (url.protocol !== 'mailto:' && url.origin === window.location.origin) return null;
+    return url.href;
+}
+
+async function openExternalUrl(href) {
+    const url = getExternalUrl(href);
+    if (!url) return;
+    try {
+        await invoke('open_external_url', { url });
+    } catch (error) {
+        debugLog('Failed to open external link: ' + error, 'error');
+        if (typeof showToast === 'function') showToast('Link konnte nicht geöffnet werden: ' + error, 'error', 3500);
+    }
+}
+
+function handleExternalLinkEvent(event) {
+    // auxclick: nur Mittelklick (öffnet sonst ein neues Fenster im Launcher)
+    if (event.type === 'auxclick' && event.button !== 1) return;
+    const anchor = event.target?.closest?.('a[href]');
+    if (!anchor) return;
+    const url = getExternalUrl(anchor.getAttribute('href'));
+    if (!url) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openExternalUrl(url);
+}
+
+// Capture-Phase: läuft vor allen anderen Handlern (auch vor dem des Shell-Plugins)
+document.addEventListener('click', handleExternalLinkEvent, true);
+document.addEventListener('auxclick', handleExternalLinkEvent, true);
+
+// ── Keine nativen Browser-Dialoge ("tauri.localhost says ...") ─────────────────
+// Meldungen laufen über Toasts, Rückfragen über showConfirmModal/showPromptModal.
+// Falls irgendwo doch noch alert/confirm/prompt aufgerufen wird, erscheint trotzdem
+// nie das native Fenster.
+window.alert = (message) => {
+    showToast(String(message ?? ''), 'info', 4500);
+};
+window.confirm = (message) => {
+    console.warn('Native confirm() blocked – use showConfirmModal():', message);
+    return false;
+};
+window.prompt = (message) => {
+    console.warn('Native prompt() blocked – use showPromptModal():', message);
+    return null;
+};
+
 // State
 let currentPage = 'profiles';
 let currentProfile = null;
@@ -146,7 +205,10 @@ let selectedFilters = {
     categories: [],
     hideInstalled: false
 };
-const LION_SHARE_FORMAT_VERSION = 1;
+// v2: Mods/Packs mit exakter Version (version_id + Hash) bzw. eingebetteter Datei
+const LION_SHARE_FORMAT_VERSION = 2;
+const LION_CONTENT_KINDS = ['mods', 'resourcepacks', 'shaderpacks'];
+const LION_CONTENT_LABELS = { mods: 'mods', resourcepacks: 'resource packs', shaderpacks: 'shader packs' };
 let pendingLionImportPayload = null;
 let currentModSearchQuery = '';
 let currentModPage = 0;
@@ -461,9 +523,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await loadMinecraftVersions();
 
         setupSearch();
-        window.addEventListener('resize', () => {
-            if (currentProfile) updateProfileScrollableBoxes();
-        });
+        window.addEventListener('resize', scheduleProfileScrollableBoxesUpdate);
 
         // Load environment icons
         loadEnvironmentIcons();
@@ -1068,6 +1128,8 @@ function renderProfiles() {
     `;
 
     grid.innerHTML = profileCards.join('') + createCard;
+    // Buttons werden immer als "Play" gerendert -> Zustand laufender Instanzen übernehmen
+    updateAllPlayStopButtons();
 }
 
 // Profile context menu on right-click
@@ -1149,7 +1211,8 @@ function getCheckedValues(root, selector) {
         .map(el => el.value);
 }
 
-async function buildLionPayload(profileId, includes) {
+async function buildLionPayload(profileId, includes, options = {}) {
+    const embedMissing = options.embedMissing !== false;
     const profile = profiles.find(p => p.id === profileId);
     if (!profile) throw new Error('Profile not found');
 
@@ -1171,38 +1234,12 @@ async function buildLionPayload(profileId, includes) {
         content: {}
     };
 
-    if (includeSet.has('mods')) {
-        const installedMods = await invoke('get_installed_mods', { profileId });
-        payload.content.mods = (installedMods || [])
-            .map(mod => ({
-                mod_id: mod.mod_id || null,
-                source: 'modrinth',
-                name: mod.name || mod.filename || '',
-                disabled: !!mod.disabled
-            }))
-            .filter(mod => !!mod.mod_id);
-    }
-
-    if (includeSet.has('resourcepacks')) {
-        const packs = await invoke('get_installed_resourcepacks', { profileId });
-        payload.content.resourcepacks = (packs || [])
-            .map(pack => ({
-                project_id: pack.project_id || null,
-                name: pack.title || pack.name || '',
-                slug: pack.slug || null
-            }))
-            .filter(pack => !!pack.project_id);
-    }
-
-    if (includeSet.has('shaderpacks')) {
-        const packs = await invoke('get_installed_shaderpacks', { profileId });
-        payload.content.shaderpacks = (packs || [])
-            .map(pack => ({
-                project_id: pack.project_id || null,
-                name: pack.title || pack.name || '',
-                slug: pack.slug || null
-            }))
-            .filter(pack => !!pack.project_id);
+    // Mods / Packs: exakte Versionen (per Datei-Hash über Modrinth ermittelt). Dateien, die es
+    // nicht auf Modrinth gibt, werden direkt eingebettet – so fehlt beim Empfänger nichts.
+    for (const kind of LION_CONTENT_KINDS) {
+        if (includeSet.has(kind)) {
+            payload.content[kind] = await invoke('export_profile_content', { profileId, kind, embedMissing });
+        }
     }
 
     if (includeSet.has('servers')) {
@@ -1283,6 +1320,35 @@ function createImportReport() {
     };
 }
 
+/** Zeigt nach dem Import, welche Inhalte fehlgeschlagen sind bzw. abweichen (statt sie still zu verschlucken). */
+function showImportIssues(failures, warnings) {
+    if (!failures.length && !warnings.length) return;
+    closeDynamicModal('import-issues-modal');
+
+    const renderList = (items, color) => `
+        <ul style="margin: 6px 0 14px 0; padding-left: 18px; color: ${color}; font-size: 12px; line-height: 1.6;">
+            ${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}
+        </ul>`;
+
+    const modal = document.createElement('div');
+    modal.id = 'import-issues-modal';
+    modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.82); display: flex; align-items: center; justify-content: center; z-index: 10002;';
+    modal.innerHTML = `
+        <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 12px; width: min(620px, 92vw); max-height: 80vh; display: flex; flex-direction: column; padding: 22px;" onclick="event.stopPropagation()">
+            <h2 style="margin: 0 0 10px 0; color: var(--gold); font-size: 20px;"><i class="bi bi-exclamation-triangle"></i> Import notes</h2>
+            <div style="overflow-y: auto; min-height: 0;">
+                ${failures.length ? `<div style="color: var(--text-primary); font-weight: 600;">Not installed (${failures.length})</div>${renderList(failures, '#f44336')}` : ''}
+                ${warnings.length ? `<div style="color: var(--text-primary); font-weight: 600;">Different version installed (${warnings.length})</div>${renderList(warnings, '#ff9800')}` : ''}
+            </div>
+            <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+                <button class="btn" onclick="closeDynamicModal('import-issues-modal')">OK</button>
+            </div>
+        </div>
+    `;
+    modal.addEventListener('click', () => closeDynamicModal('import-issues-modal'));
+    document.body.appendChild(modal);
+}
+
 function formatImportReport(report) {
     return [
         `Mods ${report.mods.success}/${report.mods.success + report.mods.failed}`,
@@ -1319,6 +1385,13 @@ function openShareProfileModal(profileId) {
                 <label><input type="checkbox" value="worlds"> Worlds (voll)</label>
                 <label><input type="checkbox" value="logs"> Logs (voll)</label>
             </div>
+            <p style="margin: 12px 0 0 0; color: var(--text-secondary); font-size: 12px;">
+                Mods &amp; packs are shared in exactly your installed versions.
+            </p>
+            <label style="display:flex; align-items:flex-start; gap:8px; color: var(--text-secondary); margin-top: 8px; font-size: 12px;">
+                <input type="checkbox" id="share-embed-missing" checked style="margin-top: 2px;">
+                <span>Embed files that are not on Modrinth (e.g. CurseForge-only or own files) – otherwise they will be missing for the recipient. Makes the file larger.</span>
+            </label>
             <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
                 <button class="btn btn-secondary" onclick="closeDynamicModal('share-profile-modal')">Cancel</button>
                 <button class="btn" id="share-profile-export-btn">Export .lion</button>
@@ -1343,7 +1416,8 @@ function openShareProfileModal(profileId) {
             exportBtn.disabled = true;
             exportBtn.textContent = 'Export...';
             try {
-                const payload = await buildLionPayload(profileId, includes);
+                const embedMissing = !!document.getElementById('share-embed-missing')?.checked;
+                const payload = await buildLionPayload(profileId, includes, { embedMissing });
                 let savedPath = null;
                 try {
                     savedPath = await saveLionPayloadWithDialog(payload, profile.name);
@@ -1354,6 +1428,17 @@ function openShareProfileModal(profileId) {
 
                 if (savedPath) {
                     showToast('Profile exported: ' + savedPath, 'success', 3200);
+                    // Hinweis auf eingebettete bzw. fehlende Dateien
+                    const entries = LION_CONTENT_KINDS.flatMap(kind => payload.content[kind] || []);
+                    const embedded = entries.filter(e => e.data_base64);
+                    const localOnly = entries.filter(e => e.source === 'local');
+                    if (embedded.length) {
+                        const mb = embedded.reduce((sum, e) => sum + (e.data_base64.length * 3 / 4), 0) / (1024 * 1024);
+                        showToast(`${embedded.length} file(s) not on Modrinth were embedded (${mb.toFixed(1)} MB).`, 'info', 5000);
+                    }
+                    if (localOnly.length) {
+                        showToast(`${localOnly.length} file(s) are not on Modrinth and were NOT embedded – they will be missing for the recipient.`, 'warning', 6500);
+                    }
                 } else {
                     showToast('Export canceled.', 'info', 2200);
                     return;
@@ -1556,23 +1641,11 @@ async function runLionImport() {
         report.worldsApplied = selections.includes('worlds') && !!shareData?.worlds_archive_base64;
         report.logsApplied = selections.includes('logs') && !!shareData?.logs_archive_base64;
 
-        const tasks = [];
-
-        if (selections.includes('mods') && Array.isArray(content.mods)) {
-            content.mods.forEach(mod => {
-                if (mod && mod.mod_id) tasks.push({ kind: 'mod', data: mod });
-            });
-        }
-        if (selections.includes('resourcepacks') && Array.isArray(content.resourcepacks)) {
-            content.resourcepacks.forEach(pack => {
-                if (pack && pack.project_id) tasks.push({ kind: 'resourcepack', data: pack });
-            });
-        }
-        if (selections.includes('shaderpacks') && Array.isArray(content.shaderpacks)) {
-            content.shaderpacks.forEach(pack => {
-                if (pack && pack.project_id) tasks.push({ kind: 'shaderpack', data: pack });
-            });
-        }
+        // Inhalte, die importiert werden (alle Einträge – auch die ohne Modrinth-ID, damit
+        // Fehlschläge gemeldet statt still übersprungen werden)
+        const contentKinds = LION_CONTENT_KINDS.filter(kind =>
+            selections.includes(kind) && Array.isArray(content[kind]) && content[kind].length > 0);
+        const totalItems = contentKinds.reduce((sum, kind) => sum + content[kind].length, 0);
 
         if (selections.includes('servers') && Array.isArray(content.servers)) {
             setImportProgress(10, 'Adding servers...');
@@ -1591,67 +1664,56 @@ async function runLionImport() {
             }
         }
 
-        const applyTaskResult = (taskKind, ok) => {
-            const key = taskKind === 'mod' ? 'mods' : taskKind === 'resourcepack' ? 'resourcepacks' : 'shaderpacks';
-            report[key][ok ? 'success' : 'failed'] += 1;
-        };
-
-        const runInstallTask = async (task) => {
-            if (task.kind === 'mod') {
-                await invoke('install_mod', {
-                    profileId: createdProfile.id,
-                    modId: task.data.mod_id,
-                    versionId: null,
-                    source: task.data.source || 'modrinth'
-                });
-            } else if (task.kind === 'resourcepack') {
-                await invoke('install_resourcepack', {
-                    profileId: createdProfile.id,
-                    packId: task.data.project_id,
-                    versionId: null
-                });
-            } else if (task.kind === 'shaderpack') {
-                await invoke('install_shaderpack', {
-                    profileId: createdProfile.id,
-                    packId: task.data.project_id,
-                    versionId: null
-                });
-            }
-        };
-
         // Gesamtfortschritt: 0-12% Profil/Daten, 12-65% Inhalte, Rest Minecraft-Download
         const contentStart = 12;
-        const contentEnd = tasks.length > 0 ? 65 : contentStart;
-        const taskLabels = { mod: 'mods', resourcepack: 'resource packs', shaderpack: 'shader packs' };
-        let completed = 0;
-        const reportTaskProgress = (task) => {
-            const pct = contentStart + (completed / Math.max(tasks.length, 1)) * (contentEnd - contentStart);
-            setImportProgress(pct, `Installing ${taskLabels[task.kind] || 'content'}... (${completed}/${tasks.length})`);
+        const contentEnd = totalItems > 0 ? 65 : contentStart;
+        const importFailures = [];
+        const importWarnings = [];
+        let completedBefore = 0;
+        let activeKind = null;
+        const reportContentProgress = (kind, doneInKind) => {
+            const overall = completedBefore + doneInKind;
+            const pct = contentStart + (overall / Math.max(totalItems, 1)) * (contentEnd - contentStart);
+            setImportProgress(pct, `Installing ${LION_CONTENT_LABELS[kind] || 'content'}... (${overall}/${totalItems})`);
         };
 
-        if (fastImport && tasks.length > 0) {
-            await Promise.allSettled(tasks.map(async (task) => {
+        let unlistenContentProgress = null;
+        try {
+            unlistenContentProgress = await window.__TAURI__.event.listen('content-import-progress', (event) => {
+                const { kind, done } = event.payload || {};
+                if (kind === activeKind) reportContentProgress(kind, Number(done) || 0);
+            });
+        } catch (_e) {
+            // Event API might not be available
+        }
+
+        try {
+            for (const kind of contentKinds) {
+                activeKind = kind;
+                const entries = content[kind];
+                reportContentProgress(kind, 0);
                 try {
-                    await runInstallTask(task);
-                    applyTaskResult(task.kind, true);
-                } catch (_e) {
-                    applyTaskResult(task.kind, false);
-                } finally {
-                    completed += 1;
-                    reportTaskProgress(task);
+                    // Backend lädt exakt die exportierten Versionen (Hash-geprüft) bzw. die
+                    // eingebetteten Dateien, mit begrenzter Parallelität
+                    const result = await invoke('import_profile_content', {
+                        profileId: createdProfile.id,
+                        kind,
+                        entries,
+                        parallel: fastImport
+                    });
+                    report[kind].success += result.installed || 0;
+                    report[kind].failed += (result.failed || []).length;
+                    (result.failed || []).forEach(f => importFailures.push(`${f.name}: ${f.reason}`));
+                    importWarnings.push(...(result.warnings || []));
+                } catch (error) {
+                    report[kind].failed += entries.length;
+                    importFailures.push(`${LION_CONTENT_LABELS[kind]}: ${error}`);
                 }
-            }));
-        } else {
-            for (const task of tasks) {
-                reportTaskProgress(task);
-                try {
-                    await runInstallTask(task);
-                    applyTaskResult(task.kind, true);
-                } catch (_installErr) {
-                    applyTaskResult(task.kind, false);
-                }
-                completed += 1;
+                completedBefore += entries.length;
             }
+        } finally {
+            activeKind = null;
+            if (typeof unlistenContentProgress === 'function') unlistenContentProgress();
         }
 
         await prepareProfileDownloadFlow(createdProfile.id, createdProfile.name, {
@@ -1660,7 +1722,9 @@ async function runLionImport() {
             activity: 'import'
         });
         await refreshProfilesInBackground();
-        showToast('Import complete. ' + formatImportReport(report), 'success', 5200);
+        showToast('Import complete. ' + formatImportReport(report),
+            importFailures.length ? 'warning' : 'success', 6000);
+        showImportIssues(importFailures, importWarnings);
 
     } catch (error) {
         setSessionWidgetState({ phase: 'idle', percent: null, canStop: false, activity: null });
@@ -1682,6 +1746,17 @@ function openLionImportModal(payload) {
     const incomingVersion = Number(payload?.version || 1);
     const isNewerFormat = Number.isFinite(incomingVersion) && incomingVersion > LION_SHARE_FORMAT_VERSION;
     const isOlderFormat = Number.isFinite(incomingVersion) && incomingVersion < LION_SHARE_FORMAT_VERSION;
+    const contentSummary = LION_CONTENT_KINDS.map(key => {
+        const list = Array.isArray(payload?.content?.[key]) ? payload.content[key] : [];
+        if (!list.length) return null;
+        const embedded = list.filter(entry => entry && entry.data_base64).length;
+        const missing = list.filter(entry => entry && entry.source === 'local').length;
+        const notes = [
+            embedded ? `${embedded} embedded in this file` : '',
+            missing ? `${missing} not included` : ''
+        ].filter(Boolean).join(', ');
+        return `${list.length} ${LION_CONTENT_LABELS[key]}${notes ? ` (${notes})` : ''}`;
+    }).filter(Boolean).join(' · ');
 
     const modal = document.createElement('div');
     modal.id = 'import-lion-modal';
@@ -1690,7 +1765,8 @@ function openLionImportModal(payload) {
         <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 12px; width: min(560px, 92vw); padding: 22px;" onclick="event.stopPropagation()">
             <h2 style="margin: 0 0 10px 0; color: var(--gold); font-size: 20px;"><i class="bi bi-box-arrow-in-down"></i> Import .lion</h2>
             <p style="margin: 0 0 12px 0; color: var(--text-secondary); font-size: 13px;">${escapeHtml(payload?.profile?.name || 'Imported Profile')} - choose the sections to import.</p>
-            <p style="margin: 0 0 12px 0; color: ${isNewerFormat ? '#ff9800' : 'var(--text-secondary)'}; font-size: 12px;">Format v${incomingVersion} (lokal: v${LION_SHARE_FORMAT_VERSION})${isOlderFormat ? ' - older format, import with fallback.' : ''}${isNewerFormat ? ' - newer than this launcher version.' : ''}</p>
+            <p style="margin: 0 0 12px 0; color: ${isNewerFormat ? '#ff9800' : 'var(--text-secondary)'}; font-size: 12px;">Format v${incomingVersion} (lokal: v${LION_SHARE_FORMAT_VERSION})${isOlderFormat ? ' - older format without exact versions: the latest compatible versions will be installed.' : ''}${isNewerFormat ? ' - newer than this launcher version.' : ''}</p>
+            ${contentSummary ? `<p style="margin: 0 0 12px 0; color: var(--text-secondary); font-size: 12px;">${escapeHtml(contentSummary)}</p>` : ''}
             <div id="import-lion-options" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; color: var(--text-primary);">
                 <label><input type="checkbox" value="settings" ${payload?.content?.share_data?.settings ? 'checked' : ''}> Settings (1:1)</label>
                 <label><input type="checkbox" value="mods" ${has('mods') ? 'checked' : ''}> Mods</label>
@@ -2098,14 +2174,16 @@ async function repairProfile(profileId) {
     }
 
     // Confirmation dialog
-    const confirmed = confirm(
-        `Repair installation?\n\n` +
-        `Profil: ${profile.name}\n` +
-        `Version: ${profile.minecraft_version}\n` +
-        `Loader: ${profile.loader.loader}\n\n` +
-        `This will re-download Minecraft and all loader files.\n` +
-        `Your mods, worlds, and settings will be kept.`
-    );
+    const confirmed = await showConfirmModal({
+        title: 'Repair installation',
+        message: 'Repair ',
+        highlight: `${profile.name} (${profile.minecraft_version}, ${profile.loader.loader})`,
+        suffix: '?',
+        details: 'This will re-download Minecraft and all loader files. Your mods, worlds, and settings will be kept.',
+        confirmText: 'Repair',
+        icon: 'bi-wrench',
+        danger: false
+    });
 
     if (!confirmed) return;
 
@@ -2131,12 +2209,16 @@ async function clearProfileCache(profileId) {
     }
 
     // Confirmation dialog
-    const confirmed = confirm(
-        `Clear cache?\n\n` +
-        `Profil: ${profile.name}\n\n` +
-        `This deletes temporary files and the shader cache.\n` +
-        `Your mods, worlds, and settings will be kept.`
-    );
+    const confirmed = await showConfirmModal({
+        title: 'Clear cache',
+        message: 'Clear the cache of ',
+        highlight: profile.name,
+        suffix: '?',
+        details: 'This deletes temporary files and the shader cache. Your mods, worlds, and settings will be kept.',
+        confirmText: 'Clear cache',
+        icon: 'bi-eraser',
+        danger: false
+    });
 
     if (!confirmed) return;
 
@@ -2251,7 +2333,7 @@ async function launchProfile(profileId) {
     let unlistenProgress = null;
 
     if (!currentUsername || currentUsername === 'Guest') {
-        alert('Please set your username in Settings first!');
+        showToast('Please set your username in Settings first!', 'warning', 4000);
         navigateToPage('settings');
         return;
     }
@@ -2443,7 +2525,7 @@ async function deleteProfile(profileId) {
         showToast('Profile deleted.', 'success', 2200);
     } catch (error) {
         debugLog('Failed to delete profile: ' + error, 'error');
-        alert('Failed to delete profile: ' + error);
+        showToast('Failed to delete profile: ' + error, 'error', 5000);
     }
 }
 
@@ -3130,6 +3212,36 @@ function renderProfileTabContent(tabName, profile) {
 }
 
 // Helper functions for profile details
+
+/**
+ * Platz, den die Elemente UNTER der Box bis zum Ende von `stopEl` brauchen
+ * (Geschwister darunter, Paddings/Borders/Margins der Eltern).
+ * Bewusst unabhängig von der aktuellen Höhe der Box selbst – sonst kann eine einmal
+ * verkleinerte Box (z.B. nach Maximieren/Wiederherstellen) nie wieder wachsen.
+ */
+function measureSpaceBelowBox(box, stopEl) {
+    const px = value => parseFloat(value) || 0;
+    let space = 0;
+    let el = box;
+    while (el && el !== stopEl && el.parentElement) {
+        space += px(getComputedStyle(el).marginBottom);
+        const parent = el.parentElement;
+        const pcs = getComputedStyle(parent);
+        const stacksVertically = pcs.display === 'block' || pcs.display === 'flow-root' ||
+            ((pcs.display === 'flex' || pcs.display === 'inline-flex') && pcs.flexDirection.startsWith('column'));
+        if (stacksVertically) {
+            for (let sib = el.nextElementSibling; sib; sib = sib.nextElementSibling) {
+                const scs = getComputedStyle(sib);
+                if (scs.display === 'none' || scs.position === 'absolute' || scs.position === 'fixed') continue;
+                space += sib.getBoundingClientRect().height + px(scs.marginTop) + px(scs.marginBottom);
+            }
+        }
+        space += px(pcs.paddingBottom) + px(pcs.borderBottomWidth);
+        el = parent;
+    }
+    return space;
+}
+
 function updateProfileScrollableBoxes() {
     const boxes = document.querySelectorAll('.profile-scroll-box');
     if (!boxes.length) return;
@@ -3137,16 +3249,37 @@ function updateProfileScrollableBoxes() {
     boxes.forEach(box => {
         if (box.offsetParent === null) return;
         const rect = box.getBoundingClientRect();
-        const viewportAvailable = Math.floor(window.innerHeight - rect.top - 24);
-        const contentHost = box.closest('.content, #server-detail-content, #main-category-shell');
-        const hostAvailable = contentHost
-            ? Math.floor(contentHost.getBoundingClientRect().bottom - rect.top - 12)
-            : viewportAvailable;
-        const available = Math.min(viewportAvailable, hostAvailable);
+
+        // Server-Detailansicht hat einen eigenen Scroll-Container mit fester Maximalhöhe
+        const scrollHost = box.closest('#server-detail-content');
+        const stopEl = scrollHost || box.closest('.content') || document.body;
+        let bottomLimit = window.innerHeight;
+        let boxTop = rect.top;
+        if (scrollHost) {
+            const hostMax = parseFloat(getComputedStyle(scrollHost).maxHeight);
+            if (Number.isFinite(hostMax)) {
+                bottomLimit = Math.min(bottomLimit, scrollHost.getBoundingClientRect().top + hostMax);
+            }
+            boxTop += scrollHost.scrollTop;
+        }
+
+        const available = Math.floor(bottomLimit - boxTop - measureSpaceBelowBox(box, stopEl) - 4);
         const targetHeight = Math.max(180, Math.min(available, 520));
         box.style.height = `${targetHeight}px`;
         box.style.maxHeight = `${targetHeight}px`;
     });
+}
+
+/**
+ * Beim Maximieren/Wiederherstellen feuert der WebView teils mehrere resize-Events mit
+ * Zwischengrößen. Daher sofort, im nächsten Frame und nach kurzer Verzögerung nachmessen.
+ */
+let scrollBoxResizeTimer = null;
+function scheduleProfileScrollableBoxesUpdate() {
+    updateProfileScrollableBoxes();
+    requestAnimationFrame(updateProfileScrollableBoxes);
+    clearTimeout(scrollBoxResizeTimer);
+    scrollBoxResizeTimer = setTimeout(updateProfileScrollableBoxes, 180);
 }
 
 // Öffnet den Haupt-Ordner des Profils
@@ -3606,8 +3739,13 @@ function stopLogsAutoRefresh() {
     }
 }
 
-function clearLogs() {
-    if (confirm('Möchtest du wirklich alle Logs löschen?')) {
+async function clearLogs() {
+    const confirmed = await showConfirmModal({
+        title: 'Logs löschen',
+        message: 'Möchtest du wirklich alle Logs löschen',
+        confirmText: 'Löschen'
+    });
+    if (confirmed) {
         debugLog('Clearing logs...', 'info');
         // TODO: Implement log clearing
     }
@@ -3844,14 +3982,14 @@ function renderInstalledModsList(mods, profileId) {
             </div>
 
             <!-- Actions -->
-            <div style="display: flex; gap: 6px; flex-shrink: 0;">
+            <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
                 <span class="mod-update-slot" style="display: contents;">${renderModUpdateButton(profileId, updateStatus)}</span>
-                <button class="btn btn-secondary" onclick="event.stopPropagation(); toggleMod('${escapeAttr(profileId)}', '${jsFile}', ${mod.disabled})"
-                        style="padding: 5px 10px; font-size: 11px;" title="${mod.disabled ? 'Aktivieren' : 'Deaktivieren'}">
-                    ${mod.disabled ? '<i class="bi bi-check"></i>' : '||'}
+                <button class="btn btn-secondary content-action-btn" onclick="event.stopPropagation(); toggleMod('${escapeAttr(profileId)}', '${jsFile}', ${mod.disabled})"
+                        title="${mod.disabled ? 'Aktivieren' : 'Deaktivieren'}">
+                    ${mod.disabled ? '<i class="bi bi-check-lg"></i>' : '||'}
                 </button>
-                <button class="btn btn-secondary" onclick="event.stopPropagation(); deleteMod('${escapeAttr(profileId)}', '${jsFile}')"
-                        style="padding: 5px 10px; font-size: 11px; color: #f44336;" title="Löschen">
+                <button class="btn btn-secondary content-action-btn content-action-delete" onclick="event.stopPropagation(); deleteMod('${escapeAttr(profileId)}', '${jsFile}')"
+                        title="Löschen">
                     ×
                 </button>
             </div>
@@ -4521,7 +4659,7 @@ async function checkForModUpdates(profileId) {
     } catch (error) {
         document.getElementById('update-check-modal')?.remove();
         debugLog('Failed to check updates: ' + error, 'error');
-        alert('Fehler beim Prüfen auf Updates: ' + error);
+        showToast('Fehler beim Prüfen auf Updates: ' + error, 'error', 5000);
     }
 }
 
@@ -4651,7 +4789,7 @@ async function openModsFolder(profileId) {
         await invoke('open_profile_folder', { profileId, subfolder: 'mods' });
     } catch (error) {
         debugLog('Failed to open mods folder: ' + error, 'error');
-        alert('Konnte Mods-Ordner nicht öffnen: ' + error);
+        showToast('Konnte Mods-Ordner nicht öffnen: ' + error, 'error', 5000);
     }
 }
 
@@ -4741,8 +4879,8 @@ function renderInstalledResourcePacks(packs, profileId) {
                         ${pack.is_folder ? '<i class="bi bi-folder"></i> Ordner' : '· ' + sizeStr}
                     </div>
                 </div>
-                <button class="btn btn-secondary" onclick="deleteResourcePack('${profileId}', '${pack.name.replace(/'/g, "\\'")}', ${pack.is_folder})" 
-                        style="padding: 6px 12px; font-size: 11px; color: #f44336;">
+                <button class="btn btn-secondary content-action-btn content-action-delete" onclick="deleteResourcePack('${profileId}', '${pack.name.replace(/'/g, "\\'")}', ${pack.is_folder})"
+                        title="Löschen">
                     <i class="bi bi-trash"></i>
                 </button>
             </div>
@@ -4927,8 +5065,8 @@ function renderInstalledShaderPacks(packs, profileId) {
                         ${pack.is_folder ? '<i class="bi bi-folder"></i> Ordner' : '· ' + sizeStr}
                     </div>
                 </div>
-                <button class="btn btn-secondary" onclick="deleteShaderPack('${profileId}', '${pack.name.replace(/'/g, "\\'")}')" 
-                        style="padding: 6px 12px; font-size: 11px; color: #f44336;">
+                <button class="btn btn-secondary content-action-btn content-action-delete" onclick="deleteShaderPack('${profileId}', '${pack.name.replace(/'/g, "\\'")}')"
+                        title="Löschen">
                     <i class="bi bi-trash"></i>
                 </button>
             </div>
@@ -5221,9 +5359,14 @@ async function submitAddServer(profileId) {
 }
 
 async function removeServer(profileId, serverIp, serverName) {
-    if (!confirm(`Server "${serverName}" (${serverIp}) wirklich entfernen?`)) {
-        return;
-    }
+    const confirmed = await showConfirmModal({
+        title: 'Server entfernen',
+        message: 'Server ',
+        highlight: `${serverName} (${serverIp})`,
+        suffix: ' wirklich entfernen?',
+        confirmText: 'Entfernen'
+    });
+    if (!confirmed) return;
 
     try {
         await invoke('remove_server', { profileId, ip: serverIp });
@@ -5286,6 +5429,55 @@ const browserModeBackup = { loaderOptions: null, modsBtnText: null };
  * Bestätigungsfenster im Stil des "Profil löschen"-Dialogs.
  * `message` wird als Text eingefügt; `highlight` wird hervorgehoben dargestellt.
  */
+/** Eingabe-Dialog im Launcher-Stil (Ersatz für das native prompt()). Liefert den Text oder null. */
+function showPromptModal({ title, message = '', defaultValue = '', confirmText = 'OK', cancelText = 'Cancel', icon = 'bi-pencil' }) {
+    return new Promise((resolve) => {
+        closeDynamicModal('lion-prompt-modal');
+
+        const modal = document.createElement('div');
+        modal.id = 'lion-prompt-modal';
+        modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.82); display: flex; align-items: center; justify-content: center; z-index: 10002;';
+        modal.innerHTML = `
+            <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 12px; width: min(450px, 90vw); padding: 20px;" onclick="event.stopPropagation()">
+                <h3 style="margin: 0 0 10px 0; color: var(--gold); font-size: 20px;"><i class="bi ${icon}"></i> <span data-prompt-title></span></h3>
+                <p data-prompt-message style="margin: 0 0 10px 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5;"></p>
+                <input type="text" data-prompt-input
+                       style="width: 100%; box-sizing: border-box; padding: 9px 10px; margin-bottom: 16px; background: var(--bg-light);
+                              border: 1px solid var(--bg-medium); border-radius: 6px; color: var(--text-primary); font-size: 13px; outline: none;">
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button class="btn btn-secondary" data-prompt-cancel></button>
+                    <button class="btn" data-prompt-ok></button>
+                </div>
+            </div>
+        `;
+
+        modal.querySelector('[data-prompt-title]').textContent = title;
+        modal.querySelector('[data-prompt-message]').textContent = message;
+        modal.querySelector('[data-prompt-cancel]').textContent = cancelText;
+        modal.querySelector('[data-prompt-ok]').textContent = confirmText;
+        const input = modal.querySelector('[data-prompt-input]');
+        input.value = defaultValue;
+
+        const onKey = (event) => {
+            if (event.key === 'Escape') cleanup(null);
+            if (event.key === 'Enter') cleanup(input.value);
+        };
+        const cleanup = (result) => {
+            document.removeEventListener('keydown', onKey);
+            if (modal.parentElement) modal.remove();
+            resolve(result);
+        };
+
+        modal.addEventListener('click', () => cleanup(null));
+        modal.querySelector('[data-prompt-cancel]').addEventListener('click', () => cleanup(null));
+        modal.querySelector('[data-prompt-ok]').addEventListener('click', () => cleanup(input.value));
+        document.addEventListener('keydown', onKey);
+        document.body.appendChild(modal);
+        input.focus();
+        input.select();
+    });
+}
+
 function showConfirmModal({ title, message, highlight = '', suffix = '?', details = '', confirmText = 'Yes I will', cancelText = 'Cancel', icon = 'bi-trash', danger = true }) {
     return new Promise((resolve) => {
         closeDynamicModal('lion-confirm-modal');
@@ -7550,7 +7742,13 @@ async function deleteServerPathEntry(serverId, relativePath, isDir) {
 }
 
 async function promptMoveServerPath(serverId, fromPath) {
-    const target = prompt('Neuer relativer Zielpfad:', fromPath);
+    const target = await showPromptModal({
+        title: 'Verschieben',
+        message: 'Neuer relativer Zielpfad:',
+        defaultValue: fromPath,
+        confirmText: 'Verschieben',
+        icon: 'bi-arrows-move'
+    });
     if (!target || target.trim() === '' || target === fromPath) return;
 
     try {
@@ -7571,7 +7769,13 @@ async function promptMoveServerPath(serverId, fromPath) {
 }
 
 async function createServerFolderPrompt(serverId) {
-    const folderName = prompt('Ordnername (relativ zum aktuellen Pfad):', 'new-folder');
+    const folderName = await showPromptModal({
+        title: 'Neuer Ordner',
+        message: 'Ordnername (relativ zum aktuellen Pfad):',
+        defaultValue: 'new-folder',
+        confirmText: 'Erstellen',
+        icon: 'bi-folder-plus'
+    });
     if (!folderName || !folderName.trim()) return;
 
     const relativePath = currentServerFilesPath
@@ -8191,7 +8395,7 @@ async function createProfile() {
     const loaderVersion = loaderVersionInput.value;
 
     if (!name || !mcVersion) {
-        alert('Please fill in all required fields');
+        showToast('Please fill in all required fields', 'warning', 3500);
         return;
     }
 
@@ -8237,7 +8441,7 @@ async function createProfile() {
         debugLog('Profile created successfully', 'success');
     } catch (error) {
         debugLog('Failed to create profile: ' + error, 'error');
-        alert('Failed to create profile: ' + error);
+        showToast('Failed to create profile: ' + error, 'error', 5000);
     }
 }
 
@@ -9649,7 +9853,7 @@ async function installMod(modId, source) {
     if (!profile) {
         // Zeige Profil-Auswahl Dialog
         if (profiles.length === 0) {
-            alert('Bitte erstelle zuerst ein Profil!');
+            showToast('Bitte erstelle zuerst ein Profil!', 'warning', 4000);
             switchPage('profiles');
             return;
         }
@@ -10312,7 +10516,13 @@ async function switchAccount(uuid) {
 }
 
 async function logoutAccount(uuid) {
-    if (!confirm('Möchtest du diesen Account wirklich abmelden?')) return;
+    const confirmed = await showConfirmModal({
+        title: 'Abmelden',
+        message: 'Möchtest du diesen Account wirklich abmelden',
+        confirmText: 'Abmelden',
+        icon: 'bi-box-arrow-right'
+    });
+    if (!confirmed) return;
 
     try {
         await invoke('remove_account', { uuid });
@@ -11232,36 +11442,36 @@ async function renderModDetails(mod, versions) {
             
             <!-- Mod Info -->
             <div>
-                <h2 style="margin: 0 0 6px 0; font-size: 24px; color: var(--text-primary);">${mod.name}</h2>
+                <h2 style="margin: 0 0 6px 0; font-size: 24px; color: var(--text-primary);">${escapeHtml(mod.name)}</h2>
                 <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
                     <span style="color: var(--text-secondary); font-size: 13px;">by</span>
-                    <a href="https://modrinth.com/user/${mod.author}" 
+                    <a href="https://modrinth.com/user/${encodeURIComponent(mod.author || '')}"
                        target="_blank"
                        style="color: var(--gold); font-size: 13px; text-decoration: underline;">
-                        ${mod.author}
+                        ${escapeHtml(mod.author)}
                     </a>
                 </div>
                 <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 12px;">
                     ${envLabel ? `<span style="background: var(--bg-dark); color: var(--gold); font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 600; border: 1px solid var(--gold);">${envLabel}</span>` : ''}
-                    ${mod.categories && mod.categories.length > 0 ? mod.categories.slice(0, 5).map(cat => 
-                        `<span style="background: var(--bg-dark); color: var(--text-secondary); font-size: 10px; padding: 3px 8px; border-radius: 4px;">${cat}</span>`
+                    ${mod.categories && mod.categories.length > 0 ? mod.categories.slice(0, 5).map(cat =>
+                        `<span style="background: var(--bg-dark); color: var(--text-secondary); font-size: 10px; padding: 3px 8px; border-radius: 4px;">${escapeHtml(cat)}</span>`
                     ).join('') : ''}
                 </div>
                 <p style="color: var(--text-secondary); font-size: 14px; margin: 0; line-height: 1.6;">
-                    ${mod.description}
+                    ${escapeHtml(mod.description)}
                 </p>
             </div>
             
             <!-- Right Side: Install Button, Last Updated, Downloads -->
             <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 12px; min-width: 200px;">
-                ${currentProfile ? 
-                    `<button class="btn btn-primary" onclick="installModFromDetails('${mod.id}')" 
+                ${canInstallFromDetails() ?
+                    `<button id="mod-details-install-btn" class="btn btn-primary" onclick="installModFromDetails('${escapeAttr(mod.id)}', this)"
                              style="width: 100%; padding: 14px 24px; font-size: 15px; font-weight: 600;">
-                        ⬇ Install
+                        <i class="bi bi-download"></i> Install
                     </button>` :
-                    `<button class="btn btn-secondary" disabled 
+                    `<button class="btn btn-secondary" disabled
                              style="width: 100%; padding: 14px 24px; font-size: 15px; opacity: 0.5; cursor: not-allowed;">
-                        Select Profile First
+                        Create a profile first
                     </button>`
                 }
                 
@@ -11310,6 +11520,9 @@ async function renderModDetails(mod, versions) {
 
     content.innerHTML = html;
 
+    // Install-Button als "Installed" markieren, falls schon im Profil/Server vorhanden
+    updateDetailsInstallButtonState(mod);
+
     // Rendere Tab-Content separat (async)
     const tabContent = await renderModDetailsTabContent(mod, versions, allLoaders, sortedMcVersions);
     document.getElementById('mod-details-tab-content').innerHTML = tabContent;
@@ -11338,7 +11551,7 @@ function renderDescriptionTab(mod) {
     return `
         <div style="background: var(--bg-medium); padding: 24px; border-radius: 12px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 16px 0; font-size: 18px; color: var(--text-primary);">About this project</h3>
-            <div style="color: var(--text-secondary); font-size: 14px; line-height: 1.8;">
+            <div class="project-body">
                 ${formattedDescription}
             </div>
         </div>
@@ -11381,9 +11594,10 @@ function renderDescriptionTab(mod) {
 }
 
 async function renderVersionsTab(mod, versions, allLoaders, sortedMcVersions) {
-    // Hole installierte Mods vom aktuellen Profil
-    let installedMods = [];
+    // Installierte Version im aktuellen Profil/Server ermitteln (Version-ID bevorzugt, sonst Versionsnummer)
     let installedVersion = null;
+    let installedVersionId = null;
+    const detailsKind = getDetailsContentKind(mod);
 
     if (serverBrowserContext) {
         await loadServerInstalledProjectIds(true);
@@ -11393,16 +11607,21 @@ async function renderVersionsTab(mod, versions, allLoaders, sortedMcVersions) {
         }
     } else if (currentProfile) {
         try {
-            installedMods = await invoke('get_installed_mods', { profileId: currentProfile.id });
-            // Finde installierte Version dieser Mod
-            const installedMod = installedMods.find(m => m.mod_id === mod.id);
-            if (installedMod && installedMod.version) {
-                installedVersion = installedMod.version;
+            if (detailsKind === 'resourcepacks' || detailsKind === 'shaderpacks') {
+                const packs = await invoke(detailsKind === 'resourcepacks' ? 'get_installed_resourcepacks' : 'get_installed_shaderpacks', { profileId: currentProfile.id });
+                const installedPack = (packs || []).find(p => p.project_id === mod.id);
+                installedVersionId = installedPack?.version_id || null;
+            } else {
+                const installedMods = await invoke('get_installed_mods', { profileId: currentProfile.id });
+                const installedMod = (installedMods || []).find(m => m.mod_id === mod.id || (mod.slug && m.mod_id === mod.slug));
+                installedVersion = installedMod?.version || null;
+                installedVersionId = installedMod?.version_id || null;
             }
         } catch (error) {
-            debugLog('Failed to get installed mods: ' + error, 'error');
+            debugLog('Failed to get installed content: ' + error, 'error');
         }
     }
+    const canInstall = canInstallFromDetails();
 
     // Filtere Versionen basierend auf Filter
     let filteredVersions = versions;
@@ -11497,7 +11716,9 @@ async function renderVersionsTab(mod, versions, allLoaders, sortedMcVersions) {
                         const typeLabel = versionType.charAt(0).toUpperCase() + versionType.slice(1);
                         
                         // Prüfe ob diese Version installiert ist
-                        const isInstalled = installedVersion === version.version_number;
+                        const isInstalled = installedVersionId
+                            ? installedVersionId === version.id
+                            : (!!installedVersion && installedVersion === version.version_number);
                         
                         return `
                         <div style="background: var(--bg-dark); padding: 16px; border-radius: 8px; margin-bottom: 10px; border-left: 3px solid ${typeColor};">
@@ -11513,18 +11734,18 @@ async function renderVersionsTab(mod, versions, allLoaders, sortedMcVersions) {
                                     </div>
                                     <span style="color: var(--text-secondary); font-size: 12px;">${version.version_number}</span>
                                 </div>
-                                ${(currentProfile || serverBrowserContext) ?
-                                    (isInstalled ? 
+                                ${canInstall ?
+                                    (isInstalled ?
                                         `<button class="btn btn-secondary" disabled style="padding: 8px 20px; font-size: 13px; opacity: 0.6;">
                                             <i class="bi bi-check"></i> Installed
                                         </button>` :
-                                        `<button class="btn btn-primary" onclick="installModVersion('${mod.id}', '${version.id}')" 
+                                        `<button class="btn btn-primary" onclick="installModVersion('${escapeAttr(mod.id)}', '${escapeAttr(version.id)}', this)"
                                                  style="padding: 8px 20px; font-size: 13px;">
                                             Install
                                         </button>`
                                     ) :
                                     `<button class="btn btn-secondary" disabled style="padding: 8px 20px; font-size: 13px; opacity: 0.5; cursor: not-allowed;">
-                                        Select Profile
+                                        Create a profile first
                                     </button>`
                                 }
                             </div>
@@ -11581,15 +11802,18 @@ function renderGalleryTab(mod) {
             <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px;">
                 ${gallery.map((img, index) => {
                     const imageUrl = normalizeMediaUrl(img.url || img);
+                    // raw_url = Originalgröße; url ist nur eine komprimierte Vorschau (~350px)
+                    const fullUrl = normalizeMediaUrl(img.raw_url || img.url || img);
                     const safeUrl = escapeAttr(imageUrl);
                     const title = img.title ? escapeHtml(img.title) : '';
                     const alt = escapeAttr(img.title || `Screenshot ${index + 1}`);
 
                     return `
                         <div style="border-radius: 8px; overflow: hidden; cursor: pointer; position: relative;"
-                             data-full-url="${safeUrl}"
-                             onclick="openGalleryImage(this.dataset.fullUrl, ${index})">
-                            <img src="${safeUrl}" alt="${alt}" 
+                             data-full-url="${escapeAttr(fullUrl)}"
+                             data-preview-url="${safeUrl}"
+                             onclick="openGalleryImage(this.dataset.fullUrl, ${index}, this.dataset.previewUrl)">
+                            <img src="${safeUrl}" alt="${alt}" loading="lazy" referrerpolicy="no-referrer"
                                  style="width: 100%; height: 180px; object-fit: cover; display: block; transition: transform 0.3s;"
                                  onmouseover="this.style.transform='scale(1.05)'"
                                  onmouseout="this.style.transform='scale(1)'"
@@ -11684,9 +11908,10 @@ function toggleSnapshotFilter() {
     switchModDetailsTab('versions');
 }
 
-function openGalleryImage(url, index) {
+function openGalleryImage(url, index, previewUrl = '') {
     const normalizedUrl = normalizeMediaUrl(url);
     if (!normalizedUrl) return;
+    const normalizedPreview = normalizeMediaUrl(previewUrl);
 
     closeGalleryImageModal();
 
@@ -11703,25 +11928,35 @@ function openGalleryImage(url, index) {
         padding: 20px;
     `;
 
-    const safeUrl = escapeAttr(normalizedUrl);
+    // Erst die (bereits geladene) Vorschau groß anzeigen, dann gegen das Originalbild tauschen
+    const hasSeparatePreview = !!normalizedPreview && normalizedPreview !== normalizedUrl;
+    const initialSrc = hasSeparatePreview ? normalizedPreview : normalizedUrl;
     modal.innerHTML = `
         <button onclick="closeGalleryImageModal()"
-                style="position:absolute;top:14px;right:18px;background:transparent;border:1px solid rgba(255,255,255,0.4);color:white;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:14px;">
+                style="position:absolute;top:14px;right:18px;z-index:1;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.4);color:white;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:14px;">
             <i class="bi bi-x-lg"></i> Close
         </button>
-        <div style="max-width:min(96vw, 1800px);max-height:92vh;display:flex;align-items:center;justify-content:center;">
-            <img src="${safeUrl}"
+        <div style="width:min(96vw, 1800px);height:90vh;display:flex;align-items:center;justify-content:center;">
+            <img src="${escapeAttr(initialSrc)}"
                  alt="Gallery image ${index + 1}"
-                 style="max-width:100%;max-height:92vh;object-fit:contain;border-radius:8px;box-shadow:0 20px 40px rgba(0,0,0,0.4);"
+                 referrerpolicy="no-referrer"
+                 style="width:100%;height:100%;object-fit:contain;border-radius:8px;"
                  onerror="handleFullscreenImageError(this)">
         </div>
     `;
 
-    modal.addEventListener('click', (event) => {
-        if (event.target === modal) {
-            closeGalleryImageModal();
-        }
-    });
+    if (hasSeparatePreview) {
+        const fullImage = new Image();
+        fullImage.referrerPolicy = 'no-referrer';
+        fullImage.onload = () => {
+            const shown = modal.querySelector('img');
+            if (shown && document.body.contains(modal)) shown.src = normalizedUrl;
+        };
+        fullImage.src = normalizedUrl;
+    }
+
+    // Das Bild füllt die ganze Fläche (object-fit: contain) → jeder Klick schließt die Ansicht
+    modal.addEventListener('click', () => closeGalleryImageModal());
 
     galleryModalKeyHandler = (event) => {
         if (event.key === 'Escape') {
@@ -11741,81 +11976,197 @@ function closeGalleryImageModal() {
     }
 }
 
-// Einfacher Markdown zu HTML Konverter
+// Markdown (inkl. eingebettetem HTML) → bereinigtes HTML, siehe markdown.js
 function formatMarkdown(text) {
     if (!text) return '';
-
-    return text
-        // Headers
-        .replace(/^### (.*$)/gim, '<h4 style="color: var(--text-primary); margin: 20px 0 10px 0;">$1</h4>')
-        .replace(/^## (.*$)/gim, '<h3 style="color: var(--text-primary); margin: 20px 0 10px 0;">$1</h3>')
-        .replace(/^# (.*$)/gim, '<h2 style="color: var(--text-primary); margin: 20px 0 10px 0;">$1</h2>')
-        // Bold & Italic
-        .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
-        .replace(/\*\*(.*?)\*\*/g, '<strong style="color: var(--text-primary);">$1</strong>')
-        .replace(/\*(.*?)\*/g, '<em>$1</em>')
-        // Links
-        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color: var(--gold);">$1</a>')
-        // Images
-        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; border-radius: 8px; margin: 10px 0;">')
-        // Code blocks
-        .replace(/```[\s\S]*?```/g, match => {
-            const code = match.replace(/```\w*\n?/g, '').replace(/```/g, '');
-            return `<pre style="background: var(--bg-dark); padding: 15px; border-radius: 8px; overflow-x: auto; font-family: monospace; font-size: 13px; margin: 10px 0;"><code>${code}</code></pre>`;
-        })
-        // Inline code
-        .replace(/`([^`]+)`/g, '<code style="background: var(--bg-dark); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 13px;">$1</code>')
-        // Lists
-        .replace(/^\s*[-*]\s+(.*)$/gim, '<li style="margin-left: 20px;">$1</li>')
-        // Line breaks
-        .replace(/\n\n/g, '</p><p style="margin: 10px 0;">')
-        .replace(/\n/g, '<br>');
+    try {
+        return window.LionMarkdown.renderMarkdown(text);
+    } catch (error) {
+        debugLog('Markdown rendering failed: ' + error, 'error');
+        return `<p style="white-space: pre-wrap;">${escapeHtml(text)}</p>`;
+    }
 }
 
-async function installModVersion(modId, versionId) {
-    if (serverBrowserContext) {
-        const ctx = serverBrowserContext;
-        try {
-            const result = await invoke('install_server_content', {
-                serverId: ctx.serverId,
-                projectId: modId,
-                versionId,
-            });
-            showToast(`${result.installed[0] || 'Inhalt'} zu "${ctx.serverName}" hinzugefügt`, 'success', 3000);
-            (result.warnings || []).forEach(w => showToast(w, 'warning', 5000));
-            browserResultsCache.clear();
-            if (currentModDetails) {
-                await showModDetails(modId, currentModDetails.source);
-            }
-        } catch (error) {
-            showToast('Installation fehlgeschlagen: ' + error, 'error', 4500);
-        }
-        return;
-    }
-    if (!currentProfile) {
-        alert('Please select a profile first');
-        return;
-    }
+// ── Installation aus der Detailansicht ───────────────────────────────────────
+const DETAILS_KIND_LABELS = { mods: 'Mod', resourcepacks: 'Resource Pack', shaderpacks: 'Shader Pack', modpacks: 'Modpack' };
 
+/** Inhaltsart des in der Detailansicht geöffneten Projekts (laut Modrinth-Projekttyp). */
+function getDetailsContentKind(mod) {
+    switch (String(mod?.project_type || '').toLowerCase()) {
+        case 'mod': return 'mods';
+        case 'resourcepack': return 'resourcepacks';
+        case 'shader': return 'shaderpacks';
+        case 'modpack': return 'modpacks';
+        default:
+            return ['resourcepacks', 'shaderpacks', 'modpacks'].includes(currentContentType) ? currentContentType : 'mods';
+    }
+}
+
+/** Installieren ist möglich mit offenem Profil, im Server-Kontext oder per Profilauswahl. */
+function canInstallFromDetails() {
+    return !!(currentProfile || serverBrowserContext || profiles.length > 0);
+}
+
+/** Ist das Projekt im aktuellen Profil installiert? (gleiche Regeln wie im Content Browser) */
+function isProjectInstalledInCurrentProfile(mod, kind) {
+    const keys = [mod.id, mod.slug, mod.name].map(normalizePackKey).filter(Boolean);
+    const set = kind === 'resourcepacks' ? installedResourcePackNames
+        : kind === 'shaderpacks' ? installedShaderPackNames
+            : installedModIds;
+    return keys.some(key => set.has(key));
+}
+
+function setDetailsInstallButtonInstalled() {
+    const button = document.getElementById('mod-details-install-btn');
+    if (!button) return;
+    button.innerHTML = '<i class="bi bi-check"></i> Installed';
+    button.className = 'btn btn-secondary';
+    button.disabled = true;
+    button.style.opacity = '0.6';
+    button.style.cursor = 'not-allowed';
+}
+
+async function updateDetailsInstallButtonState(mod) {
+    if (!mod) return;
+    const kind = getDetailsContentKind(mod);
+    if (kind === 'modpacks') return; // Modpacks werden als eigenes Profil installiert
+    let installed = false;
     try {
-        debugLog(`Installing mod version ${versionId} to profile ${currentProfile.id}`);
-
-        await invoke('install_mod', {
-            profileId: currentProfile.id,
-            modId: modId,
-            versionId: versionId,
-            source: currentModDetails.source
-        });
-
-        debugLog('Mod installed successfully!', 'success');
-        alert('Mod installed successfully!');
-
-        // Reload mod details to update install status
-        if (currentModDetails) {
-            await showModDetails(modId, currentModDetails.source);
+        if (serverBrowserContext) {
+            await loadServerInstalledProjectIds();
+            installed = serverInstalledProjectIds.has(mod.id);
+        } else if (currentProfile) {
+            if (kind === 'resourcepacks') await loadInstalledResourcePackNames();
+            else if (kind === 'shaderpacks') await loadInstalledShaderPackNames();
+            else await loadInstalledModIds();
+            installed = isProjectInstalledInCurrentProfile(mod, kind);
         }
     } catch (error) {
-        debugLog('Failed to install mod: ' + error, 'error');
-        alert('Failed to install mod: ' + error);
+        debugLog('Could not determine install state: ' + error, 'error');
     }
+    // Nur anwenden, wenn noch dasselbe Projekt angezeigt wird
+    if (installed && currentModDetails?.mod?.id === mod.id) setDetailsInstallButtonInstalled();
+}
+
+/** Markiert eine sichtbare Karte im Content Browser als installiert. */
+function markBrowserCardInstalled(projectId) {
+    document.querySelectorAll('.mod-card').forEach(card => {
+        if (card.dataset.modId !== projectId) return;
+        const btn = card.querySelector('.install-btn');
+        if (btn) {
+            btn.outerHTML = '<button class="btn btn-secondary" disabled style="opacity: 0.5; cursor: not-allowed;">Installiert</button>';
+        }
+        card.style.opacity = '0.7';
+        card.style.borderColor = '#555';
+        const nameRow = card.querySelector('.mod-name')?.parentElement;
+        if (nameRow && !nameRow.querySelector('[data-installed-badge]')) {
+            nameRow.insertAdjacentHTML('beforeend',
+                '<span data-installed-badge style="background: #4caf50; color: white; font-size: 10px; padding: 2px 5px; border-radius: 3px;"><i class="bi bi-check"></i> Installiert</span>');
+        }
+    });
+}
+
+/**
+ * Installiert ein Projekt aus der Detailansicht ins aktuelle Profil bzw. den aktuellen Server.
+ * versionId = null → passende Version fürs Profil, sonst genau diese Version.
+ * Rückmeldungen ausschließlich über Toasts. Gibt true bei Erfolg zurück.
+ */
+async function installProjectFromDetails(projectId, versionId = null, button = null) {
+    const mod = currentModDetails?.mod;
+    const source = currentModDetails?.source || 'modrinth';
+    const kind = getDetailsContentKind(mod);
+    const label = DETAILS_KIND_LABELS[kind] || 'Inhalt';
+    const displayName = mod?.name || label;
+
+    const setBusy = (busy) => {
+        if (!button) return;
+        if (busy) {
+            button.dataset.originalHtml = button.innerHTML;
+            button.innerHTML = '<span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span> Installing...';
+            button.disabled = true;
+        } else {
+            button.innerHTML = button.dataset.originalHtml || 'Install';
+            button.disabled = false;
+        }
+    };
+
+    // Server-Kontext: Inhalt landet im lokalen Server
+    if (serverBrowserContext) {
+        const ctx = serverBrowserContext;
+        setBusy(true);
+        try {
+            const result = await invoke('install_server_content', { serverId: ctx.serverId, projectId, versionId });
+            await loadServerInstalledProjectIds(true);
+            browserResultsCache.clear();
+            markBrowserCardInstalled(projectId);
+            showToast(`${result.installed?.[0] || displayName} zu "${ctx.serverName}" hinzugefügt`, 'success', 3500);
+            (result.warnings || []).forEach(w => showToast(w, 'warning', 5000));
+            return true;
+        } catch (error) {
+            setBusy(false);
+            showToast('Installation fehlgeschlagen: ' + error, 'error', 5000);
+            return false;
+        }
+    }
+
+    // Modpacks werden als eigenes Profil installiert
+    if (kind === 'modpacks') {
+        await installModpack(projectId, source);
+        return false;
+    }
+
+    let profile = currentProfile;
+    if (!profile) {
+        if (!profiles.length) {
+            showToast('Bitte erstelle zuerst ein Profil!', 'warning', 4000);
+            return false;
+        }
+        profile = await showProfileSelectDialog();
+        if (!profile) return false;
+    }
+
+    setBusy(true);
+    try {
+        if (kind === 'resourcepacks') {
+            await invoke('install_resourcepack', { profileId: profile.id, packId: projectId, versionId });
+        } else if (kind === 'shaderpacks') {
+            await invoke('install_shaderpack', { profileId: profile.id, packId: projectId, versionId });
+        } else {
+            await invoke('install_mod', { profileId: profile.id, modId: projectId, versionId, source });
+        }
+
+        // "Installiert"-Status überall aktualisieren (Content Browser, Profil-Listen)
+        invalidateProfileContentCaches(profile.id);
+        browserResultsCache.clear();
+        if (currentProfile && currentProfile.id === profile.id) {
+            if (kind === 'resourcepacks') await loadInstalledResourcePackNames(true);
+            else if (kind === 'shaderpacks') await loadInstalledShaderPackNames(true);
+            else await loadInstalledModIds(true);
+            markBrowserCardInstalled(projectId);
+        }
+
+        showToast(`${displayName} wurde zu "${profile.name}" hinzugefügt`, 'success', 3500);
+        return true;
+    } catch (error) {
+        debugLog(`Install from details failed: ${error}`, 'error');
+        setBusy(false);
+        showToast(`${label}-Installation fehlgeschlagen: ${error}`, 'error', 5000);
+        return false;
+    }
+}
+
+/** Großer Install-Button oben rechts: passende Version fürs Profil installieren. */
+async function installModFromDetails(projectId, button = null) {
+    const ok = await installProjectFromDetails(projectId, null, button || document.getElementById('mod-details-install-btn'));
+    if (!ok) return;
+    setDetailsInstallButtonInstalled();
+    if (currentModDetailsTab === 'versions') await switchModDetailsTab('versions');
+}
+
+/** Versionen-Tab: genau diese Version installieren. */
+async function installModVersion(modId, versionId, button = null) {
+    const ok = await installProjectFromDetails(modId, versionId, button);
+    if (!ok) return;
+    setDetailsInstallButtonInstalled();
+    await switchModDetailsTab('versions'); // "INSTALLED"-Markierung aktualisieren
 }

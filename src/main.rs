@@ -3,8 +3,6 @@
     windows_subsystem = "windows"
 )]
 
-use tauri::Manager;
-
 mod api;
 mod config;
 mod core;
@@ -27,9 +25,27 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        // Externe Links niemals im Launcher-Fenster öffnen, sondern im System-Browser
+        .plugin(gui::external_links::navigation_guard())
         .setup(|app| {
+            // Hauptfenster selbst erzeugen ("create": false in tauri.conf.json), damit
+            // Popups/neue Fenster abgefangen und im System-Browser geöffnet werden können.
+            let window_config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|w| w.label == "main")
+                .cloned()
+                .ok_or("Window config 'main' missing in tauri.conf.json")?;
+            let window = tauri::WebviewWindowBuilder::from_config(app.handle(), &window_config)?
+                .on_new_window(|url, _features| {
+                    gui::external_links::handle_new_window_request(&url);
+                    tauri::webview::NewWindowResponse::Deny
+                })
+                .build()?;
+
             // Fenster-Icon aus eingebetteten Bytes setzen (Titelleiste / Taskleiste)
-            let window = app.get_webview_window("main").unwrap();
             let icon_bytes = include_bytes!("../icons/icon.png");
             if let Ok(icon) = tauri::image::Image::from_bytes(icon_bytes) {
                 window.set_icon(icon).ok();
@@ -42,6 +58,7 @@ fn main() {
             // General
             gui::greet,
             gui::get_embedded_logo_data_url,
+            gui::external_links::open_external_url,
             gui::initialize_launcher,
             // Settings
             gui::get_config,
@@ -68,6 +85,8 @@ fn main() {
             gui::prepare_profile_download,
             gui::export_profile_share_data,
             gui::import_profile_share_data,
+            gui::content_share::export_profile_content,
+            gui::content_share::import_profile_content,
             gui::save_lion_file_with_dialog,
             gui::take_pending_lion_file,
             // Mods - Browser

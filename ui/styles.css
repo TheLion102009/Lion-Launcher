@@ -817,6 +817,29 @@ body {
     background-color: var(--bg-medium);
 }
 
+/* Aktions-Buttons (Deaktivieren / Löschen) in den Content-Listen eines Profils.
+   Feste Größe, kleiner als die Karte (Icon 44-48px) → Kartenhöhe bleibt unverändert. */
+.content-action-btn {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 15px;
+    line-height: 1;
+}
+
+.content-action-btn .bi {
+    font-size: 16px;
+}
+
+.content-action-btn.content-action-delete {
+    color: #f44336;
+    font-size: 22px;
+}
+
 /* Mod Browser */
 .mod-browser {
     display: flex;
@@ -1705,4 +1728,134 @@ button.server-address-badge:hover {
 .lion-spin {
     display: inline-block;
     animation: sessionSpin 0.9s linear infinite;
+}
+
+/* ── Projektbeschreibung (Mod-Details) ─────────────────────────────────────── */
+.project-body {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+    display: flow-root;
+}
+
+.project-body > :first-child {
+    margin-top: 0;
+}
+
+.project-body h1,
+.project-body h2,
+.project-body h3,
+.project-body h4,
+.project-body h5,
+.project-body h6 {
+    color: var(--text-primary);
+    line-height: 1.3;
+    margin: 1.2em 0 0.5em;
+}
+
+.project-body h1 { font-size: 1.6em; }
+.project-body h2 { font-size: 1.4em; }
+.project-body h3 { font-size: 1.2em; }
+.project-body h4 { font-size: 1.05em; }
+.project-body h5,
+.project-body h6 { font-size: 1em; }
+
+.project-body p {
+    margin: 0.6em 0;
+}
+
+.project-body a {
+    color: var(--gold);
+}
+
+.project-body strong {
+    color: var(--text-primary);
+}
+
+.project-body img {
+    max-width: 100%;
+    height: auto;
+    vertical-align: middle;
+    border-radius: 4px;
+}
+
+.project-body ul,
+.project-body ol {
+    margin: 0.6em 0;
+    padding-left: 1.6em;
+}
+
+.project-body li {
+    margin: 0.2em 0;
+}
+
+.project-body li > p {
+    margin: 0.3em 0;
+}
+
+.project-body blockquote {
+    margin: 0.8em 0;
+    padding: 0.4em 1em;
+    border-left: 3px solid var(--gold);
+    background: var(--bg-dark);
+    border-radius: 0 6px 6px 0;
+}
+
+.project-body code {
+    background: var(--bg-dark);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.92em;
+}
+
+.project-body pre {
+    background: var(--bg-dark);
+    padding: 12px 14px;
+    border-radius: 8px;
+    overflow-x: auto;
+}
+
+.project-body pre code {
+    padding: 0;
+    background: none;
+}
+
+.project-body hr {
+    border: none;
+    border-top: 1px solid var(--bg-light);
+    margin: 1.2em 0;
+}
+
+.project-body table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    margin: 0.8em 0;
+}
+
+.project-body th,
+.project-body td {
+    border: 1px solid var(--bg-light);
+    padding: 6px 10px;
+}
+
+.project-body th {
+    background: var(--bg-dark);
+    color: var(--text-primary);
+}
+
+.project-body details {
+    background: var(--bg-dark);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin: 0.6em 0;
+}
+
+.project-body summary {
+    cursor: pointer;
+    color: var(--text-primary);
+    font-weight: 600;
 }

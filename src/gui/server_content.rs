@@ -528,6 +528,7 @@ pub async fn search_server_content(
                 wiki_url: None,
                 discord_url: None,
                 gallery: vec![],
+                project_type: None,
             }
         })
         .collect())

@@ -89,6 +89,7 @@ impl CurseForgeClient {
                     wiki_url: None,
                     discord_url: None,
                     gallery: vec![],
+                    project_type: None,
                 }
             })
             .collect();
@@ -142,6 +143,7 @@ impl CurseForgeClient {
             wiki_url: None,
             discord_url: None,
             gallery: vec![],
+            project_type: None,
         })
     }
 }

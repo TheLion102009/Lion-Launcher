@@ -36,11 +36,18 @@ pub struct ModInfo {
     pub discord_url: Option<String>,
     #[serde(default)]
     pub gallery: Vec<GalleryImage>,
+    /// Modrinth-Projekttyp: "mod", "resourcepack", "shader", "modpack" (None = unbekannt)
+    #[serde(default)]
+    pub project_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GalleryImage {
+    /// Komprimierte Vorschau (für Thumbnails)
     pub url: String,
+    /// Bild in Originalgröße (für die Vollbildansicht)
+    #[serde(default)]
+    pub raw_url: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
