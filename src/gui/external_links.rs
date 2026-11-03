@@ -104,7 +104,9 @@ mod tests {
 
     #[test]
     fn web_links_are_external() {
-        assert!(is_openable_external(&url("https://modrinth.com/mod/sodium")));
+        assert!(is_openable_external(&url(
+            "https://modrinth.com/mod/sodium"
+        )));
         assert!(is_openable_external(&url("http://example.com/?a=1&b=2")));
         assert!(is_openable_external(&url("mailto:someone@example.com")));
         assert!(!is_internal_url(&url("https://modrinth.com/mod/sodium")));
@@ -112,8 +114,12 @@ mod tests {
 
     #[test]
     fn dangerous_schemes_are_rejected() {
-        assert!(!is_openable_external(&url("file:///C:/Windows/System32/calc.exe")));
+        assert!(!is_openable_external(&url(
+            "file:///C:/Windows/System32/calc.exe"
+        )));
         assert!(!is_openable_external(&url("javascript:alert(1)")));
-        assert!(!is_internal_url(&url("file:///C:/Windows/System32/calc.exe")));
+        assert!(!is_internal_url(&url(
+            "file:///C:/Windows/System32/calc.exe"
+        )));
     }
 }

@@ -1,20 +1,18 @@
-// Icon error handler – extracted to avoid quote issues in HTML attributes
+// ── Bild-Fallbacks ───────────────────────────────────────────────────────────
+// Bilder bekommen statt Inline-onerror-Handlern ein data-fallback-Attribut
+// (z.B. <img data-fallback="icon">). Ein zentraler Listener zeigt bei Ladefehlern den Ersatz.
 function handleIconError(el) {
-    el.onerror = null;
     el.parentElement.innerHTML = '<span style="font-size: 22px;"><i class="bi bi-box"></i></span>';
 }
 function handleIconErrorLarge(el) {
-    el.onerror = null;
     el.parentElement.innerHTML = '<div style="font-size: 48px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: var(--bg-dark); border-radius: 8px;"><i class="bi bi-box"></i></div>';
 }
 function handleIconErrorMedium(el) {
-    el.onerror = null;
     const iconClass = el.dataset.fallbackIcon || 'bi-box';
     el.parentElement.innerHTML = '<div style="font-size: 32px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;"><i class="bi ' + iconClass + '"></i></div>';
 }
 
 function handleGalleryImageError(el) {
-    el.onerror = null;
     const wrapper = el.parentElement;
     if (!wrapper) return;
     wrapper.innerHTML = `
@@ -26,7 +24,6 @@ function handleGalleryImageError(el) {
 }
 
 function handleFullscreenImageError(el) {
-    el.onerror = null;
     const container = el.parentElement;
     if (!container) return;
     container.innerHTML = `
@@ -36,6 +33,31 @@ function handleFullscreenImageError(el) {
         </div>
     `;
 }
+
+const IMAGE_FALLBACKS = {
+    // Profil-Icon → Launcher-Logo
+    logo: img => { img.src = LION_LOGO_URL; },
+    icon: handleIconError,
+    'icon-medium': handleIconErrorMedium,
+    'icon-large': handleIconErrorLarge,
+    gallery: handleGalleryImageError,
+    fullscreen: handleFullscreenImageError,
+    // Bild ausblenden und das direkt folgende Ersatz-Element anzeigen
+    sibling: img => {
+        img.style.display = 'none';
+        if (img.nextElementSibling) img.nextElementSibling.style.display = 'flex';
+    }
+};
+
+// error-Events von Bildern steigen nicht auf → in der Capture-Phase abfangen
+document.addEventListener('error', (event) => {
+    const img = event.target;
+    if (!(img instanceof HTMLImageElement) || !img.dataset.fallback) return;
+    const fallback = IMAGE_FALLBACKS[img.dataset.fallback];
+    // Nur einmal auslösen, damit ein ebenfalls fehlendes Ersatzbild keine Schleife erzeugt
+    delete img.dataset.fallback;
+    if (fallback) fallback(img);
+}, true);
 
 function normalizeMediaUrl(url) {
     if (!url) return '';
@@ -108,27 +130,27 @@ document.addEventListener('contextmenu', (e) => {
 });
 
 // Tauri 2 API Import - mit Fallback
-let invoke;
-try {
+function resolveTauriInvoke() {
     if (window.__TAURI_INTERNALS__) {
-        invoke = window.__TAURI_INTERNALS__.invoke;
         debugLog('Tauri 2 API loaded (__TAURI_INTERNALS__)', 'success');
-    } else if (window.__TAURI__ && window.__TAURI__.core) {
-        invoke = window.__TAURI__.core.invoke;
-        debugLog('Tauri 2 API loaded (__TAURI__.core)', 'success');
-    } else if (window.__TAURI__ && window.__TAURI__.tauri) {
-        invoke = window.__TAURI__.tauri.invoke;
-        debugLog('Tauri 1 API loaded (fallback)', 'success');
-    } else {
-        throw new Error('Tauri API not found!');
+        return window.__TAURI_INTERNALS__.invoke;
     }
-} catch (e) {
-    console.error('Failed to load Tauri API:', e.message);
-    invoke = async (cmd, _args) => {
+    if (window.__TAURI__?.core) {
+        debugLog('Tauri 2 API loaded (__TAURI__.core)', 'success');
+        return window.__TAURI__.core.invoke;
+    }
+    if (window.__TAURI__?.tauri) {
+        debugLog('Tauri 1 API loaded (fallback)', 'success');
+        return window.__TAURI__.tauri.invoke;
+    }
+    console.error('Failed to load Tauri API: Tauri API not found!');
+    return async (cmd) => {
         console.error('Mock invoke:', cmd);
         throw new Error('Tauri API not available');
     };
 }
+
+const invoke = resolveTauriInvoke();
 
 // ── Externe Links ────────────────────────────────────────────────────────────
 // Externe Links (Modrinth, GitHub, Discord, ...) werden IMMER im System-Browser geöffnet,
@@ -1098,7 +1120,7 @@ function renderProfiles() {
 
         // Icon: if icon_path is present (data URL), show it, otherwise the app icon
         const iconHTML = profile.icon_path
-            ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;" onerror="this.onerror=null; this.src='${LION_LOGO_URL}';">`
+            ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;" data-fallback="logo">`
             : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;">`;
 
         return `
@@ -1263,12 +1285,7 @@ async function buildLionPayload(profileId, includes, options = {}) {
     }
 
     if (includeSet.has('logs')) {
-        let latestLog = '';
-        try {
-            latestLog = await invoke('get_profile_logs', { profileId, logType: 'latest' });
-        } catch (_e) {
-            latestLog = '';
-        }
+        const latestLog = await invoke('get_profile_logs', { profileId, logType: 'latest' }).catch(() => '');
         payload.content.logs = {
             latest: latestLog ? String(latestLog).split('\n').slice(-600).join('\n') : ''
         };
@@ -1301,11 +1318,10 @@ function downloadLionPayload(payload, suggestedName) {
 async function saveLionPayloadWithDialog(payload, suggestedName) {
     const content = JSON.stringify(payload, null, 2);
     const defaultFileName = sanitizeLionName(suggestedName) + '.lion';
-    const savedPath = await invoke('save_lion_file_with_dialog', {
+    return invoke('save_lion_file_with_dialog', {
         defaultFileName,
         content
     });
-    return savedPath;
 }
 
 function createImportReport() {
@@ -1550,6 +1566,19 @@ async function refreshProfilesInBackground() {
     }
 }
 
+/** Legt das Zielprofil eines .lion-Imports an und liefert es zurück. */
+async function createProfileForImport(name, minecraftVersion, loader, loaderVersion) {
+    const knownProfileIds = new Set(profiles.map(p => p.id));
+    const profileList = await invoke('create_profile', { name, minecraftVersion, loader, loaderVersion });
+    profiles = profileList.profiles || [];
+    if (currentPage === 'profiles' && !currentProfile) renderProfiles();
+
+    const createdProfile = profiles.find(p => !knownProfileIds.has(p.id)) ||
+        profiles.find(p => p.name === name && p.minecraft_version === minecraftVersion);
+    if (!createdProfile) throw new Error('Imported profile was not created');
+    return createdProfile;
+}
+
 async function runLionImport() {
     if (!pendingLionImportPayload) return;
     const payload = pendingLionImportPayload;
@@ -1587,21 +1616,7 @@ async function runLionImport() {
         const loaderVersion = profileData.loader_version || 'latest';
         const importedIcon = profileData.icon_path || LION_LOGO_URL;
 
-        const knownProfileIds = new Set(profiles.map(p => p.id));
-        const profileList = await invoke('create_profile', {
-            name: profileName,
-            minecraftVersion: mcVersion,
-            loader,
-            loaderVersion
-        });
-        profiles = profileList.profiles || [];
-        if (currentPage === 'profiles' && !currentProfile) renderProfiles();
-
-        const createdProfile = profiles.find(p => !knownProfileIds.has(p.id)) ||
-            profiles.find(p => p.name === profileName && p.minecraft_version === mcVersion);
-        if (!createdProfile) {
-            throw new Error('Imported profile was not created');
-        }
+        const createdProfile = await createProfileForImport(profileName, mcVersion, loader, loaderVersion);
         importedProfileId = createdProfile.id;
 
         const content = payload.content || {};
@@ -1808,26 +1823,34 @@ async function openPendingLionFile() {
     }
 }
 
+/** Liest und prüft den Inhalt einer .lion-Datei. Wirft bei ungültigen Dateien. */
+function parseLionPayload(text) {
+    const payload = JSON.parse(text);
+    if (payload?.format !== 'lion-profile') {
+        throw new Error('Invalid .lion format');
+    }
+    const fileVersion = Number(payload?.version || 1);
+    if (!Number.isFinite(fileVersion) || fileVersion <= 0) {
+        throw new Error('Invalid .lion version number');
+    }
+    if (fileVersion > LION_SHARE_FORMAT_VERSION) {
+        throw new Error('This .lion file is newer than your launcher (v' + fileVersion + ')');
+    }
+    return payload;
+}
+
 function openLionImportFromText(text) {
+    let payload;
     try {
-        const payload = JSON.parse(text);
-        if (payload?.format !== 'lion-profile') {
-            throw new Error('Invalid .lion format');
-        }
-        const fileVersion = Number(payload?.version || 1);
-        if (!Number.isFinite(fileVersion) || fileVersion <= 0) {
-            throw new Error('Invalid .lion version number');
-        }
-        if (fileVersion > LION_SHARE_FORMAT_VERSION) {
-            throw new Error('This .lion file is newer than your launcher (v' + fileVersion + ')');
-        }
-        if (fileVersion < LION_SHARE_FORMAT_VERSION) {
-            showToast('Older .lion version detected. Importing with fallback.', 'info', 3200);
-        }
-        openLionImportModal(payload);
+        payload = parseLionPayload(text);
     } catch (error) {
         showToast('Could not read import file: ' + error, 'error', 4500);
+        return;
     }
+    if (Number(payload.version || 1) < LION_SHARE_FORMAT_VERSION) {
+        showToast('Older .lion version detected. Importing with fallback.', 'info', 3200);
+    }
+    openLionImportModal(payload);
 }
 
 // RAM slider helper functions
@@ -1934,7 +1957,7 @@ async function openProfileSettings(profileId) {
                 <!-- Profile picture -->
                 <div style="display: flex; gap: 15px; align-items: center; background: var(--bg-light); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
                     <div id="profile-icon-preview" style="width: 60px; height: 60px; background: var(--bg-medium); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 30px; overflow: hidden;">
-                        ${profile.icon_path ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.onerror=null; this.src='${LION_LOGO_URL}';">` : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover;">`}
+                        ${profile.icon_path ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover;" data-fallback="logo">` : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover;">`}
                     </div>
                     <div style="flex: 1;">
                         <input type="file" id="profile-icon-input" accept="image/*" onchange="previewProfileIcon(event)" style="display: none;">
@@ -1996,7 +2019,7 @@ async function openProfileSettings(profileId) {
                     <div style="width: 100%; position: relative; height: 20px; margin: 0 10px;">
                         <!-- Progress bar below the slider -->
                         <div style="position: absolute; width: calc(100% - 20px); height: 8px; background: var(--bg-light); border-radius: 4px; top: 6px; left: 0; right: 0; pointer-events: none;">
-                            <div id="memory-slider-progress" style="height: 100%; background: var(--gold); border-radius: 4px; width: 0%; transition: width 0.1s ease;"></div>
+                            <div id="memory-slider-progress" style="height: 100%; background: var(--gold); border-radius: 4px; width: 0; transition: width 0.1s ease;"></div>
                         </div>
                         <!-- Slider -->
                         <input type="range" 
@@ -2585,7 +2608,7 @@ function showProfileDetails(profileId, view = {}) {
 
     // Icon: if icon_path is present (data URL), show it, otherwise the app icon
     const iconHTML = profile.icon_path
-        ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover; border-radius: 12px;" onerror="this.onerror=null; this.src='${LION_LOGO_URL}';">`
+        ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover; border-radius: 12px;" data-fallback="logo">`
         : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover; border-radius: 12px;">`;
 
     const loaderLabel = SERVER_SOFTWARE[profile.loader.loader]?.label || profile.loader.loader;
@@ -3096,7 +3119,7 @@ function renderProfileTabContent(tabName, profile) {
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <h3 style="color: var(--gold); margin: 0;"><i class="bi bi-display"></i> Server</h3>
                     <div style="display: flex; gap: 8px;">
-                        <button class="btn btn-secondary" onclick="showAddServerModal('${profile.id}')" 
+                        <button class="btn btn-secondary" onclick="showAddServerModal()"
                                 style="padding: 8px 12px; font-size: 12px; border: 2px solid var(--gold); color: var(--gold); background: var(--bg-light);"
                                 onmouseover="this.style.background='var(--gold)'; this.style.color='var(--bg-dark)';"
                                 onmouseout="this.style.background='var(--bg-light)'; this.style.color='var(--gold)';">
@@ -3640,7 +3663,7 @@ function renderLogContent(targetElement, logs) {
 
     const formattedLogs = logs.split('\n').map((line, index) => {
         if (!line.trim()) return '';
-        const timeMatch = line.match(/^\[(\d{2}:\d{2}:\d{2})\]/);
+        const timeMatch = line.match(/^\[(\d{2}:\d{2}:\d{2})]/);
         let timeStamp = '';
         let restOfLine = line;
         if (timeMatch) {
@@ -3663,9 +3686,9 @@ function renderLogContent(targetElement, logs) {
             levelBadge = '<span style="background:#616161;color:white;padding:1px 5px;border-radius:3px;font-size:9px;margin-right:6px;">DEBUG</span>';
         }
         restOfLine = restOfLine
-            .replace(/\[INFO\]|\[WARN\]|\[ERROR\]|\[DEBUG\]/g, '')
-            .replace(/\[main\/INFO\]|\[main\/WARN\]|\[main\/ERROR\]/g, '')
-            .replace(/\[Render thread\/INFO\]|\[Render thread\/WARN\]|\[Render thread\/ERROR\]/g, '')
+            .replace(/\[(?:INFO|WARN|ERROR|DEBUG)]/g, '')
+            .replace(/\[main\/(?:INFO|WARN|ERROR)]/g, '')
+            .replace(/\[Render thread\/(?:INFO|WARN|ERROR)]/g, '')
             .trim();
         const timeDisplay = timeStamp
             ? `<span style="color:#888;font-weight:500;min-width:70px;display:inline-block;">${timeStamp}</span>`
@@ -3950,9 +3973,8 @@ function renderInstalledModsList(mods, profileId) {
         const updateStatus = getModUpdateStatus(profileId, mod.filename);
 
         return `
-        <div class="installed-mod-card" data-filename="${file}" data-mod-id="${escapeAttr(updateStatus?.project_id || mod.mod_id || '')}"
-             onclick="if(!event.target.closest('input, button')) { showModDetailsFromProfile(this.dataset.modId, 'modrinth'); }"
-             style="background: var(--bg-dark); border: 1px solid ${mod.disabled ? '#666' : 'var(--bg-light)'}; border-radius: 8px; padding: 12px; display: flex; align-items: center; gap: 12px; ${mod.disabled ? 'opacity: 0.6;' : ''} transition: all 0.2s; cursor: pointer;">
+        <div class="installed-mod-card${mod.disabled ? ' is-disabled' : ''}" data-filename="${file}" data-mod-id="${escapeAttr(updateStatus?.project_id || mod.mod_id || '')}"
+             onclick="if(!event.target.closest('input, button')) { showModDetailsFromProfile(this.dataset.modId, 'modrinth'); }">
             <!-- Checkbox -->
             <input type="checkbox" class="mod-checkbox" data-filename="${file}"
                    onchange="toggleModSelection('${jsFile}')"
@@ -3962,7 +3984,7 @@ function renderInstalledModsList(mods, profileId) {
             <!-- Icon -->
             <div class="mod-card-icon" style="width: 44px; height: 44px; background: var(--bg-light); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden;">
                 ${iconUrl
-                ? `<img src="${escapeAttr(iconUrl)}" style="width: 100%; height: 100%; object-fit: cover;" onerror="handleIconError(this)">`
+                ? `<img alt="" src="${escapeAttr(iconUrl)}" style="width: 100%; height: 100%; object-fit: cover;" data-fallback="icon">`
                 : `<span style="font-size: 22px;"><i class="bi bi-box"></i></span>`
             }
             </div>
@@ -4289,7 +4311,7 @@ function applyModUpdateStatusToCard(card, status, profileId) {
     const iconEl = card.querySelector('.mod-card-icon');
     if (iconEl && status.icon_url && !iconEl.querySelector('img') && iconEl.dataset.iconTried !== status.icon_url) {
         iconEl.dataset.iconTried = status.icon_url;
-        iconEl.innerHTML = `<img src="${escapeAttr(status.icon_url)}" style="width: 100%; height: 100%; object-fit: cover;" onerror="handleIconError(this)">`;
+        iconEl.innerHTML = `<img alt="" src="${escapeAttr(status.icon_url)}" style="width: 100%; height: 100%; object-fit: cover;" data-fallback="icon">`;
     }
 }
 
@@ -4608,7 +4630,7 @@ async function checkForModUpdates(profileId) {
                                        onchange="toggleModUpdateSelection(this.dataset.filename)"
                                        style="width: 17px; height: 17px; cursor: pointer; accent-color: var(--gold); flex-shrink: 0;">
                                 <div style="width: 40px; height: 40px; background: var(--bg-dark); border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;">
-                                    ${u.display_icon ? `<img src="${escapeAttr(u.display_icon)}" style="width: 100%; height: 100%; object-fit: cover;" onerror="handleIconError(this)">` : '<span style="font-size: 18px;"><i class="bi bi-box"></i></span>'}
+                                    ${u.display_icon ? `<img alt="" src="${escapeAttr(u.display_icon)}" style="width: 100%; height: 100%; object-fit: cover;" data-fallback="icon">` : '<span style="font-size: 18px;"><i class="bi bi-box"></i></span>'}
                                 </div>
                                 <div style="flex: 1; min-width: 0;">
                                     <p style="margin: 0; color: var(--text-primary); font-size: 13px;">${escapeHtml(u.display_name)}</p>
@@ -4858,11 +4880,11 @@ function renderInstalledResourcePacks(packs, profileId) {
         return;
     }
 
-    const packsHTML = packs.map(pack => {
+    list.innerHTML = packs.map(pack => {
         const sizeStr = pack.size > 0 ? `${(pack.size / 1024 / 1024).toFixed(2)} MB` : '';
         const iconSrc = resolvePackIconSrc(pack);
         const iconHTML = iconSrc
-            ? `<img src="${escapeAttr(iconSrc)}" style="width: 48px; height: 48px; border-radius: 4px; object-fit: cover;" onerror="this.onerror=null; this.style.display='none'; this.nextElementSibling.style.display='flex';">
+            ? `<img alt="" src="${escapeAttr(iconSrc)}" style="width: 48px; height: 48px; border-radius: 4px; object-fit: cover;" data-fallback="sibling">
                <div style="display: none; width: 48px; height: 48px; font-size: 32px; align-items: center; justify-content: center;"><i class="bi bi-palette"></i></div>`
             : `<div style="font-size: 32px;"><i class="bi bi-palette"></i></div>`;
 
@@ -4879,15 +4901,13 @@ function renderInstalledResourcePacks(packs, profileId) {
                         ${pack.is_folder ? '<i class="bi bi-folder"></i> Ordner' : '· ' + sizeStr}
                     </div>
                 </div>
-                <button class="btn btn-secondary content-action-btn content-action-delete" onclick="deleteResourcePack('${profileId}', '${pack.name.replace(/'/g, "\\'")}', ${pack.is_folder})"
+                <button class="btn btn-secondary content-action-btn content-action-delete" onclick="deleteResourcePack('${profileId}', '${pack.name.replace(/'/g, "\\'")}')"
                         title="Löschen">
                     <i class="bi bi-trash"></i>
                 </button>
             </div>
         `;
     }).join('');
-
-    list.innerHTML = packsHTML;
 }
 
 async function refreshResourcePacks(profileId) {
@@ -4896,7 +4916,7 @@ async function refreshResourcePacks(profileId) {
     showToast('Resource Packs aktualisiert', 'success', 2000);
 }
 
-async function deleteResourcePack(profileId, name, isFolder) {
+async function deleteResourcePack(profileId, name) {
     debugLog('Deleting resource pack: ' + name, 'info');
 
     try {
@@ -5044,11 +5064,11 @@ function renderInstalledShaderPacks(packs, profileId) {
         return;
     }
 
-    const packsHTML = packs.map(pack => {
+    list.innerHTML = packs.map(pack => {
         const sizeStr = pack.size > 0 ? `${(pack.size / 1024 / 1024).toFixed(2)} MB` : '';
         const iconSrc = resolvePackIconSrc(pack);
         const iconHTML = iconSrc
-            ? `<img src="${escapeAttr(iconSrc)}" style="width: 48px; height: 48px; border-radius: 4px; object-fit: cover;" onerror="this.onerror=null; this.style.display='none'; this.nextElementSibling.style.display='flex';">
+            ? `<img alt="" src="${escapeAttr(iconSrc)}" style="width: 48px; height: 48px; border-radius: 4px; object-fit: cover;" data-fallback="sibling">
                <div style="display: none; width: 48px; height: 48px; font-size: 32px; align-items: center; justify-content: center;"><i class="bi bi-stars"></i></div>`
             : `<i class="bi bi-stars"></i>`;
 
@@ -5072,8 +5092,6 @@ function renderInstalledShaderPacks(packs, profileId) {
             </div>
         `;
     }).join('');
-
-    list.innerHTML = packsHTML;
 }
 
 async function refreshShaderPacks(profileId) {
@@ -5123,7 +5141,7 @@ async function loadWorlds(profileId) {
             return;
         }
 
-        const worldsHTML = worlds.map(world => {
+        list.innerHTML = worlds.map(world => {
             // Formatiere letzte Spielzeit
             const lastPlayed = world.last_played > 0
                 ? formatTimestamp(world.last_played)
@@ -5134,7 +5152,7 @@ async function loadWorlds(profileId) {
 
             // Icon oder Fallback
             const iconHtml = world.icon_base64
-                ? `<img src="${world.icon_base64}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">`
+                ? `<img alt="" src="${world.icon_base64}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">`
                 : `<div style="font-size: 32px;"><i class="bi bi-globe"></i></div>`;
 
             return `
@@ -5159,8 +5177,6 @@ async function loadWorlds(profileId) {
                 </div>
             `;
         }).join('');
-
-        list.innerHTML = worldsHTML;
 
     } catch (error) {
         debugLog('Failed to load worlds: ' + error, 'error');
@@ -5228,10 +5244,10 @@ async function loadServers(profileId) {
             return;
         }
 
-        const serversHTML = servers.map(server => {
+        list.innerHTML = servers.map(server => {
             // Icon oder Fallback
             const iconHtml = server.icon_base64
-                ? `<img src="${server.icon_base64}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px; image-rendering: pixelated;">`
+                ? `<img alt="" src="${server.icon_base64}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px; image-rendering: pixelated;">`
                 : `<div style="font-size: 28px; color: var(--text-secondary);"><i class="bi bi-display"></i></div>`;
 
             // Spieleranzahl (grün, rechts)
@@ -5240,7 +5256,7 @@ async function loadServers(profileId) {
                 : '';
 
             // MOTD: HTML-Version mit Minecraft-Farben oder Fallback auf clean/IP
-            let motdHtml = '';
+            let motdHtml;
             if (server.motd_html && server.motd_html.length > 0) {
                 // Jede Zeile als eigene Zeile rendern (wie in Minecraft)
                 motdHtml = server.motd_html.map(line =>
@@ -5287,8 +5303,6 @@ async function loadServers(profileId) {
             `;
         }).join('');
 
-        list.innerHTML = serversHTML;
-
     } catch (error) {
         debugLog('Failed to load servers: ' + error, 'error');
         list.innerHTML = `
@@ -5304,7 +5318,7 @@ async function refreshServers(profileId) {
     showToast('Server aktualisiert', 'success', 2000);
 }
 
-function showAddServerModal(profileId) {
+function showAddServerModal() {
     const modal = document.getElementById('add-server-modal');
     if (modal) {
         modal.classList.add('active');
@@ -6795,7 +6809,7 @@ function renderServerInstalledContent(items, serverId, isFiltered = false) {
         const clickable = !!item.project_id;
         const checked = selectedServerContent.has(item.filename) ? 'checked' : '';
         const icon = item.icon_url
-            ? `<img src="${escapeAttr(item.icon_url)}" style="width: 100%; height: 100%; object-fit: cover;" onerror="handleIconError(this)">`
+            ? `<img alt="" src="${escapeAttr(item.icon_url)}" style="width: 100%; height: 100%; object-fit: cover;" data-fallback="icon">`
             : `<span style="font-size: 22px;"><i class="bi ${defaultIcon}"></i></span>`;
 
         return `
@@ -7858,7 +7872,7 @@ function previewProfileIcon(event) {
         selectedProfileIcon = e.target.result;
         const preview = document.getElementById('profile-icon-preview');
         if (preview) {
-            preview.innerHTML = `<img src="${e.target.result}" style="width: 100%; height: 100%; object-fit: cover;">`;
+            preview.innerHTML = `<img alt="" src="${e.target.result}" style="width: 100%; height: 100%; object-fit: cover;">`;
         }
     };
     reader.readAsDataURL(file);
@@ -8856,11 +8870,10 @@ async function loadModrinthCategories() {
 
                     const text = document.createElement('span');
                     // Formatiere den Namen schöner
-                    const formattedName = cat.name
+                    text.textContent = cat.name
                         .split('-')
                         .map(word => word.charAt(0).toUpperCase() + word.slice(1))
                         .join(' ');
-                    text.textContent = formattedName;
                     text.style.cssText = `
                         color: var(--text-primary);
                         flex: 1;
@@ -9041,7 +9054,7 @@ async function searchResourcePacks(query, page = 0) {
     }
 }
 
-async function installResourcePack(packId, source) {
+async function installResourcePack(packId) {
     let profile = currentProfile;
 
     if (!profile) {
@@ -9087,7 +9100,7 @@ async function installResourcePack(packId, source) {
     }
 }
 
-async function installShaderPack(packId, source) {
+async function installShaderPack(packId) {
     let profile = currentProfile;
 
     if (!profile) {
@@ -9223,7 +9236,7 @@ async function searchShaderPacks(query, page = 0) {
     }
 }
 
-async function installModpack(packId, source) {
+async function installModpack(packId) {
     // Suche den Modpack-Namen aus der Mod-Card im DOM
     let packName = packId;
     const card = document.querySelector(`[data-mod-id="${packId}"]`);
@@ -9256,7 +9269,7 @@ async function installModpack(packId, source) {
             </div>
 
             <div style="background: var(--bg-light); border-radius: 8px; height: 8px; overflow: hidden; margin-bottom: 25px;">
-                <div id="mp-progress-bar" style="background: var(--gold); height: 100%; width: 0%;
+                <div id="mp-progress-bar" style="background: var(--gold); height: 100%; width: 0;
                      transition: width 0.4s ease; border-radius: 8px;"></div>
             </div>
 
@@ -9701,7 +9714,7 @@ function renderMods(mods, page = 0) {
             iconHTML = `<img src="${escapeAttr(mod.icon_url)}" alt="${escapeAttr(mod.name)}" 
                              style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;"
                              data-fallback-icon="${fallbackIconClass}"
-                             onerror="handleIconErrorMedium(this)">`;
+                             data-fallback="icon-medium">`;
         } else {
             iconHTML = `<div style="font-size: 32px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">${defaultIcon}</div>`;
         }
@@ -10169,6 +10182,37 @@ function setAccentColor(color, save = true) {
     }
 }
 
+/** Lädt die Launcher-Konfiguration; wirft, wenn sie unvollständig ist. */
+async function loadGameConfig() {
+    const config = await invoke('get_config');
+    if (!config || !config.game_settings) {
+        throw new Error('Config konnte nicht geladen werden');
+    }
+    return config;
+}
+
+/**
+ * Ermittelt den zu speichernden Java-Pfad:
+ * eigener Pfad > Pfad der gewählten Runtime > automatisch bereitgestellte Runtime.
+ */
+async function resolveJavaPathForSettings(customJavaPath, selectedRuntimeValue) {
+    if (customJavaPath) return customJavaPath;
+
+    const selectedOption = javaRuntimeOptionsCache.find(o => String(o.value) === selectedRuntimeValue);
+    if (selectedOption?.path) return selectedOption.path;
+
+    let targetMajor = latestStableJavaMajor;
+    if (selectedOption) {
+        targetMajor = Number(selectedOption.major) || latestStableJavaMajor;
+    } else if (selectedRuntimeValue !== 'auto') {
+        const parsed = parseInt(selectedRuntimeValue, 10);
+        if (Number.isFinite(parsed) && parsed > 0) targetMajor = parsed;
+    }
+
+    showToast(`Preparing Java ${targetMajor}...`, 'info', 2500);
+    return invoke('ensure_java_runtime_for_settings', { major: targetMajor });
+}
+
 const saveSettingsBtn = document.getElementById('save-settings-btn');
 if (saveSettingsBtn) {
     saveSettingsBtn.addEventListener('click', async () => {
@@ -10183,38 +10227,14 @@ if (saveSettingsBtn) {
             const memory = Math.max(512, parseInt(memoryInput.value || '4096', 10) || 4096);
             localStorage.setItem('memory', String(memory));
 
-            let config = await invoke('get_config');
-            if (!config || !config.game_settings) {
-                throw new Error('Config konnte nicht geladen werden');
-            }
-
-            const customJavaPath = customJavaInput?.value.trim() || '';
-            let javaPathToSave = customJavaPath;
+            const config = await loadGameConfig();
 
             const selectedRuntimeValue = javaRuntimeSelect?.value || 'auto';
             localStorage.setItem('preferredJavaRuntime', selectedRuntimeValue);
-
-            if (!javaPathToSave) {
-                const selectedOption = javaRuntimeOptionsCache.find(o => String(o.value) === selectedRuntimeValue);
-                let targetMajor = latestStableJavaMajor;
-
-                if (selectedOption) {
-                    targetMajor = Number(selectedOption.major) || latestStableJavaMajor;
-                    if (selectedOption.path) {
-                        javaPathToSave = selectedOption.path;
-                    }
-                } else if (selectedRuntimeValue !== 'auto') {
-                    const parsed = parseInt(selectedRuntimeValue, 10);
-                    if (Number.isFinite(parsed) && parsed > 0) {
-                        targetMajor = parsed;
-                    }
-                }
-
-                if (!javaPathToSave) {
-                    showToast(`Preparing Java ${targetMajor}...`, 'info', 2500);
-                    javaPathToSave = await invoke('ensure_java_runtime_for_settings', { major: targetMajor });
-                }
-            }
+            const javaPathToSave = await resolveJavaPathForSettings(
+                customJavaInput?.value.trim() || '',
+                selectedRuntimeValue
+            );
 
             config.game_settings.memory_mb = memory;
             config.game_settings.java_path = javaPathToSave || null;
@@ -10295,7 +10315,7 @@ async function updateAccountsList() {
         if (activeAccount && activeDisplay) {
             activeDisplay.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 15px;">
-                    <img src="${activeAccount.head_url}" style="width: 64px; height: 64px; border-radius: 8px; image-rendering: pixelated;">
+                    <img alt="" src="${activeAccount.head_url}" style="width: 64px; height: 64px; border-radius: 8px; image-rendering: pixelated;">
                     <div style="flex: 1;">
                         <p style="margin: 0; color: var(--text-primary); font-weight: bold; font-size: 18px;">${activeAccount.username}</p>
                         <p style="margin: 5px 0 0 0; color: var(--text-secondary); font-size: 12px;">
@@ -10324,7 +10344,7 @@ async function updateAccountsList() {
                 <h4 style="color: var(--text-secondary); margin: 0 0 10px 0; font-size: 14px;">Weitere Accounts</h4>
                 ${otherAccounts.map(acc => `
                     <div style="display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--bg-dark); border-radius: 8px; margin-bottom: 8px;">
-                        <img src="${acc.head_url}" style="width: 32px; height: 32px; border-radius: 4px; image-rendering: pixelated;">
+                        <img alt="" src="${acc.head_url}" style="width: 32px; height: 32px; border-radius: 4px; image-rendering: pixelated;">
                         <span style="flex: 1; color: var(--text-primary);">${acc.username}</span>
                         <span style="color: var(--text-secondary); font-size: 11px;">${acc.is_microsoft ? '<i class="bi bi-shield-lock"></i>' : '<i class="bi bi-person"></i>'}</span>
                         <button class="btn btn-secondary" onclick="switchAccount('${acc.uuid}')" style="padding: 5px 10px; font-size: 11px;">
@@ -11059,20 +11079,17 @@ function renderSavedSkins() {
 
     const hasMsAccount = activeAccount && activeAccount.is_microsoft;
 
-    container.innerHTML = savedSkins.map((skin, index) => {
-        const showApply = hasMsAccount;
-        return `
+    container.innerHTML = savedSkins.map((skin, index) => `
         <div class="skin-thumbnail">
             <div onclick="showSavedSkin('${skin.uuid}', '${skin.name}', '${skin.filename || ''}')">
                 <img src="https://mc-heads.net/avatar/${skin.uuid}/48" alt="${skin.name}">
                 <p class="skin-name">${skin.name}</p>
             </div>
-            ${showApply ? `<button class="skin-action-btn" onclick="event.stopPropagation(); quickApplySavedSkin(${index})" 
+            ${hasMsAccount ? `<button class="skin-action-btn" onclick="event.stopPropagation(); quickApplySavedSkin(${index})"
                 title="Skin equippen">✨</button>` : ''}
-            <button class="skin-action-btn skin-delete-btn" onclick="event.stopPropagation(); removeSavedSkin(${index})" 
+            <button class="skin-action-btn skin-delete-btn" onclick="event.stopPropagation(); removeSavedSkin(${index})"
                 title="Aus Gespeichert entfernen" style="top: -4px; left: -4px; right: auto;">🗑</button>
-        </div>`;
-    }).join('');
+        </div>`).join('');
 }
 
 async function showSavedSkin(uuid, name, filename) {
@@ -11427,7 +11444,7 @@ async function renderModDetails(mod, versions) {
         return 0;
     });
 
-    const html = `
+    content.innerHTML = `
         <!-- Header Section -->
         <div style="display: grid; grid-template-columns: 80px 1fr auto; gap: 20px; margin-bottom: 20px; background: var(--bg-medium); padding: 20px; border-radius: 12px;">
             <!-- Mod Icon -->
@@ -11435,7 +11452,7 @@ async function renderModDetails(mod, versions) {
                 ${mod.icon_url ? 
                     `<img src="${escapeAttr(mod.icon_url)}" alt="${escapeAttr(mod.name)}" 
                          style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;"
-                         onerror="handleIconErrorLarge(this)">` :
+                         data-fallback="icon-large">` :
                     `<div style="font-size: 48px; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: var(--bg-dark); border-radius: 8px;"><i class="bi bi-box"></i></div>`
                 }
             </div>
@@ -11518,14 +11535,11 @@ async function renderModDetails(mod, versions) {
         </div>
     `;
 
-    content.innerHTML = html;
-
     // Install-Button als "Installed" markieren, falls schon im Profil/Server vorhanden
     updateDetailsInstallButtonState(mod);
 
     // Rendere Tab-Content separat (async)
-    const tabContent = await renderModDetailsTabContent(mod, versions, allLoaders, sortedMcVersions);
-    document.getElementById('mod-details-tab-content').innerHTML = tabContent;
+    document.getElementById('mod-details-tab-content').innerHTML = await renderModDetailsTabContent(mod, versions, allLoaders, sortedMcVersions);
 }
 
 async function renderModDetailsTabContent(mod, versions, allLoaders, sortedMcVersions) {
@@ -11817,7 +11831,7 @@ function renderGalleryTab(mod) {
                                  style="width: 100%; height: 180px; object-fit: cover; display: block; transition: transform 0.3s;"
                                  onmouseover="this.style.transform='scale(1.05)'"
                                  onmouseout="this.style.transform='scale(1)'"
-                                 onerror="handleGalleryImageError(this)">
+                                 data-fallback="gallery">
                             ${title ? `
                                 <div style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.8)); padding: 10px;">
                                     <span style="color: white; font-size: 12px;">${title}</span>
@@ -11868,8 +11882,7 @@ async function switchModDetailsTab(tab) {
         const tabContent = document.getElementById('mod-details-tab-content');
         if (tabContent) {
             tabContent.innerHTML = '<div class="loading"><div class="spinner" style="margin: 20px auto;"></div></div>';
-            const content = await renderModDetailsTabContent(mod, versions, allLoaders, sortedMcVersions);
-            tabContent.innerHTML = content;
+            tabContent.innerHTML = await renderModDetailsTabContent(mod, versions, allLoaders, sortedMcVersions);
 
             // Setze Dropdown-Werte explizit nach dem Rendern (für Versions-Tab)
             if (tab === 'versions') {
@@ -11941,7 +11954,7 @@ function openGalleryImage(url, index, previewUrl = '') {
                  alt="Gallery image ${index + 1}"
                  referrerpolicy="no-referrer"
                  style="width:100%;height:100%;object-fit:contain;border-radius:8px;"
-                 onerror="handleFullscreenImageError(this)">
+                 data-fallback="fullscreen">
         </div>
     `;
 
@@ -12111,7 +12124,7 @@ async function installProjectFromDetails(projectId, versionId = null, button = n
 
     // Modpacks werden als eigenes Profil installiert
     if (kind === 'modpacks') {
-        await installModpack(projectId, source);
+        await installModpack(projectId);
         return false;
     }
 

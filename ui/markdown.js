@@ -41,7 +41,7 @@
     const FENCE_RE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
     const ATX_HEADING_RE = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
     const TABLE_DELIMITER_RE = /^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
-    const REF_DEF_RE = /^ {0,3}\[([^\]]+)\]:[ \t]*<?([^\s>]+)>?(?:[ \t]+(?:"([^"]*)"|'([^']*)'|\(([^)]*)\)))?[ \t]*$/;
+    const REF_DEF_RE = /^ {0,3}\[([^\]]+)]:[ \t]*<?([^\s>]+)>?(?:[ \t]+(?:"([^"]*)"|'([^']*)'|\(([^)]*)\)))?[ \t]*$/;
 
     function htmlBlockType(line, inParagraph) {
         if (!/^ {0,3}</.test(line)) return null;
@@ -281,6 +281,9 @@
                 continue;
             }
 
+            // Eine Liste beginnt immer mit einem Eintrag – ohne ihn gibt es nichts fortzusetzen
+            if (!current) break;
+
             if (indent >= current.contentIndent) {
                 const content = line.slice(current.contentIndent);
                 if (pendingBlank && !isListItem(content)) current.innerBlank = true;
@@ -306,7 +309,7 @@
         const body = items.map(item => {
             let content = parseBlocks(item.lines, ctx, !loose);
             // GFM-Aufgabenliste: - [ ] / - [x]
-            content = content.replace(/^(<p>)?\[([ xX])\][ \t]+/, (_, p, mark) =>
+            content = content.replace(/^(<p>)?\[([ xX])][ \t]+/, (_, p, mark) =>
                 (p || '') + (mark === ' ' ? '☐ ' : '☑ '));
             return `<li>${content}</li>`;
         }).join('');

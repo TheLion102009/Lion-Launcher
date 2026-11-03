@@ -817,6 +817,24 @@ body {
     background-color: var(--bg-medium);
 }
 
+/* Karte einer installierten Mod im Content-Tab eines Profils */
+.installed-mod-card {
+    background: var(--bg-dark);
+    border: 1px solid var(--bg-light);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.installed-mod-card.is-disabled {
+    border-color: #666;
+    opacity: 0.6;
+}
+
 /* Aktions-Buttons (Deaktivieren / Löschen) in den Content-Listen eines Profils.
    Feste Größe, kleiner als die Karte (Icon 44-48px) → Kartenhöhe bleibt unverändert. */
 .content-action-btn {
@@ -1614,17 +1632,7 @@ button.server-address-badge:hover {
     gap: 15px;
 }
 
-.server-content-card {
-    background: var(--bg-dark);
-    border: 1px solid var(--bg-light);
-    border-radius: 8px;
-    padding: 12px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    transition: all 0.2s;
-}
-
+/* Grundlayout kommt von .installed-mod-card (beide Klassen sind gesetzt) */
 .server-content-card:hover {
     border-color: var(--gold);
 }

@@ -5,8 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lion Launcher</title>
     <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/skinview3d@3.4.1/bundles/skinview3d.bundle.js"></script>
+    <!-- Lokal gebündelt (funktioniert auch offline): bootstrap-icons 1.11.3, skinview3d 3.4.1 (beide MIT) -->
+    <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+    <script src="vendor/skinview3d/skinview3d.bundle.js"></script>
 </head>
 <body>
     <div class="container">
@@ -102,7 +103,7 @@
                     <h1 data-i18n="nav_content_browser">Content Browser</h1>
                 </div>
                 <div class="content">
-                    <input type="text" class="search-bar" id="mod-search" data-i18n-placeholder="search_placeholder" placeholder="Search content...">
+                    <input type="text" class="search-bar" id="mod-search" aria-label="Search content" data-i18n-placeholder="search_placeholder" placeholder="Search content...">
 
                     <!-- Content Categories -->
                     <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
@@ -144,7 +145,7 @@
                                     <span class="collapse-icon" id="collapse-sort" style="transition: transform 0.2s;">▼</span>
                                 </h3>
                                 <div id="filter-sort-content" class="filter-content">
-                                    <select id="filter-sort" class="filter-option" style="width: 100%; padding: 10px; background: var(--bg-dark); border: 2px solid var(--bg-light); border-radius: 8px; color: #666666; cursor: pointer;">
+                                    <select id="filter-sort" class="filter-option" aria-label="Sort by" style="width: 100%; padding: 10px; background: var(--bg-dark); border: 2px solid var(--bg-light); border-radius: 8px; color: #666666; cursor: pointer;">
                                         <option value="relevance" data-i18n-opt="sort_relevance">Relevance</option>
                                         <option value="downloads" selected data-i18n-opt="sort_downloads">Downloads</option>
                                         <option value="updated" data-i18n-opt="sort_updated">Recently Updated</option>
@@ -160,7 +161,7 @@
                                     <span class="collapse-icon" id="collapse-version" style="transition: transform 0.2s;">▼</span>
                                 </h3>
                                 <div id="filter-version-content" class="filter-content">
-                                    <select id="filter-version" class="filter-option" style="width: 100%; border: none;">
+                                    <select id="filter-version" class="filter-option" aria-label="Minecraft version" style="width: 100%; border: none;">
                                         <option value="" data-i18n-opt="all_versions">All Versions</option>
                                     </select>
                                     <label style="display: block; margin-top: 10px; font-size: 12px; cursor: pointer;">
@@ -177,7 +178,7 @@
                                     <span class="collapse-icon" id="collapse-loader" style="transition: transform 0.2s;">▼</span>
                                 </h3>
                                 <div id="filter-loader-content" class="filter-content">
-                                    <select id="filter-loader" class="filter-option" style="width: 100%; padding: 10px; background: var(--bg-dark); border: 2px solid var(--bg-light); border-radius: 8px; color: #666666; cursor: pointer;">
+                                    <select id="filter-loader" class="filter-option" aria-label="Mod loader" style="width: 100%; padding: 10px; background: var(--bg-dark); border: 2px solid var(--bg-light); border-radius: 8px; color: #666666; cursor: pointer;">
                                         <option value="" data-i18n-opt="all_loaders">All Loaders</option>
                                         <option value="fabric">Fabric</option>
                                         <option value="forge">Forge</option>
@@ -302,7 +303,7 @@
                             <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px;">
                                 <h3 style="color: var(--gold); margin: 0 0 15px 0;" data-i18n="current_skin">Aktueller Skin</h3>
                                 <div id="current-skin-info" style="display: flex; align-items: center; gap: 15px;">
-                                    <img id="current-skin-head" src="https://mc-heads.net/avatar/MHF_Steve/64" 
+                                    <img id="current-skin-head" alt="Current skin" src="https://mc-heads.net/avatar/MHF_Steve/64" 
                                          style="width: 64px; height: 64px; border-radius: 8px; image-rendering: pixelated;">
                                     <div>
                                         <p id="current-skin-name" style="color: var(--text-primary); font-weight: bold;" data-i18n="not_logged_in_skin">Nicht angemeldet</p>
@@ -315,7 +316,7 @@
                             <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; flex: 1; overflow: hidden; display: flex; flex-direction: column;">
                                 <h3 style="color: var(--gold); margin: 0 0 15px 0;" data-i18n="player_skin_view">Spieler-Skin anzeigen</h3>
                                 <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                                    <input type="text" id="skin-search-input" data-i18n-placeholder="enter_player_name" placeholder="Spielername eingeben..."
+                                    <input type="text" id="skin-search-input" aria-label="Player name" data-i18n-placeholder="enter_player_name" placeholder="Spielername eingeben..."
                                            style="flex: 1; padding: 12px; background: var(--bg-dark); border: 2px solid var(--bg-light); border-radius: 8px; color: var(--text-primary);"
                                            onkeydown="if(event.key==='Enter')searchPlayerSkin()">
                                     <button class="btn" onclick="searchPlayerSkin()" data-i18n="btn_show">Anzeigen</button>
@@ -429,11 +430,11 @@
                     <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px;">
                         <h3 style="color: var(--gold); margin: 0 0 20px 0;" data-i18n="general">⚙️ Allgemein</h3>
                         <div class="form-group">
-                            <label data-i18n="memory_label">Memory (MB)</label>
+                            <label for="settings-memory" data-i18n="memory_label">Memory (MB)</label>
                             <input type="number" id="settings-memory" placeholder="4096">
                         </div>
                         <div class="form-group">
-                            <label>Java Runtime</label>
+                            <label for="settings-java-runtime">Java Runtime</label>
                             <select id="settings-java-runtime">
                                 <option value="auto">Latest stable JDK (automatic)</option>
                             </select>
@@ -442,7 +443,7 @@
                             </p>
                         </div>
                         <div class="form-group">
-                            <label data-i18n="java_path_label">Custom Java Path (Optional Override)</label>
+                            <label for="settings-java-custom-path" data-i18n="java_path_label">Custom Java Path (Optional Override)</label>
                             <input type="text" id="settings-java-custom-path" data-i18n-placeholder="java_path_placeholder" placeholder="Leave empty to use selected runtime">
                         </div>
                         <button class="btn" id="save-settings-btn" data-i18n="save_settings">Save Settings</button>
@@ -460,17 +461,17 @@
             </button>
             <div class="modal-header" data-i18n="create_profile_title">Create New Profile</div>
             <div class="form-group">
-                <label data-i18n="profile_name_label">Profile Name</label>
+                <label for="profile-name" data-i18n="profile_name_label">Profile Name</label>
                 <input type="text" id="profile-name" data-i18n-placeholder="profile_name_placeholder" placeholder="My Profile">
             </div>
             <div class="form-group">
-                <label data-i18n="mc_version_label">Minecraft Version</label>
+                <label for="profile-mc-version" data-i18n="mc_version_label">Minecraft Version</label>
                 <select id="profile-mc-version" style="font-weight: 600; color: #999;">
                     <option value="" data-i18n-opt="loading_versions">Loading versions...</option>
                 </select>
             </div>
             <div class="form-group">
-                <label data-i18n="mod_loader_label">Mod Loader</label>
+                <label for="profile-loader" data-i18n="mod_loader_label">Mod Loader</label>
                 <select id="profile-loader" style="font-weight: 600; color: #999;">
                     <option value="vanilla">vanilla</option>
                     <option value="fabric" selected>fabric</option>
@@ -483,7 +484,7 @@
                 </div>
             </div>
             <div class="form-group">
-                <label data-i18n="loader_version_label">Loader Version</label>
+                <label for="profile-loader-version" data-i18n="loader_version_label">Loader Version</label>
                 <select id="profile-loader-version" style="font-weight: 600; color: #999;">
                     <option value="latest" data-i18n-opt="loader_latest">Latest</option>
                 </select>

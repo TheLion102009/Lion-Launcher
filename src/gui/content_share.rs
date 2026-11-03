@@ -223,7 +223,10 @@ async fn modrinth_json<T: serde::de::DeserializeOwned>(
 ) -> Result<T, String> {
     let resp = modrinth_send(build).await?;
     if !resp.status().is_success() {
-        return Err(format!("Modrinth-Anfrage fehlgeschlagen: {}", resp.status()));
+        return Err(format!(
+            "Modrinth-Anfrage fehlgeschlagen: {}",
+            resp.status()
+        ));
     }
     resp.json::<T>().await.map_err(|e| e.to_string())
 }
@@ -322,7 +325,10 @@ async fn find_compatible_version(
         return Ok(None);
     }
     if !resp.status().is_success() {
-        return Err(format!("Modrinth-Anfrage fehlgeschlagen: {}", resp.status()));
+        return Err(format!(
+            "Modrinth-Anfrage fehlgeschlagen: {}",
+            resp.status()
+        ));
     }
     let versions: Vec<MrVersion> = resp.json().await.map_err(|e| e.to_string())?;
     Ok(versions.into_iter().next())
@@ -377,9 +383,12 @@ fn zip_folder(dir: &Path) -> anyhow::Result<Vec<u8>> {
     let mut cursor = Cursor::new(Vec::new());
     {
         let mut zip = zip::ZipWriter::new(&mut cursor);
-        let options = zip::write::FileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
-        for entry in walkdir::WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+        let options =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        for entry in walkdir::WalkDir::new(dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
             let path = entry.path();
             let Ok(rel) = path.strip_prefix(dir) else {
                 continue;
@@ -434,7 +443,8 @@ fn local_display_name(game_dir: &Path, kind: ContentKind, filename: &str) -> Opt
         ),
         _ => (format!("{}.json", filename), "title"),
     };
-    let content = std::fs::read_to_string(game_dir.join(kind.metadata_dir()).join(meta_file)).ok()?;
+    let content =
+        std::fs::read_to_string(game_dir.join(kind.metadata_dir()).join(meta_file)).ok()?;
     let meta: serde_json::Value = serde_json::from_str(&content).ok()?;
     meta.get(key)
         .and_then(|v| v.as_str())
@@ -478,7 +488,9 @@ fn scan_local_content(game_dir: &Path, kind: ContentKind) -> Result<Vec<LocalCon
         let lower = raw_name.to_lowercase();
 
         let (filename, disabled, is_folder) = match kind {
-            ContentKind::Mods if path.is_file() && lower.ends_with(".jar") => (raw_name, false, false),
+            ContentKind::Mods if path.is_file() && lower.ends_with(".jar") => {
+                (raw_name, false, false)
+            }
             ContentKind::Mods if path.is_file() && lower.ends_with(".jar.disabled") => (
                 raw_name[..raw_name.len() - ".disabled".len()].to_string(),
                 true,
@@ -632,8 +644,13 @@ enum ImportJob {
         warn_exact_missing: bool,
     },
     /// In der `.lion`-Datei eingebettete Datei
-    Embedded { entry: SharedContentEntry },
-    Fail { name: String, reason: String },
+    Embedded {
+        entry: SharedContentEntry,
+    },
+    Fail {
+        name: String,
+        reason: String,
+    },
 }
 
 struct ImportContext {
@@ -676,7 +693,11 @@ async fn write_metadata(
         .map(|p| p.title.clone())
         .or_else(|| entry.name.clone().filter(|n| !n.trim().is_empty()));
     let icon_url = project.and_then(|p| p.icon_url.clone());
-    let source = if project_id.is_some() { "modrinth" } else { "embedded" };
+    let source = if project_id.is_some() {
+        "modrinth"
+    } else {
+        "embedded"
+    };
     let version_number = version
         .map(|(_, number)| number)
         .or(entry.version_number.as_deref());
@@ -737,8 +758,7 @@ async fn install_modrinth_version(
         .files
         .iter()
         .find(|f| {
-            wanted_sha1.is_some()
-                && f.hashes.sha1.as_deref().map(str::to_lowercase) == wanted_sha1
+            wanted_sha1.is_some() && f.hashes.sha1.as_deref().map(str::to_lowercase) == wanted_sha1
         })
         .or_else(|| version.files.iter().find(|f| f.primary))
         .or_else(|| version.files.first())
@@ -819,7 +839,10 @@ async fn install_embedded(ctx: &ImportContext, entry: &SharedContentEntry) -> Re
     Ok(())
 }
 
-async fn run_import_job(ctx: &ImportContext, job: ImportJob) -> Result<InstalledContent, (String, String)> {
+async fn run_import_job(
+    ctx: &ImportContext,
+    job: ImportJob,
+) -> Result<InstalledContent, (String, String)> {
     match job {
         ImportJob::Fail { name, reason } => Err((name, reason)),
         ImportJob::Embedded { entry } => install_embedded(ctx, &entry)
@@ -846,18 +869,19 @@ async fn run_import_job(ctx: &ImportContext, job: ImportJob) -> Result<Installed
             warn_exact_missing,
         } => {
             let name = entry.display_name();
-            let version = find_compatible_version(&project_id, ctx.kind, &ctx.mc_version, &ctx.loader)
-                .await
-                .map_err(|e| (name.clone(), e))?
-                .ok_or_else(|| {
-                    (
-                        name.clone(),
-                        format!(
-                            "Keine passende Version für Minecraft {} ({}) gefunden",
-                            ctx.mc_version, ctx.loader
-                        ),
-                    )
-                })?;
+            let version =
+                find_compatible_version(&project_id, ctx.kind, &ctx.mc_version, &ctx.loader)
+                    .await
+                    .map_err(|e| (name.clone(), e))?
+                    .ok_or_else(|| {
+                        (
+                            name.clone(),
+                            format!(
+                                "Keine passende Version für Minecraft {} ({}) gefunden",
+                                ctx.mc_version, ctx.loader
+                            ),
+                        )
+                    })?;
             install_modrinth_version(ctx, &entry, &version)
                 .await
                 .map_err(|e| (name.clone(), e))?;
@@ -971,7 +995,7 @@ async fn import_content_into(
         .filter(|e| {
             e.version_id
                 .as_ref()
-                .map_or(true, |id| !versions.contains_key(id))
+                .is_none_or(|id| !versions.contains_key(id))
         })
         .filter_map(|e| e.sha1.as_ref().map(|h| h.to_lowercase()))
         .collect();
@@ -1180,14 +1204,28 @@ mod tests {
         std::fs::remove_dir_all(&target).ok();
 
         let rt = tokio::runtime::Runtime::new().unwrap();
-        for kind in [ContentKind::Mods, ContentKind::ResourcePacks, ContentKind::ShaderPacks] {
-            let exported = rt.block_on(export_content_from(&source, kind, true)).unwrap();
+        for kind in [
+            ContentKind::Mods,
+            ContentKind::ResourcePacks,
+            ContentKind::ShaderPacks,
+        ] {
+            let exported = rt
+                .block_on(export_content_from(&source, kind, true))
+                .unwrap();
             let embedded = exported.iter().filter(|e| e.data_base64.is_some()).count();
             let json = serde_json::to_string(&exported).unwrap();
             let entries: Vec<SharedContentEntry> = serde_json::from_str(&json).unwrap();
 
             let (report, _) = rt
-                .block_on(import_content_into(&target, &mc, &loader, kind, entries, true, |_| {}))
+                .block_on(import_content_into(
+                    &target,
+                    &mc,
+                    &loader,
+                    kind,
+                    entries,
+                    true,
+                    |_| {},
+                ))
                 .unwrap();
             println!(
                 "{}: exported {} ({} embedded, {} KB json) → installed {}/{}, failed {:?}, warnings {:?}",
@@ -1211,8 +1249,18 @@ mod tests {
                 v.sort();
                 v
             };
-            assert_eq!(src_files.len(), dst_files.len(), "{}: Anzahl unterschiedlich", kind.as_str());
-            assert_eq!(fingerprint(&src_files), fingerprint(&dst_files), "{}: Dateien/Versionen unterschiedlich", kind.as_str());
+            assert_eq!(
+                src_files.len(),
+                dst_files.len(),
+                "{}: Anzahl unterschiedlich",
+                kind.as_str()
+            );
+            assert_eq!(
+                fingerprint(&src_files),
+                fingerprint(&dst_files),
+                "{}: Dateien/Versionen unterschiedlich",
+                kind.as_str()
+            );
             assert!(report.failed.is_empty());
         }
         std::fs::remove_dir_all(&target).ok();
@@ -1229,7 +1277,10 @@ mod tests {
         let dst = base.join("dst");
         unzip_into(&bytes, &dst).unwrap();
         assert_eq!(std::fs::read(dst.join("pack.mcmeta")).unwrap(), b"{}");
-        assert_eq!(std::fs::read(dst.join("assets").join("x.txt")).unwrap(), b"x");
+        assert_eq!(
+            std::fs::read(dst.join("assets").join("x.txt")).unwrap(),
+            b"x"
+        );
         std::fs::remove_dir_all(&base).ok();
     }
 }
