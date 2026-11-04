@@ -26,6 +26,9 @@ const TRANSLATIONS = {
         nav_settings: 'Settings',
         nav_back: 'Back',
         nav_forward: 'Forward',
+        search_section: '🔎 Search',
+        keep_search_label: 'Keep search',
+        keep_search_hint: 'Search text and filters stay when you open a detail view and go back – in the Content Browser and in a profile\'s mod list.',
 
         // Profiles page
         loading_profiles: 'Loading profiles...',
@@ -147,6 +150,9 @@ const TRANSLATIONS = {
         nav_settings: 'Einstellungen',
         nav_back: 'Zurück',
         nav_forward: 'Vorwärts',
+        search_section: '🔎 Suche',
+        keep_search_label: 'Suche beibehalten',
+        keep_search_hint: 'Suchbegriff und Filter bleiben erhalten, wenn du eine Detailansicht öffnest und zurückgehst – im Content Browser und in der Mod-Liste eines Profils.',
 
         loading_profiles: 'Profile werden geladen...',
         btn_new_profile: '+ Neues Profil',
@@ -260,6 +266,9 @@ const TRANSLATIONS = {
         nav_settings: '设置',
         nav_back: '返回',
         nav_forward: '前进',
+        search_section: '🔎 搜索',
+        keep_search_label: '保留搜索',
+        keep_search_hint: '打开详情页再返回时，保留搜索词和筛选条件——适用于内容浏览器和配置的 Mod 列表。',
 
         loading_profiles: '正在加载档案...',
         btn_new_profile: '+ 新建档案',
@@ -373,6 +382,9 @@ const TRANSLATIONS = {
         nav_settings: '設定',
         nav_back: '戻る',
         nav_forward: '進む',
+        search_section: '🔎 検索',
+        keep_search_label: '検索を保持',
+        keep_search_hint: '詳細ページを開いて戻っても、検索語とフィルターを保持します（コンテンツブラウザとプロファイルの Mod 一覧）。',
 
         loading_profiles: 'プロフィールを読み込み中...',
         btn_new_profile: '+ 新しいプロフィール',
@@ -486,6 +498,9 @@ const TRANSLATIONS = {
         nav_settings: 'Настройки',
         nav_back: 'Назад',
         nav_forward: 'Вперёд',
+        search_section: '🔎 Поиск',
+        keep_search_label: 'Сохранять поиск',
+        keep_search_hint: 'Поисковый запрос и фильтры сохраняются, когда вы открываете подробности и возвращаетесь назад — в Content Browser и в списке Mod профиля.',
 
         loading_profiles: 'Загрузка профилей...',
         btn_new_profile: '+ Новый профиль',
@@ -599,6 +614,9 @@ const TRANSLATIONS = {
         nav_settings: 'Paramètres',
         nav_back: 'Précédent',
         nav_forward: 'Suivant',
+        search_section: '🔎 Recherche',
+        keep_search_label: 'Conserver la recherche',
+        keep_search_hint: 'Le texte recherché et les filtres sont conservés lorsque vous ouvrez une page de détails puis revenez – dans le Content Browser et dans la liste des Mods d\'un profil.',
 
         loading_profiles: 'Chargement des profils...',
         btn_new_profile: '+ Nouveau profil',
@@ -712,6 +730,9 @@ const TRANSLATIONS = {
         nav_settings: 'Configuración',
         nav_back: 'Atrás',
         nav_forward: 'Adelante',
+        search_section: '🔎 Búsqueda',
+        keep_search_label: 'Mantener búsqueda',
+        keep_search_hint: 'El texto de búsqueda y los filtros se mantienen al abrir una vista de detalle y volver: en el Content Browser y en la lista de Mods de un perfil.',
 
         loading_profiles: 'Cargando perfiles...',
         btn_new_profile: '+ Nuevo perfil',
@@ -825,6 +846,9 @@ const TRANSLATIONS = {
         nav_settings: 'Configurações',
         nav_back: 'Voltar',
         nav_forward: 'Avançar',
+        search_section: '🔎 Pesquisa',
+        keep_search_label: 'Manter pesquisa',
+        keep_search_hint: 'O texto da pesquisa e os filtros são mantidos ao abrir uma página de detalhes e voltar – no Content Browser e na lista de Mods de um perfil.',
 
         loading_profiles: 'Carregando perfis...',
         btn_new_profile: '+ Novo perfil',
@@ -938,6 +962,9 @@ const TRANSLATIONS = {
         nav_settings: '설정',
         nav_back: '뒤로',
         nav_forward: '앞으로',
+        search_section: '🔎 검색',
+        keep_search_label: '검색 유지',
+        keep_search_hint: '상세 화면을 열었다가 돌아와도 검색어와 필터가 유지됩니다 – Content Browser와 프로필의 Mod 목록.',
 
         loading_profiles: '프로필 불러오는 중...',
         btn_new_profile: '+ 새 프로필',
@@ -1051,6 +1078,9 @@ const TRANSLATIONS = {
         nav_settings: 'Ustawienia',
         nav_back: 'Wstecz',
         nav_forward: 'Dalej',
+        search_section: '🔎 Wyszukiwanie',
+        keep_search_label: 'Zachowaj wyszukiwanie',
+        keep_search_hint: 'Wyszukiwana fraza i filtry zostają zachowane po otwarciu szczegółów i powrocie – w Content Browser i na liście Modów profilu.',
 
         loading_profiles: 'Ładowanie profili...',
         btn_new_profile: '+ Nowy profil',

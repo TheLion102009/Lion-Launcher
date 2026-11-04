@@ -370,7 +370,24 @@
                         <!-- Account Liste -->
                         <div id="accounts-list" style="margin-top: 20px;"></div>
                     </div>
-                    
+
+                    <!-- Such-Einstellungen -->
+                    <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                        <h3 style="color: var(--gold); margin: 0 0 16px 0;" data-i18n="search_section">🔎 Search</h3>
+                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+                            <div>
+                                <label for="settings-keep-search" style="display: block; margin: 0 0 4px 0; cursor: pointer;" data-i18n="keep_search_label">Keep search</label>
+                                <p style="color: var(--text-secondary); font-size: 12px; margin: 0;" data-i18n="keep_search_hint">
+                                    Search text and filters stay when you open a detail view and go back – in the Content Browser and in a profile's mod list.
+                                </p>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="settings-keep-search" checked onchange="setKeepSearch(this.checked)">
+                                <span class="switch-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+
                     <!-- Theme Settings -->
                     <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
                         <h3 style="color: var(--gold); margin: 0 0 20px 0;" data-i18n="appearance">🎨 Erscheinungsbild</h3>

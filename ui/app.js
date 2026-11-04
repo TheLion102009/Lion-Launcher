@@ -674,7 +674,7 @@ function setupNavigation() {
 function navigateToPage(page) {
     if (page === 'mods') {
         recordNavigation({ type: 'browser', context: 'global' });
-        showGlobalContentBrowser();
+        showGlobalContentBrowser(null, { fresh: !isKeepSearchEnabled() });
         return;
     }
     // Profile und Server tragen sich beim Laden der Übersicht selbst ein
@@ -800,16 +800,19 @@ async function restoreNavLocation(location) {
     }
 }
 
-/** Zeigt den Content Browser wieder an – ohne Neuladen, wenn Suche/Seite noch zum Kontext gehören. */
+/**
+ * Zeigt den Content Browser wieder an. Mit "Suche beibehalten" ohne Neuladen, solange Suche/Seite
+ * noch zum Kontext gehören; sonst startet er frisch.
+ */
 async function restoreContentBrowser(location) {
-    const sameView = browserViewKey === navLocationKey(location);
+    const sameView = isKeepSearchEnabled() && browserViewKey === navLocationKey(location);
 
     if (location.context === 'profile') {
         const profile = profiles.find(p => p.id === location.profileId);
         if (sameView && profile) {
             currentProfile = profile;
             openedFromProfile = true;
-            switchPage('mods');
+            switchPage('mods', { keepBrowserFilters: true });
         } else {
             currentProfileSubTab = location.contentType || 'mods';
             openContentBrowser(location.profileId);
@@ -822,13 +825,16 @@ async function restoreContentBrowser(location) {
             await openServerContentBrowser(location.serverId);
         }
     } else {
-        showGlobalContentBrowser(location.contentType);
+        showGlobalContentBrowser(location.contentType, { fresh: !sameView });
     }
 }
 
-/** Content Browser ohne Profil/Server; lädt neu, falls noch Ergebnisse eines anderen Kontexts angezeigt werden. */
-function showGlobalContentBrowser(contentType = null) {
-    const sameView = browserViewKey === 'browser:global';
+/**
+ * Content Browser ohne Profil/Server; lädt neu, falls noch Ergebnisse eines anderen Kontexts
+ * angezeigt werden oder `fresh` gesetzt ist.
+ */
+function showGlobalContentBrowser(contentType = null, options = {}) {
+    const sameView = !options.fresh && browserViewKey === 'browser:global';
     switchPage('mods', { keepBrowserFilters: sameView });
     if (!sameView) {
         resetFiltersToDefault();
@@ -960,8 +966,8 @@ function switchPage(page, options = {}) {
         } else {
             debugLog('Opening mod browser for profile: ' + currentProfile.name, 'info');
 
-            // Set filters automatically based on the profile
-            applyProfileFilters(currentProfile);
+            // Set filters automatically based on the profile (nicht beim Zurückkehren zu einer gemerkten Suche)
+            if (!options.keepBrowserFilters) applyProfileFilters(currentProfile);
         }
 
         // IMPORTANT: This code runs AFTER openContentBrowser/switchContentType!
@@ -2334,6 +2340,7 @@ async function saveProfileSettingsFromModal(profileId, silent = false) {
             profileId: profileId,
             updates: updates
         });
+        if (browserViewKey === `browser:profile:${profileId}`) browserViewKey = null;
 
         if (!silent) {
             showToast('Profile settings saved!', 'success', 3000);
@@ -3777,6 +3784,8 @@ async function clearLogs() {
 // ==================== MOD-VERWALTUNG ====================
 
 let selectedMods = new Set();
+/** profileId -> Suchbegriff in der Mod-Liste des Profils (für "Suche beibehalten") */
+const installedModsSearchByProfile = new Map();
 let modsWatcherInterval = null;
 let lastModsHash = '';
 let modUpdateCandidates = [];
@@ -3848,9 +3857,7 @@ async function loadInstalledMods(profileId, options = {}) {
     if (!forceReload && Array.isArray(cached)) {
         installedModsCache = cached;
         cachedModsProfileId = profileId;
-
-        const searchInput = document.getElementById('installed-mods-search');
-        if (searchInput) searchInput.value = '';
+        const searchQuery = restoreInstalledModsSearch(profileId);
 
         if (cached.length === 0) {
             modsList.innerHTML = `
@@ -3868,7 +3875,8 @@ async function loadInstalledMods(profileId, options = {}) {
         }
 
         document.getElementById('bulk-actions-bar').style.display = 'flex';
-        renderInstalledModsList(cached, profileId);
+        if (searchQuery) filterInstalledMods(searchQuery);
+        else renderInstalledModsList(cached, profileId);
         updateProfileScrollableBoxes();
         refreshModUpdateStatuses(profileId, cached);
         return;
@@ -3884,9 +3892,8 @@ async function loadInstalledMods(profileId, options = {}) {
         installedModIdsProfileId = null;
         installedModIds.clear();
 
-        // Suchfeld zurücksetzen beim Neuladen
-        const searchInput = document.getElementById('installed-mods-search');
-        if (searchInput) searchInput.value = '';
+        // Suchfeld: gemerkter Begriff bei "Suche beibehalten", sonst leer
+        const searchQuery = restoreInstalledModsSearch(profileId);
 
         if (!mods || mods.length === 0) {
             modsList.innerHTML = `
@@ -3908,7 +3915,8 @@ async function loadInstalledMods(profileId, options = {}) {
         // Zeige Bulk Actions Bar
         document.getElementById('bulk-actions-bar').style.display = 'flex';
 
-        renderInstalledModsList(mods, profileId);
+        if (searchQuery) filterInstalledMods(searchQuery);
+        else renderInstalledModsList(mods, profileId);
 
         updateProfileScrollableBoxes();
 
@@ -3931,9 +3939,20 @@ async function loadInstalledMods(profileId, options = {}) {
     }
 }
 
+/** Setzt das Suchfeld der Mod-Liste: gemerkter Begriff bei "Suche beibehalten", sonst leer. */
+function restoreInstalledModsSearch(profileId) {
+    const query = isKeepSearchEnabled() ? (installedModsSearchByProfile.get(profileId) || '') : '';
+    if (!query) installedModsSearchByProfile.delete(profileId);
+    const searchInput = document.getElementById('installed-mods-search');
+    if (searchInput) searchInput.value = query;
+    return query;
+}
+
 /** Filtert die installierte Mod-Liste anhand des Suchbegriffs (client-seitig) */
 function filterInstalledMods(query) {
     if (!cachedModsProfileId) return;
+    if (query.trim()) installedModsSearchByProfile.set(cachedModsProfileId, query);
+    else installedModsSearchByProfile.delete(cachedModsProfileId);
 
     const q = query.trim().toLowerCase();
     const filtered = q.length === 0
@@ -4956,6 +4975,13 @@ function openContentBrowser(profileId) {
         currentProfile = profile;
         openedFromProfile = true; // Setze Flag BEVOR switchPage aufgerufen wird
         debugLog('Opening Content Browser from profile: ' + profile.name + ', SubTab: ' + currentProfileSubTab, 'info');
+    }
+
+    // "Suche beibehalten": derselbe Browser für dieses Profil/denselben Typ bleibt wie er war
+    if (profile && isKeepSearchEnabled() && browserViewKey === `browser:profile:${profileId}` &&
+        currentContentType === currentProfileSubTab) {
+        switchPage('mods', { keepBrowserFilters: true });
+        return;
     }
 
     // Wechsle zum Content Browser
@@ -8037,6 +8063,7 @@ async function saveProfileSettings(profileId) {
             profileId: profileId,
             updates: updates
         });
+        if (browserViewKey === `browser:profile:${profileId}`) browserViewKey = null;
 
         showToast('Profil-Einstellungen gespeichert!', 'success', 3000);
         selectedProfileIcon = null;
@@ -10129,11 +10156,24 @@ async function loadSettings() {
         javaRuntimeSelect.dataset.bound = '1';
     }
 
+    const keepSearchToggle = document.getElementById('settings-keep-search');
+    if (keepSearchToggle) keepSearchToggle.checked = isKeepSearchEnabled();
+
     // Theme laden
     const savedTheme = localStorage.getItem('theme') || 'dark';
     const savedAccent = localStorage.getItem('accentColor') || 'gold';
     setTheme(savedTheme, false);
     setAccentColor(savedAccent, false);
+}
+
+// "Suche beibehalten": Suchbegriff/Filter überstehen Detailansicht + Zurück (Standard: an)
+function isKeepSearchEnabled() {
+    return localStorage.getItem('keepSearch') !== 'false';
+}
+
+function setKeepSearch(enabled) {
+    localStorage.setItem('keepSearch', enabled ? 'true' : 'false');
+    if (!enabled) installedModsSearchByProfile.clear();
 }
 
 // Theme Functions
