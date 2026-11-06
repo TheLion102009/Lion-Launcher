@@ -2,6 +2,7 @@ use anyhow::{bail, Result};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use crate::utils::process::HideConsoleWindow;
 
 // NeoForge Installation und Launch-Logik
 // Basierend auf PandoraLauncher und PrismLauncher Best Practices
@@ -515,6 +516,7 @@ async fn run_neoforge_installer(
     tracing::info!("🔨 Running NeoForge installer (this may take 1-2 minutes)...");
 
     let mut cmd = Command::new(java_path);
+    cmd.hide_console_window();
     cmd.arg("-jar");
     cmd.arg(installer_path);
     cmd.arg("--installClient");
@@ -700,6 +702,7 @@ pub fn build_launch_command(
     };
 
     let mut cmd = Command::new(&java_bin);
+    cmd.hide_console_window();
 
     // Linux: Display-Umgebungsvariablen weitergeben.
     // Tauri-Kindprozesse erben DISPLAY/WAYLAND_DISPLAY nicht immer

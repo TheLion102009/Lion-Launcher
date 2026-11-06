@@ -10,6 +10,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
+use crate::utils::process::HideConsoleWindow;
 use tokio::time::{sleep, Duration};
 
 const MAX_CONSOLE_LINES: usize = 4000;
@@ -476,6 +477,7 @@ fn kill_process(pid: u32) {
     {
         std::process::Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .hide_console_window()
             .spawn()
             .ok();
     }
@@ -557,6 +559,7 @@ fn parse_java_major(version: &str) -> Option<u32> {
 fn detect_java_major(java_bin: &str) -> Result<u32, String> {
     let output = std::process::Command::new(java_bin)
         .arg("-version")
+        .hide_console_window()
         .output()
         .map_err(|e| format!("Java konnte nicht gestartet werden ({}): {}", java_bin, e))?;
 
@@ -1182,6 +1185,7 @@ async fn run_logged_process(
 
     let mut child = Command::new(program)
         .args(args)
+        .hide_console_window()
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -1711,6 +1715,7 @@ async fn prepare_and_spawn_server(server_id: &str, console: &ConsoleBuffer) -> R
     let xms = (profile.memory_mb / 2).max(512);
 
     let mut cmd = Command::new(&java_bin);
+    cmd.hide_console_window();
     cmd.current_dir(&profile.server_dir)
         .arg(format!("-Xms{}M", xms))
         .arg(format!("-Xmx{}M", xmx));

@@ -8,6 +8,7 @@ use crate::core::download::DownloadManager;
 /// 4. Prozessoren ausführen (jarsplitter → installertools → binarypatcher)
 /// 5. Korrekten --gameJar Pfad zurückgeben
 use anyhow::{bail, Result};
+use crate::utils::process::HideConsoleWindow;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -873,6 +874,7 @@ impl ForgeInstaller {
                 .arg(proc_cp.join(cp_sep))
                 .arg(&main_class)
                 .args(&resolved_args)
+                .hide_console_window()
                 .output()
                 .await;
 

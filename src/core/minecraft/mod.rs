@@ -11,6 +11,7 @@ use crate::types::profile::Profile;
 use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use crate::utils::process::HideConsoleWindow;
 
 const MOJANG_MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const RESOURCES_URL: &str = "https://resources.download.minecraft.net";
@@ -294,6 +295,7 @@ pub fn kill_running_process(profile_id: &str) -> bool {
         {
             std::process::Command::new("taskkill")
                 .args(["/PID", &pid.to_string(), "/F"])
+                .hide_console_window()
                 .spawn()
                 .ok();
         }
@@ -1363,7 +1365,9 @@ maxThreads = -1
         tracing::info!("JVM args resolved: {}", resolved_jvm_args.len());
         tracing::info!("Game args resolved: {}", resolved_game_args.len());
 
+        // Forge/NeoForge läuft mit java.exe: ohne das Flag bliebe die ganze Spielzeit ein Terminal offen
         let mut cmd = Command::new(&java_path);
+        cmd.hide_console_window();
 
         // ── Linux/NVIDIA Umgebungs-Fixes ─────────────────────────────────────────
         // Kontext: NVIDIA Kernel-Modul und Userspace-Treiber können unterschiedliche
@@ -1824,6 +1828,7 @@ maxThreads = -1
         tokio::fs::create_dir_all(game_dir.join("logs")).await.ok();
 
         let mut cmd = Command::new(&java_bin);
+        cmd.hide_console_window();
 
         // ── Linux/NVIDIA Display-Umgebungsvariablen ──────────────────────────────
         // Ohne DISPLAY startet kein Fenster auf X11. Muss explizit gesetzt werden,
@@ -2986,7 +2991,7 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
             }
         }
 
-        if Command::new("java").arg("-version").output().is_ok() {
+        if Command::new("java").arg("-version").hide_console_window().output().is_ok() {
             return Ok("java".to_string());
         }
 
@@ -3224,6 +3229,7 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         let path_bin = if cfg!(windows) { "java.exe" } else { "java" };
         if tokio::process::Command::new(path_bin)
             .arg("-version")
+            .hide_console_window()
             .output()
             .await
             .is_ok()
@@ -3257,6 +3263,7 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         // java -version writes to stderr, e.g.: openjdk version "21.0.2" 2024-01-16
         let Ok(out) = tokio::process::Command::new(java_bin)
             .arg("-version")
+            .hide_console_window()
             .output()
             .await
         else {
@@ -3323,6 +3330,7 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
                     "Expand-Archive -Path '{p}' -DestinationPath '{d}_tmp' -Force;                      $s=Get-ChildItem '{d}_tmp'|?{{$_.PSIsContainer}}|select -First 1;                      if($s){{Copy-Item \"$($s.FullName)\\*\" '{d}' -Recurse -Force}};                      Remove-Item '{d}_tmp' -Recurse -Force",
                     p = archive_path.display(), d = java_dir.display()
                 )])
+                .hide_console_window()
                 .status().await?;
             if !status.success() {
                 bail!("Failed to extract Java on Windows");

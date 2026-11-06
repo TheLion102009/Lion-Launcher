@@ -1,4 +1,5 @@
 use crate::config::schema::LauncherConfig;
+use crate::utils::process::HideConsoleWindow;
 use crate::types::version::MinecraftVersion;
 use std::collections::BTreeSet;
 
@@ -100,6 +101,7 @@ pub async fn get_java_runtime_options() -> Result<Vec<JavaRuntimeOption>, String
     let path_java = if cfg!(windows) { "java.exe" } else { "java" };
     if tokio::process::Command::new(path_java)
         .arg("-version")
+        .hide_console_window()
         .output()
         .await
         .is_ok()

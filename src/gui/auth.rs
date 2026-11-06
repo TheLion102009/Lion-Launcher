@@ -589,8 +589,10 @@ pub async fn open_auth_url(url: String) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
+        use crate::utils::process::HideConsoleWindow;
         std::process::Command::new("cmd")
             .args(["/C", "start", "", &url])
+            .hide_console_window()
             .spawn()
             .map_err(|e| format!("Konnte Browser nicht öffnen: {}", e))?;
     }
