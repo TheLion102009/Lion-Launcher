@@ -52,6 +52,9 @@ fn main() {
             }
             #[cfg(debug_assertions)]
             window.open_devtools();
+
+            // Freunde & geteilte Instanzen (P2P, ohne eigenen Server)
+            gui::friends::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -59,6 +62,30 @@ fn main() {
             gui::greet,
             gui::get_embedded_logo_data_url,
             gui::external_links::open_external_url,
+            // Launcher-Updates
+            gui::updater::updater_check,
+            gui::updater::updater_install,
+            // Freunde
+            gui::friends::friends_state,
+            gui::friends::friends_add,
+            gui::friends::friends_accept,
+            gui::friends::friends_remove,
+            // Geteilte Instanzen
+            gui::friends::share::share_status,
+            gui::friends::share::share_create,
+            gui::friends::share::share_pending_changes,
+            gui::friends::share::share_push,
+            gui::friends::share::share_invite_friend,
+            gui::friends::share::share_remove_member,
+            gui::friends::share::share_stop,
+            gui::friends::share::share_list_config_files,
+            gui::friends::share::share_set_config_files,
+            gui::friends::share::share_preview,
+            gui::friends::share::share_accept,
+            gui::friends::share::share_decline_invite,
+            gui::friends::share::share_check_update,
+            gui::friends::share::share_apply_update,
+            gui::friends::share::share_leave,
             gui::initialize_launcher,
             // Settings
             gui::get_config,

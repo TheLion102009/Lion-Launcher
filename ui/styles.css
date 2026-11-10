@@ -853,6 +853,12 @@ body {
     font-size: 16px;
 }
 
+.content-action-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    transform: none;
+}
+
 .content-action-btn.content-action-delete {
     color: #f44336;
     font-size: 22px;
@@ -1866,4 +1872,731 @@ button.server-address-badge:hover {
     cursor: pointer;
     color: var(--text-primary);
     font-weight: 600;
+}
+
+/* ── Freunde-Kasten (rechts auf Home, Local Servers, Skins) ────────────────── */
+.page.has-friends:not(.hidden) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 260px;
+    grid-template-areas:
+        "header header"
+        "content friends";
+    grid-template-rows: auto 1fr;
+}
+
+.page.has-friends > .header {
+    grid-area: header;
+}
+
+.page.has-friends > .content {
+    grid-area: content;
+    min-width: 0;
+}
+
+.friends-panel {
+    grid-area: friends;
+    display: flex;
+    flex-direction: column;
+    /* Beginnt knapp unter dem goldenen Strich (fest bei 80px) und endet 12px über dem Fensterrand */
+    height: calc(100vh - 102px);
+    margin: 10px 12px 12px 0;
+    background: var(--bg-medium);
+    border: 1px solid var(--bg-light);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* In der Profil-Detailansicht wird der Platz für den Inhalt gebraucht */
+.page.has-friends.friends-collapsed:not(.hidden) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "header" "content";
+}
+
+.page.has-friends.friends-collapsed > .friends-panel {
+    display: none;
+}
+
+
+.friends-add.hidden,
+.share-config-row.hidden {
+    display: none;
+}
+
+.friends-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 12px 10px 14px;
+    border-bottom: 1px solid var(--bg-light);
+}
+
+.friends-title {
+    color: var(--text-primary);
+    font-weight: 700;
+    font-size: 15px;
+}
+
+.friends-title .bi {
+    color: var(--gold);
+    margin-right: 4px;
+}
+
+.friends-online-count {
+    flex: 1;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.friends-icon-btn {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.15s, color 0.15s;
+}
+
+.friends-icon-btn:hover {
+    background: var(--bg-light);
+    color: var(--text-primary);
+}
+
+.friends-icon-btn.accept:hover {
+    color: #4caf50;
+}
+
+.friends-add {
+    display: flex;
+    gap: 6px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--bg-light);
+}
+
+.friends-add input {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 9px;
+    background: var(--bg-dark);
+    border: 1px solid var(--bg-light);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 12px;
+    outline: none;
+}
+
+.friends-add input:focus {
+    border-color: var(--gold);
+}
+
+.friends-add .btn {
+    padding: 0 10px;
+}
+
+.friends-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 8px;
+}
+
+.friends-section {
+    margin-bottom: 8px;
+}
+
+.friends-section-title {
+    padding: 8px 6px 4px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.friends-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px;
+    border-radius: 8px;
+    transition: background 0.15s, opacity 0.15s;
+}
+
+.friends-row:hover {
+    background: var(--bg-light);
+}
+
+.friends-row.invite {
+    cursor: pointer;
+}
+
+/* Offline: ausgegraut */
+.friends-row.is-offline {
+    opacity: 0.45;
+}
+
+.friends-row.is-offline .friends-avatar,
+.friends-row.is-offline-avatar .friends-avatar {
+    filter: grayscale(1);
+    opacity: 0.6;
+}
+
+.friends-row.is-offline:hover {
+    opacity: 0.8;
+}
+
+.friends-avatar-wrap {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.friends-avatar {
+    width: 32px;
+    height: 32px;
+    display: block;
+    border-radius: 50%;
+    image-rendering: pixelated;
+    background: var(--bg-dark);
+    object-fit: cover;
+}
+
+.friends-avatar.square {
+    border-radius: 6px;
+    image-rendering: auto;
+}
+
+.friends-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #747f8d;
+    border: 2px solid var(--bg-medium);
+    box-sizing: content-box;
+}
+
+.friends-avatar-wrap .friends-dot {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+}
+
+.friends-dot.online {
+    background: #3ba55d;
+}
+
+.friends-row-text,
+.friends-me-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.friends-name {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.friends-sub {
+    color: var(--text-secondary);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.friends-sub .friends-dot {
+    width: 7px;
+    height: 7px;
+    border: none;
+    margin-right: 3px;
+}
+
+.friends-row-actions {
+    display: flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.friends-row:hover .friends-row-actions,
+.friends-row-actions:focus-within {
+    opacity: 1;
+}
+
+/* Anfragen und Einladungen brauchen immer sichtbare Buttons */
+.friends-row.is-pending .friends-row-actions,
+.friends-row.invite .friends-row-actions {
+    opacity: 1;
+}
+
+.friends-empty {
+    padding: 16px 8px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+    text-align: center;
+}
+
+.friends-me {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--bg-dark);
+    border-top: 1px solid var(--bg-light);
+}
+
+.friends-me:empty {
+    display: none;
+}
+
+/* ── Share-Tab & Dialoge ─────────────────────────────────────────────────── */
+.share-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+.share-card {
+    background: var(--bg-dark);
+    border: 1px solid var(--bg-light);
+    border-radius: 10px;
+    padding: 14px 16px;
+    color: var(--text-primary);
+}
+
+.share-span {
+    grid-column: 1 / -1;
+}
+
+.share-card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.share-card-head h3 {
+    margin: 0;
+    font-size: 15px;
+    color: var(--gold);
+}
+
+.share-intro {
+    max-width: 640px;
+    margin: 20px auto;
+    padding: 30px;
+    text-align: center;
+}
+
+.share-intro-icon {
+    font-size: 40px;
+    color: var(--gold);
+}
+
+.share-intro p {
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.share-muted {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.share-small-btn {
+    padding: 5px 12px;
+    font-size: 12px;
+}
+
+.share-danger {
+    color: #f44336;
+}
+
+.share-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.share-link-row {
+    display: flex;
+    gap: 6px;
+    margin: 12px 0 4px;
+}
+
+.share-link-row input {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 8px;
+    background: var(--bg-medium);
+    border: 1px solid var(--bg-light);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.share-ahead,
+.share-uptodate {
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.share-ahead {
+    color: var(--gold);
+}
+
+.share-uptodate {
+    color: #4caf50;
+}
+
+.share-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.share-chip {
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--bg-light);
+    color: var(--text-primary);
+    font-size: 11px;
+}
+
+.share-chip.add {
+    background: rgba(76, 175, 80, 0.2);
+    color: #81c784;
+}
+
+.share-chip.upd {
+    background: rgba(33, 150, 243, 0.2);
+    color: #64b5f6;
+}
+
+.share-chip.rem {
+    background: rgba(244, 67, 54, 0.2);
+    color: #e57373;
+}
+
+.share-item-list {
+    display: grid;
+    gap: 4px;
+    max-height: 320px;
+    overflow-y: auto;
+    margin: 6px 0 10px;
+}
+
+.share-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--bg-medium);
+    border-left: 3px solid transparent;
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+.share-item.add {
+    border-left-color: #4caf50;
+}
+
+.share-item.upd {
+    border-left-color: #2196f3;
+}
+
+.share-item.rem {
+    border-left-color: #f44336;
+    opacity: 0.75;
+}
+
+.share-item-kind {
+    flex-shrink: 0;
+    color: var(--text-secondary);
+    font-size: 10px;
+    text-transform: uppercase;
+}
+
+.share-item-name {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.share-item-version {
+    flex-shrink: 0;
+    color: var(--text-secondary);
+}
+
+.share-badge {
+    flex-shrink: 0;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.share-badge.warn {
+    background: rgba(255, 152, 0, 0.2);
+    color: #ffb74d;
+}
+
+.share-warning,
+.share-trust-note {
+    display: flex;
+    gap: 8px;
+    margin: 10px 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.share-warning {
+    background: rgba(255, 152, 0, 0.12);
+    color: #ffb74d;
+}
+
+.share-trust-note {
+    background: var(--bg-medium);
+    color: var(--text-secondary);
+}
+
+.share-configs summary {
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin: 6px 0;
+}
+
+.share-config-path {
+    padding: 2px 0 2px 12px;
+    color: var(--text-secondary);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 11px;
+}
+
+.share-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.82);
+}
+
+.share-modal {
+    width: min(640px, 92vw);
+    max-height: 86vh;
+    overflow-y: auto;
+    padding: 22px;
+    background: var(--bg-dark);
+    border: 2px solid var(--gold);
+    border-radius: 12px;
+    color: var(--text-primary);
+}
+
+.share-modal-loading {
+    padding: 24px;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.share-modal-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 12px;
+}
+
+.share-modal-head h2 {
+    margin: 0 0 4px;
+    color: var(--gold);
+    font-size: 20px;
+}
+
+.share-modal-icon {
+    width: 56px;
+    height: 56px;
+    flex-shrink: 0;
+    border-radius: 10px;
+    object-fit: cover;
+    background: var(--bg-medium);
+}
+
+.share-modal-sub {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.share-modal-section-title {
+    margin-top: 10px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.share-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.share-config-filter {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    background: var(--bg-medium);
+    border: 1px solid var(--bg-light);
+    border-radius: 6px;
+    color: var(--text-primary);
+    outline: none;
+}
+
+.share-config-list {
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.share-config-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.share-config-row:hover {
+    background: var(--bg-medium);
+}
+
+.share-config-path-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* Vom Besitzer einer geteilten Instanz verwaltete Mod (gesperrt) */
+.shared-lock-badge {
+    background: var(--bg-light);
+    color: var(--gold);
+    font-size: 9px;
+    padding: 2px 5px;
+    border-radius: 3px;
+}
+
+/* ── Launcher-Updates ────────────────────────────────────────────────────── */
+/* Gelber Punkt am Settings-Symbol, wenn ein Update gefunden wurde */
+.nav-item.has-update {
+    position: relative;
+}
+
+.nav-item.has-update::after {
+    content: "";
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--gold);
+    border: 2px solid var(--bg-medium);
+    box-shadow: 0 0 6px rgba(255, 215, 0, 0.7);
+}
+
+/* Auf dem aktiven (gelben) Knopf dunkel füllen, damit der Punkt sichtbar bleibt */
+.nav-item.active.has-update::after {
+    background: var(--bg-dark);
+    border-color: var(--bg-dark);
+}
+
+/* "Update verfügbar" im Aktivitäts-Kasten oben rechts */
+.session-widget.has-update {
+    cursor: pointer;
+    border-color: var(--gold);
+}
+
+.session-widget.has-update .session-profile-name {
+    color: var(--gold);
+}
+
+.launcher-update-card {
+    background: var(--bg-medium);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 25px;
+}
+
+.launcher-update-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.launcher-update-head h3 {
+    margin: 0;
+    color: var(--gold);
+}
+
+.launcher-update-status {
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.launcher-update-status.available .bi {
+    color: var(--gold);
+}
+
+.launcher-update-status.ok .bi {
+    color: #4caf50;
+}
+
+.launcher-update-bar {
+    height: 8px;
+    margin-top: 10px;
+    background: var(--bg-light);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.launcher-update-bar > div {
+    height: 100%;
+    background: var(--gold);
+    transition: width 0.3s ease;
+}
+
+.launcher-update-notes summary {
+    margin: 10px 0 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
 }

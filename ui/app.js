@@ -304,14 +304,16 @@ function syncSessionWidgetWithRunningProfiles() {
     }
 
     if (runningProfiles.size === 0) {
+        // Nichts läuft: ein gefundenes Launcher-Update im Aktivitäts-Kasten anzeigen
+        const updateReady = typeof isLauncherUpdateAvailable === 'function' && isLauncherUpdateAvailable();
         setSessionWidgetState({
             profileId: null,
-            profileName: 'No Session Active',
+            profileName: updateReady ? 'Update verfügbar' : 'No Session Active',
             phase: 'idle',
             status: 'Idle',
             percent: null,
             canStop: false,
-            activity: null
+            activity: updateReady ? 'update-available' : null
         });
         return;
     }
@@ -367,6 +369,9 @@ function renderSessionWidget() {
         statusEl.classList.toggle('hidden', !statusText);
     }
     widget.title = statusText;
+    const updateHint = sessionWidgetState.activity === 'update-available';
+    widget.classList.toggle('has-update', updateHint);
+    if (updateHint) widget.title = 'Launcher-Update verfügbar – zum Installieren klicken';
 
     const canStop = !!sessionWidgetState.profileId && !!sessionWidgetState.canStop;
     stopBtn.classList.toggle('hidden', !canStop);
@@ -386,6 +391,11 @@ function initSessionWidget() {
             }
         });
     }
+
+    // "Update verfügbar" im Kasten → zu den Einstellungen mit dem Update-Button
+    document.getElementById('session-widget')?.addEventListener('click', () => {
+        if (sessionWidgetState.activity === 'update-available') navigateToPage('settings');
+    });
 
     renderSessionWidget();
 }
@@ -1094,6 +1104,7 @@ async function loadProfiles() {
 function renderProfiles() {
     const grid = document.getElementById('profiles-grid');
     if (!grid) return;
+    setFriendsPanelHidden(false);
 
     if (profiles.length === 0) {
         // If no profiles: only show the create card
@@ -1239,8 +1250,7 @@ function getCheckedValues(root, selector) {
         .map(el => el.value);
 }
 
-async function buildLionPayload(profileId, includes, options = {}) {
-    const embedMissing = options.embedMissing !== false;
+async function buildLionPayload(profileId, includes) {
     const profile = profiles.find(p => p.id === profileId);
     if (!profile) throw new Error('Profile not found');
 
@@ -1266,7 +1276,7 @@ async function buildLionPayload(profileId, includes, options = {}) {
     // nicht auf Modrinth gibt, werden direkt eingebettet – so fehlt beim Empfänger nichts.
     for (const kind of LION_CONTENT_KINDS) {
         if (includeSet.has(kind)) {
-            payload.content[kind] = await invoke('export_profile_content', { profileId, kind, embedMissing });
+            payload.content[kind] = await invoke('export_profile_content', { profileId, kind });
         }
     }
 
@@ -1407,13 +1417,10 @@ function openShareProfileModal(profileId) {
                 <label><input type="checkbox" value="worlds"> Worlds (voll)</label>
                 <label><input type="checkbox" value="logs"> Logs (voll)</label>
             </div>
-            <p style="margin: 12px 0 0 0; color: var(--text-secondary); font-size: 12px;">
-                Mods &amp; packs are shared in exactly your installed versions.
+            <p style="margin: 12px 0 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5;">
+                Mods &amp; packs are shared in exactly your installed versions. Files without a Modrinth
+                download (e.g. CurseForge-only or self-built) are included directly in the .lion file.
             </p>
-            <label style="display:flex; align-items:flex-start; gap:8px; color: var(--text-secondary); margin-top: 8px; font-size: 12px;">
-                <input type="checkbox" id="share-embed-missing" checked style="margin-top: 2px;">
-                <span>Embed files that are not on Modrinth (e.g. CurseForge-only or own files) – otherwise they will be missing for the recipient. Makes the file larger.</span>
-            </label>
             <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
                 <button class="btn btn-secondary" onclick="closeDynamicModal('share-profile-modal')">Cancel</button>
                 <button class="btn" id="share-profile-export-btn">Export .lion</button>
@@ -1438,8 +1445,7 @@ function openShareProfileModal(profileId) {
             exportBtn.disabled = true;
             exportBtn.textContent = 'Export...';
             try {
-                const embedMissing = !!document.getElementById('share-embed-missing')?.checked;
-                const payload = await buildLionPayload(profileId, includes, { embedMissing });
+                const payload = await buildLionPayload(profileId, includes);
                 let savedPath = null;
                 try {
                     savedPath = await saveLionPayloadWithDialog(payload, profile.name);
@@ -1450,16 +1456,13 @@ function openShareProfileModal(profileId) {
 
                 if (savedPath) {
                     showToast('Profile exported: ' + savedPath, 'success', 3200);
-                    // Hinweis auf eingebettete bzw. fehlende Dateien
-                    const entries = LION_CONTENT_KINDS.flatMap(kind => payload.content[kind] || []);
-                    const embedded = entries.filter(e => e.data_base64);
-                    const localOnly = entries.filter(e => e.source === 'local');
+                    // Hinweis auf mitgegebene Dateien ohne Modrinth-Download
+                    const embedded = LION_CONTENT_KINDS
+                        .flatMap(kind => payload.content[kind] || [])
+                        .filter(e => e.data_base64);
                     if (embedded.length) {
                         const mb = embedded.reduce((sum, e) => sum + (e.data_base64.length * 3 / 4), 0) / (1024 * 1024);
-                        showToast(`${embedded.length} file(s) not on Modrinth were embedded (${mb.toFixed(1)} MB).`, 'info', 5000);
-                    }
-                    if (localOnly.length) {
-                        showToast(`${localOnly.length} file(s) are not on Modrinth and were NOT embedded – they will be missing for the recipient.`, 'warning', 6500);
+                        showToast(`${embedded.length} file(s) without a Modrinth download were included (${mb.toFixed(1)} MB).`, 'info', 5000);
                     }
                 } else {
                     showToast('Export canceled.', 'info', 2200);
@@ -2368,6 +2371,9 @@ async function launchProfile(profileId) {
         return;
     }
 
+    // Geteilte Instanz: neuen Stand des Besitzers prüfen und nach Bestätigung übernehmen
+    if (!(await syncSharedInstanceBeforeLaunch(profileId))) return;
+
     debugLog('Launching: ' + profileName, 'info');
 
     try {
@@ -2609,6 +2615,11 @@ function showProfileDetails(profileId, view = {}) {
     currentProfile = profile;
     currentProfileSubTab = 'mods'; // Reset auf Mods beim Öffnen eines Profils
 
+    // Freunde-Kasten ausblenden (Platz für die Detailansicht) und gesperrte Inhalte einer
+    // geteilten Instanz laden
+    setFriendsPanelHidden(true);
+    loadSharedManagedFiles(profile.id);
+
     // Erstelle Details-View
     const grid = document.getElementById('profiles-grid');
     if (!grid) return;
@@ -2674,7 +2685,15 @@ function showProfileDetails(profileId, view = {}) {
                                        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; transform: scale(1);">
                             Servers
                         </button>
-                        <button class="main-category-tab" data-maincategory="logs" onclick="switchMainCategory('logs')" 
+                        <button class="main-category-tab" data-maincategory="share" onclick="switchMainCategory('share')"
+                                onmouseover="if(!this.classList.contains('active')) this.style.background='rgba(218, 165, 32, 0.1)'"
+                                onmouseout="if(!this.classList.contains('active')) this.style.background='transparent'"
+                                style="padding: 10px 24px; background: transparent; border: none; color: var(--text-secondary);
+                                       cursor: pointer; border-radius: 8px; font-weight: 600; font-size: 15px;
+                                       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; transform: scale(1);">
+                            Share
+                        </button>
+                        <button class="main-category-tab" data-maincategory="logs" onclick="switchMainCategory('logs')"
                                 onmouseover="if(!this.classList.contains('active')) this.style.background='rgba(218, 165, 32, 0.1)'"
                                 onmouseout="if(!this.classList.contains('active')) this.style.background='transparent'"
                                 style="padding: 10px 24px; background: transparent; border: none; color: var(--text-secondary);
@@ -2763,6 +2782,11 @@ function switchMainCategory(categoryName) {
                 stopLogsAutoRefresh();
                 stopLiveLog();
                 stopModsWatcher();
+            } else if (categoryName === 'share') {
+                loadShareTab(currentProfile.id);
+                stopLogsAutoRefresh();
+                stopLiveLog();
+                stopModsWatcher();
             } else if (categoryName === 'logs') {
                 stopModsWatcher();
                 currentLogType = 'latest';
@@ -2827,6 +2851,9 @@ function renderMainCategoryContent(categoryName, profile) {
             return `
                 ${renderProfileTabContent('servers', profile)}
             `;
+
+        case 'share':
+            return renderShareTabShell(profile);
 
         case 'logs':
             return renderLogsContent(profile);
@@ -3990,14 +4017,18 @@ function renderInstalledModsList(mods, profileId) {
         const file = escapeAttr(mod.filename);
         const jsFile = escapeAttr(String(mod.filename).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
         const updateStatus = getModUpdateStatus(profileId, mod.filename);
+        // In geteilten Instanzen sind die Mods des Besitzers gesperrt
+        const sharedOwner = isManagedSharedMod(profileId, mod.filename);
+        const lockTitle = sharedOwner ? escapeAttr(`Gehört zur geteilten Instanz von ${sharedOwner}`) : '';
 
         return `
         <div class="installed-mod-card${mod.disabled ? ' is-disabled' : ''}" data-filename="${file}" data-mod-id="${escapeAttr(updateStatus?.project_id || mod.mod_id || '')}"
              onclick="if(!event.target.closest('input, button')) { showModDetailsFromProfile(this.dataset.modId, 'modrinth'); }">
             <!-- Checkbox -->
-            <input type="checkbox" class="mod-checkbox" data-filename="${file}"
+            <input type="checkbox" class="mod-checkbox" data-filename="${file}" aria-label="Auswählen"
                    onchange="toggleModSelection('${jsFile}')"
                    onclick="event.stopPropagation();"
+                   ${sharedOwner ? `disabled title="${lockTitle}"` : ''}
                    style="width: 18px; height: 18px; cursor: pointer; flex-shrink: 0; accent-color: var(--gold);">
 
             <!-- Icon -->
@@ -4015,6 +4046,7 @@ function renderInstalledModsList(mods, profileId) {
                         ${escapeHtml(mod.name || mod.filename)}
                     </h4>
                     ${mod.disabled ? '<span style="background: #f44336; color: white; font-size: 9px; padding: 2px 5px; border-radius: 3px;">DEAKTIVIERT</span>' : ''}
+                    ${sharedOwner ? `<span class="shared-lock-badge" title="${lockTitle}"><i class="bi bi-lock-fill"></i> ${escapeHtml(sharedOwner)}</span>` : ''}
                 </div>
                 <p style="margin: 3px 0 0 0; color: var(--text-secondary); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                     ${escapeHtml(mod.filename)}
@@ -4024,13 +4056,13 @@ function renderInstalledModsList(mods, profileId) {
 
             <!-- Actions -->
             <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
-                <span class="mod-update-slot" style="display: contents;">${renderModUpdateButton(profileId, updateStatus)}</span>
+                <span class="mod-update-slot" style="display: contents;">${sharedOwner ? '' : renderModUpdateButton(profileId, updateStatus)}</span>
                 <button class="btn btn-secondary content-action-btn" onclick="event.stopPropagation(); toggleMod('${escapeAttr(profileId)}', '${jsFile}', ${mod.disabled})"
-                        title="${mod.disabled ? 'Aktivieren' : 'Deaktivieren'}">
+                        ${sharedOwner ? `disabled title="${lockTitle}"` : `title="${mod.disabled ? 'Aktivieren' : 'Deaktivieren'}"`}>
                     ${mod.disabled ? '<i class="bi bi-check-lg"></i>' : '||'}
                 </button>
                 <button class="btn btn-secondary content-action-btn content-action-delete" onclick="event.stopPropagation(); deleteMod('${escapeAttr(profileId)}', '${jsFile}')"
-                        title="Löschen">
+                        ${sharedOwner ? `disabled title="${lockTitle}"` : 'title="Löschen"'}>
                     ×
                 </button>
             </div>
@@ -4079,7 +4111,8 @@ function toggleModSelection(filename) {
 }
 
 function toggleSelectAllMods() {
-    const checkboxes = document.querySelectorAll('.mod-checkbox');
+    // Gesperrte Mods (geteilte Instanz) sind deaktiviert und werden nicht mit ausgewählt
+    const checkboxes = document.querySelectorAll('.mod-checkbox:not(:disabled)');
     const selectAllCheckbox = document.getElementById('select-all-mods');
 
     if (selectAllCheckbox.checked) {

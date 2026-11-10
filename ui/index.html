@@ -74,7 +74,7 @@
             </div>
 
             <!-- Profiles Page -->
-            <div id="page-profiles" class="page">
+            <div id="page-profiles" class="page has-friends">
                 <div class="header">
                     <h1 data-i18n="nav_profiles">Profiles</h1>
                 </div>
@@ -83,10 +83,11 @@
                         <div class="loading" data-i18n="loading_profiles">Loading profiles...</div>
                     </div>
                 </div>
+                <aside class="friends-panel" data-friends-panel aria-label="Freunde"></aside>
             </div>
 
             <!-- Local Servers Page -->
-            <div id="page-servers-hub" class="page hidden">
+            <div id="page-servers-hub" class="page has-friends hidden">
                 <div class="header">
                     <h1>Local Servers</h1>
                 </div>
@@ -95,6 +96,7 @@
                         <div class="loading">Loading servers...</div>
                     </div>
                 </div>
+                <aside class="friends-panel" data-friends-panel aria-label="Freunde"></aside>
             </div>
 
             <!-- Content Browser Page -->
@@ -258,7 +260,7 @@
             </div>
 
             <!-- Skins Page -->
-            <div id="page-skins" class="page hidden">
+            <div id="page-skins" class="page has-friends hidden">
                 <div class="header">
                     <h1 data-i18n="nav_skins">Skins</h1>
                 </div>
@@ -337,6 +339,7 @@
                         </div>
                     </div>
                 </div>
+                <aside class="friends-panel" data-friends-panel aria-label="Freunde"></aside>
             </div>
 
             <!-- Settings Page -->
@@ -345,6 +348,9 @@
                     <h1 data-i18n="nav_settings">Settings</h1>
                 </div>
                 <div class="content" style="height: calc(100vh - 140px); overflow-y: auto; padding-bottom: 24px;">
+
+                    <!-- Launcher-Updates (wird von updater.js gefüllt) -->
+                    <div id="launcher-update-card" class="launcher-update-card"></div>
 
                     <!-- Account Settings -->
                     <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
@@ -518,5 +524,7 @@
     <script src="i18n.js"></script>
     <script src="markdown.js"></script>
     <script src="app.js"></script>
+    <script src="friends.js"></script>
+    <script src="updater.js"></script>
 </body>
 </html>

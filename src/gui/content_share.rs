@@ -100,7 +100,7 @@ pub struct ContentImportReport {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct ContentImportProgress {
+pub(crate) struct ContentImportProgress {
     kind: String,
     done: usize,
     total: usize,
@@ -110,14 +110,14 @@ struct ContentImportProgress {
 // ==================== Inhaltsarten ====================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ContentKind {
+pub(crate) enum ContentKind {
     Mods,
     ResourcePacks,
     ShaderPacks,
 }
 
 impl ContentKind {
-    fn parse(kind: &str) -> Result<Self, String> {
+    pub(crate) fn parse(kind: &str) -> Result<Self, String> {
         match kind {
             "mods" => Ok(Self::Mods),
             "resourcepacks" => Ok(Self::ResourcePacks),
@@ -126,7 +126,7 @@ impl ContentKind {
         }
     }
 
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Mods => "mods",
             Self::ResourcePacks => "resourcepacks",
@@ -336,7 +336,7 @@ async fn find_compatible_version(
 
 // ==================== Datei-Hilfen ====================
 
-fn hash_file(path: &Path) -> std::io::Result<(String, String, u64)> {
+pub(crate) fn hash_file(path: &Path) -> std::io::Result<(String, String, u64)> {
     use sha1::Digest as _;
     let mut file = std::fs::File::open(path)?;
     let mut sha1 = sha1::Sha1::new();
@@ -359,14 +359,14 @@ fn hash_file(path: &Path) -> std::io::Result<(String, String, u64)> {
     ))
 }
 
-fn sha1_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha1_hex(bytes: &[u8]) -> String {
     use sha1::Digest as _;
     hex::encode(sha1::Sha1::digest(bytes))
 }
 
 /// Erlaubt nur einfache Dateinamen (kein Pfad, kein `..`) – die Namen stammen aus einer
 /// fremden `.lion`-Datei bzw. der Modrinth-API.
-fn safe_file_name(name: &str) -> Option<String> {
+pub(crate) fn safe_file_name(name: &str) -> Option<String> {
     let name = name.trim();
     if name.is_empty()
         || name == "."
@@ -379,7 +379,7 @@ fn safe_file_name(name: &str) -> Option<String> {
     Some(name.to_string())
 }
 
-fn zip_folder(dir: &Path) -> anyhow::Result<Vec<u8>> {
+pub(crate) fn zip_folder(dir: &Path) -> anyhow::Result<Vec<u8>> {
     let mut cursor = Cursor::new(Vec::new());
     {
         let mut zip = zip::ZipWriter::new(&mut cursor);
@@ -452,7 +452,9 @@ fn local_display_name(game_dir: &Path, kind: ContentKind, filename: &str) -> Opt
         .map(str::to_string)
 }
 
-async fn load_profile(profile_id: &str) -> Result<crate::types::profile::Profile, String> {
+pub(crate) async fn load_profile(
+    profile_id: &str,
+) -> Result<crate::types::profile::Profile, String> {
     let manager = ProfileManager::new().map_err(|e| e.to_string())?;
     let profiles = manager.load_profiles().await.map_err(|e| e.to_string())?;
     profiles
@@ -531,22 +533,21 @@ fn scan_local_content(game_dir: &Path, kind: ContentKind) -> Result<Vec<LocalCon
     Ok(files)
 }
 
-/// Erstellt die Inhaltsliste für den `.lion`-Export (exakte Versionen bzw. eingebettete Dateien).
-///
-/// `embed_missing = false`: Dateien, die es nicht auf Modrinth gibt, werden nur namentlich
-/// aufgeführt (kleinere Datei; der Empfänger bekommt sie als "fehlt" gemeldet).
+/// Erstellt die Inhaltsliste für den `.lion`-Export: exakte Modrinth-Versionen; Dateien ohne
+/// Modrinth-Download (CurseForge-only, selbst gebaut, ...) werden immer direkt mitgegeben.
 #[tauri::command]
 pub async fn export_profile_content(
     profile_id: String,
     kind: String,
-    embed_missing: Option<bool>,
 ) -> Result<Vec<SharedContentEntry>, String> {
     let kind = ContentKind::parse(&kind)?;
     let profile = load_profile(&profile_id).await?;
-    export_content_from(&profile.game_dir, kind, embed_missing.unwrap_or(true)).await
+    export_content_from(&profile.game_dir, kind, true).await
 }
 
-async fn export_content_from(
+/// `embed_missing = false` wird für geteilte Instanzen genutzt: Dort liefert der Besitzer
+/// Dateien ohne Modrinth-Download selbst aus, statt sie ins Manifest zu packen.
+pub(crate) async fn export_content_from(
     game_dir: &Path,
     kind: ContentKind,
     embed_missing: bool,
@@ -948,7 +949,7 @@ pub async fn import_profile_content(
 
 /// Kern des Imports (ohne Tauri-Abhängigkeit, damit testbar).
 /// Gibt den Bericht und die Projekt-IDs der installierten Inhalte zurück.
-async fn import_content_into(
+pub(crate) async fn import_content_into(
     game_dir: &Path,
     mc_version: &str,
     loader: &str,
@@ -1048,7 +1049,7 @@ async fn import_content_into(
             jobs.push(ImportJob::Fail {
                 name: entry.display_name(),
                 reason: "Nicht auf Modrinth verfügbar und nicht in der .lion-Datei enthalten \
-                         (beim Teilen \"Dateien einbetten\" aktivieren)"
+                         (Datei mit einer älteren Launcher-Version exportiert)"
                     .to_string(),
             });
         }
@@ -1264,6 +1265,47 @@ mod tests {
             assert!(report.failed.is_empty());
         }
         std::fs::remove_dir_all(&target).ok();
+    }
+
+    /// Selbst gebaute JAR (nicht auf Modrinth) wird in die .lion-Datei gepackt und kommt
+    /// byte-identisch beim Empfänger an.
+    /// `cargo test --bin Lion-Launcher custom_jar_is_embedded -- --ignored`
+    #[test]
+    #[ignore = "benötigt Internet (Modrinth)"]
+    fn custom_jar_is_embedded() {
+        let base = std::env::temp_dir().join(format!("lion-custom-jar-{}", std::process::id()));
+        let source = base.join("source");
+        let target = base.join("target");
+        std::fs::create_dir_all(source.join("mods")).unwrap();
+        // Zufälliger Inhalt → garantiert unbekannt für Modrinth
+        let custom: Vec<u8> = uuid::Uuid::new_v4().as_bytes().repeat(512);
+        std::fs::write(source.join("mods").join("my-own-mod-1.0.jar"), &custom).unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let exported = rt
+            .block_on(export_content_from(&source, ContentKind::Mods, true))
+            .unwrap();
+        assert_eq!(exported.len(), 1);
+        assert_eq!(exported[0].source.as_deref(), Some("embedded"));
+        assert!(exported[0].data_base64.is_some());
+
+        let json = serde_json::to_string(&exported).unwrap();
+        let entries: Vec<SharedContentEntry> = serde_json::from_str(&json).unwrap();
+        let (report, _) = rt
+            .block_on(import_content_into(
+                &target,
+                "1.21.1",
+                "fabric",
+                ContentKind::Mods,
+                entries,
+                true,
+                |_| {},
+            ))
+            .unwrap();
+        assert_eq!(report.installed, 1, "failed: {:?}", report.failed);
+        let imported = std::fs::read(target.join("mods").join("my-own-mod-1.0.jar")).unwrap();
+        assert_eq!(imported, custom);
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]

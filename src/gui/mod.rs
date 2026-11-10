@@ -2,6 +2,7 @@ pub mod auth;
 pub mod components;
 pub mod content_share;
 pub mod external_links;
+pub mod friends;
 pub mod mod_browser;
 pub mod mod_updates;
 pub mod profile_manager;
@@ -10,6 +11,7 @@ pub mod server_content;
 pub mod server_manager;
 pub mod settings;
 pub mod themes;
+pub mod updater;
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {
