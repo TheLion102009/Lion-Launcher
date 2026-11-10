@@ -18,7 +18,6 @@ depends=(
     'cairo'
     'gdk-pixbuf2'
     'atk'
-    'openssl'
 )
 makedepends=(
     'rust'
