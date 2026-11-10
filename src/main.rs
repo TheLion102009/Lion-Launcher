@@ -70,6 +70,8 @@ fn main() {
             gui::friends::friends_add,
             gui::friends::friends_accept,
             gui::friends::friends_remove,
+            gui::friends::friends_messages,
+            gui::friends::friends_send_message,
             // Geteilte Instanzen
             gui::friends::share::share_status,
             gui::friends::share::share_create,
@@ -84,6 +86,7 @@ fn main() {
             gui::friends::share::share_accept,
             gui::friends::share::share_decline_invite,
             gui::friends::share::share_check_update,
+            gui::friends::share::share_check_all_updates,
             gui::friends::share::share_apply_update,
             gui::friends::share::share_leave,
             gui::initialize_launcher,

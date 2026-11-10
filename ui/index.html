@@ -352,6 +352,34 @@
                     <!-- Launcher-Updates (wird von updater.js gefüllt) -->
                     <div id="launcher-update-card" class="launcher-update-card"></div>
 
+                    <!-- Datenschutz: automatische Verbindungen abschaltbar (siehe PRIVACY.md) -->
+                    <div class="launcher-update-card">
+                        <div class="launcher-update-head">
+                            <h3><i class="bi bi-shield-lock"></i> Datenschutz</h3>
+                            <a href="https://github.com/TheLion102009/Lion-Launcher/blob/master/PRIVACY.md" class="share-muted">Datenschutzerklärung</a>
+                        </div>
+                        <div class="privacy-row">
+                            <div>
+                                <div class="privacy-title">Automatisch nach Launcher-Updates suchen</div>
+                                <div class="share-muted">Fragt beim Start und alle 6 Stunden bei GitHub nach einer neuen Version.</div>
+                            </div>
+                            <label class="lion-toggle" title="Automatische Update-Prüfung">
+                                <input type="checkbox" id="privacy-auto-update" aria-label="Automatische Update-Prüfung">
+                                <span class="lion-toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="privacy-row">
+                            <div>
+                                <div class="privacy-title">Freunde-System (P2P)</div>
+                                <div class="share-muted">Online-Status, Chat und geteilte Instanzen. Nutzt die öffentlichen iroh-Relays, damit Freunde dich finden. Änderung wirkt nach einem Neustart.</div>
+                            </div>
+                            <label class="lion-toggle" title="Freunde-System">
+                                <input type="checkbox" id="privacy-friends" aria-label="Freunde-System">
+                                <span class="lion-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+
                     <!-- Account Settings -->
                     <div style="background: var(--bg-medium); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
                         <h3 style="color: var(--gold); margin: 0 0 20px 0;" data-i18n="mc_account">👤 Minecraft Account</h3>
@@ -522,9 +550,6 @@
     <input type="file" id="lion-import-input" accept=".lion,application/json" style="display: none;">
 
     <script src="i18n.js"></script>
-    <script src="markdown.js"></script>
     <script src="app.js"></script>
-    <script src="friends.js"></script>
-    <script src="updater.js"></script>
 </body>
 </html>

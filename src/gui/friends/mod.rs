@@ -20,7 +20,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use store::{Friend, FriendState, FriendsState, ShareInvite};
+use store::{ChatMessage, Friend, FriendState, FriendsState, ShareInvite};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, OnceCell};
 
@@ -33,6 +33,9 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(12);
 
 /// Event an das Frontend, wenn sich Freunde, Status oder Einladungen geändert haben.
 const CHANGED_EVENT: &str = "friends-changed";
+
+/// Maximale Länge einer Chat-Nachricht (Zeichen).
+const MAX_CHAT_CHARS: usize = 2000;
 
 static SERVICE: OnceCell<Arc<FriendsService>> = OnceCell::const_new();
 
@@ -51,6 +54,15 @@ pub(crate) struct FriendsService {
 /// Startet den Dienst im Hintergrund (aufgerufen beim App-Start).
 pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
+        // In den Einstellungen abschaltbar (Datenschutz): dann keinerlei P2P-Verbindungen
+        let enabled = crate::gui::settings::load_config()
+            .await
+            .map(|c| c.privacy.friends_enabled)
+            .unwrap_or(true);
+        if !enabled {
+            tracing::info!("Friends service disabled in settings");
+            return;
+        }
         match FriendsService::bind(app).await {
             Ok(service) => {
                 let service = SERVICE.get_or_init(|| async { service }).await.clone();
@@ -146,6 +158,8 @@ pub struct FriendView {
     pub uuid: Option<String>,
     pub state: FriendState,
     pub online: bool,
+    /// Ungelesene Nachrichten/Einladungen
+    pub unread: usize,
 }
 
 #[derive(Serialize)]
@@ -366,6 +380,18 @@ impl FriendsService {
                 state
                     .invites
                     .retain(|i| !(i.share_id == share_id && i.owner_id == remote));
+                // Einladung erscheint zusätzlich im Chat mit dem Freund
+                state.push_message(ChatMessage {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    friend_id: remote.to_string(),
+                    outgoing: false,
+                    text: String::new(),
+                    sent_at: store::now_rfc3339(),
+                    delivered: true,
+                    read: false,
+                    share_id: Some(share_id.clone()),
+                    share_name: Some(name.clone()),
+                });
                 state.invites.push(ShareInvite {
                     share_id,
                     owner_id: remote.to_string(),
@@ -377,6 +403,30 @@ impl FriendsService {
                 state.save();
                 drop(state);
                 self.notify_changed();
+                protocol::encode_ok(&Response::Ok)
+            }
+            Request::Chat { id, text } => {
+                let mut state = self.state.lock().await;
+                if !state.is_accepted_friend(remote) {
+                    return protocol::encode_error("Nur Freunde können Nachrichten senden");
+                }
+                // Wiederholte Zustellung derselben Nachricht ignorieren
+                if !state.messages.iter().any(|m| m.id == id) {
+                    state.push_message(ChatMessage {
+                        id,
+                        friend_id: remote.to_string(),
+                        outgoing: false,
+                        text: text.chars().take(MAX_CHAT_CHARS).collect(),
+                        sent_at: store::now_rfc3339(),
+                        delivered: true,
+                        read: false,
+                        share_id: None,
+                        share_name: None,
+                    });
+                    state.save();
+                    drop(state);
+                    self.notify_changed();
+                }
                 protocol::encode_ok(&Response::Ok)
             }
             other => share::handle_share_request(self, remote, other).await,
@@ -443,6 +493,9 @@ impl FriendsService {
                             service.send(&friend.id, &service.hello_request()).await
                         {
                             service.update_friend_profile(&friend.id, name, uuid).await;
+                            // Erreichbar → Liegengebliebenes nachholen
+                            service.deliver_pending_messages(&friend.id).await;
+                            share::on_friend_online(&service, &friend.id).await;
                         }
                     }
                     // Noch nicht zugestellte Anfrage erneut senden
@@ -464,6 +517,41 @@ impl FriendsService {
         self.notify_changed();
     }
 
+    /// Sendet noch nicht zugestellte Nachrichten an einen Freund (in Reihenfolge).
+    async fn deliver_pending_messages(&self, friend_id: &str) {
+        let pending: Vec<(String, String)> = {
+            let state = self.state.lock().await;
+            state
+                .messages
+                .iter()
+                .filter(|m| {
+                    m.friend_id == friend_id && m.outgoing && !m.delivered && m.share_id.is_none()
+                })
+                .map(|m| (m.id.clone(), m.text.clone()))
+                .collect()
+        };
+        for (id, text) in pending {
+            if self
+                .send(
+                    friend_id,
+                    &Request::Chat {
+                        id: id.clone(),
+                        text,
+                    },
+                )
+                .await
+                .is_err()
+            {
+                break;
+            }
+            let mut state = self.state.lock().await;
+            if let Some(message) = state.messages.iter_mut().find(|m| m.id == id) {
+                message.delivered = true;
+            }
+            state.save();
+        }
+    }
+
     pub(crate) async fn view(&self) -> FriendsView {
         let (name, uuid) = self.my_identity();
         let id = self.my_id();
@@ -477,6 +565,7 @@ impl FriendsService {
                 uuid: f.uuid.clone(),
                 state: f.state,
                 online: f.state == FriendState::Accepted && self.is_online(&f.id),
+                unread: state.unread_count(&f.id),
             })
             .collect();
         friends.sort_by_key(|f| (!f.online, f.name.to_lowercase()));
@@ -592,11 +681,83 @@ pub async fn friends_remove(id: String) -> Result<(), String> {
         let mut state = service.state.lock().await;
         state.friends.retain(|f| f.id != id);
         state.invites.retain(|i| i.owner_id != id);
+        state.messages.retain(|m| m.friend_id != id);
         state.save();
     }
     service.notify_changed();
     let _ = service.send(&id, &Request::RemoveFriend).await;
     Ok(())
+}
+
+/// Chatverlauf mit einem Freund; markiert eingehende Nachrichten als gelesen.
+#[tauri::command]
+pub async fn friends_messages(friend_id: String) -> Result<Vec<ChatMessage>, String> {
+    let service = service()?;
+    let mut state = service.state.lock().await;
+    let mut changed = false;
+    for message in state
+        .messages
+        .iter_mut()
+        .filter(|m| m.friend_id == friend_id && !m.read)
+    {
+        message.read = true;
+        changed = true;
+    }
+    let messages = state
+        .messages
+        .iter()
+        .filter(|m| m.friend_id == friend_id)
+        .cloned()
+        .collect();
+    if changed {
+        state.save();
+        drop(state);
+        service.notify_changed();
+    }
+    Ok(messages)
+}
+
+/// Sendet eine Nachricht. Ist der Freund offline, wird sie zugestellt, sobald er online kommt.
+#[tauri::command]
+pub async fn friends_send_message(friend_id: String, text: String) -> Result<ChatMessage, String> {
+    let service = service()?;
+    let text: String = text.trim().chars().take(MAX_CHAT_CHARS).collect();
+    if text.is_empty() {
+        return Err("Leere Nachricht".to_string());
+    }
+    let mut message = ChatMessage {
+        id: uuid::Uuid::new_v4().to_string(),
+        friend_id: friend_id.clone(),
+        outgoing: true,
+        text: text.clone(),
+        sent_at: store::now_rfc3339(),
+        delivered: false,
+        read: true,
+        share_id: None,
+        share_name: None,
+    };
+    {
+        let mut state = service.state.lock().await;
+        if !state.is_accepted_friend(&friend_id) {
+            return Err("Nur Freunden kann geschrieben werden".to_string());
+        }
+        state.push_message(message.clone());
+        state.save();
+    }
+    let request = Request::Chat {
+        id: message.id.clone(),
+        text,
+    };
+    if service.send(&friend_id, &request).await.is_ok() {
+        message.delivered = true;
+        let mut state = service.state.lock().await;
+        if let Some(stored) = state.messages.iter_mut().find(|m| m.id == message.id) {
+            stored.delivered = true;
+        }
+        state.save();
+    }
+    service.notify_changed();
+    Ok(message)
 }
 
 #[cfg(test)]

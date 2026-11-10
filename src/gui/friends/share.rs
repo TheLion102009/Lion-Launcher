@@ -11,7 +11,7 @@
 
 use super::protocol::{self, Request, Response};
 use super::store::{
-    blobs_dir, ConfigEntry, FriendsState, JoinedShare, OwnedShare, ShareManifest, ALL_KINDS,
+    self, blobs_dir, ConfigEntry, FriendsState, JoinedShare, OwnedShare, ShareManifest, ALL_KINDS,
 };
 use super::{service, FriendsService};
 use crate::core::profiles::ProfileManager;
@@ -30,10 +30,6 @@ const CONFIG_ROOTS: [&str; 3] = ["config", "defaultconfigs", "kubejs"];
 const CONFIG_ROOT_FILES: [&str; 3] = ["options.txt", "optionsof.txt", "optionsshaders.txt"];
 const MAX_CONFIG_FILE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CONFIG_FILES_LISTED: usize = 3000;
-
-/// Vom Besitzer geladene, noch nicht angewendete Updates (Profil-ID → Manifest).
-static PENDING_UPDATES: once_cell::sync::Lazy<std::sync::Mutex<HashMap<String, ShareManifest>>> =
-    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
 
 // ==================== Hilfen ====================
 
@@ -449,7 +445,7 @@ async fn apply_manifest(
             let mut entry = entry.clone();
             if entry.source.as_deref() == Some("share") {
                 let sha1 = entry.sha1.clone().unwrap_or_default();
-                match service.fetch_blob(owner_id, &new.share_id, &sha1).await {
+                match load_blob(service, owner_id, &new.share_id, &sha1).await {
                     Ok(bytes) => entry.data_base64 = Some(general_purpose::STANDARD.encode(bytes)),
                     Err(e) => {
                         result.failed.push(format!("{}: {}", entry_name(&entry), e));
@@ -497,10 +493,7 @@ async fn apply_manifest(
         if local_sha1.as_deref() == Some(config.sha1.as_str()) {
             continue;
         }
-        match service
-            .fetch_blob(owner_id, &new.share_id, &config.sha1)
-            .await
-        {
+        match load_blob(service, owner_id, &new.share_id, &config.sha1).await {
             Ok(bytes) => {
                 if let Some(parent) = target.parent() {
                     std::fs::create_dir_all(parent).ok();
@@ -514,6 +507,130 @@ async fn apply_manifest(
     }
 
     Ok(result)
+}
+
+/// Liefert eine Datei des Besitzers: zuerst aus dem lokalen Speicher (vorab geladen),
+/// sonst direkt vom Besitzer – und legt sie dabei für später ab.
+async fn load_blob(
+    service: &FriendsService,
+    owner_id: &str,
+    share_id: &str,
+    sha1: &str,
+) -> Result<Vec<u8>, String> {
+    if let Ok(bytes) = tokio::fs::read(blob_path(sha1)).await {
+        if content_share::sha1_hex(&bytes).eq_ignore_ascii_case(sha1) {
+            return Ok(bytes);
+        }
+    }
+    let bytes = service.fetch_blob(owner_id, share_id, sha1).await?;
+    write_blob(sha1, &bytes)?;
+    Ok(bytes)
+}
+
+/// Lädt den neuesten Stand des Besitzers samt seiner Dateien vorab, damit das Update später
+/// auch ohne den Besitzer übernommen werden kann. Gibt den vorgemerkten Stand zurück.
+async fn prefetch_update(
+    service: &FriendsService,
+    owner_id: &str,
+    share_id: &str,
+) -> Result<Option<ShareManifest>, String> {
+    let manifest = manifest_from(
+        service,
+        owner_id,
+        Request::GetManifest {
+            share_id: share_id.to_string(),
+        },
+    )
+    .await?;
+    let applied = load_state_snapshot(|state| {
+        state
+            .joined_shares
+            .iter()
+            .find(|j| j.owner_id == owner_id && j.share_id == share_id)
+            .map(|j| j.manifest.revision)
+    })
+    .await?;
+    let Some(applied) = applied else {
+        return Ok(None);
+    };
+    if manifest.revision <= applied {
+        return Ok(None);
+    }
+
+    let hashes: Vec<String> = manifest.blob_hashes().map(str::to_string).collect();
+    for sha1 in hashes {
+        load_blob(service, owner_id, share_id, &sha1).await?;
+    }
+
+    let mut state = service.state.lock().await;
+    if let Some(joined) = state.joined_by_share_mut(owner_id, share_id) {
+        joined.latest_revision = manifest.revision;
+        joined.pending = Some(manifest.clone());
+    }
+    state.save();
+    drop(state);
+    service.notify_changed();
+    Ok(Some(manifest))
+}
+
+/// Zeitpunkt der letzten Vorab-Prüfung je geteilter Instanz (nicht bei jedem Online-Check).
+static LAST_PREFETCH: once_cell::sync::Lazy<std::sync::Mutex<HashMap<String, std::time::Instant>>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+const PREFETCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Wird aufgerufen, sobald ein Freund erreichbar ist: offene Update-Hinweise an ihn zustellen
+/// und neue Stände seiner geteilten Instanzen vorab laden.
+pub(super) async fn on_friend_online(service: &Arc<FriendsService>, friend_id: &str) {
+    let (notify, joined): (Vec<(String, u64)>, Vec<String>) = {
+        let state = service.state.lock().await;
+        (
+            state
+                .owned_shares
+                .iter()
+                .filter(|s| s.pending_notify.iter().any(|m| m == friend_id))
+                .map(|s| (s.share_id.clone(), s.manifest.revision))
+                .collect(),
+            state
+                .joined_shares
+                .iter()
+                .filter(|j| j.owner_id == friend_id && !j.ended)
+                .map(|j| j.share_id.clone())
+                .collect(),
+        )
+    };
+
+    for (share_id, revision) in notify {
+        let request = Request::ShareUpdated {
+            share_id: share_id.clone(),
+            revision,
+        };
+        if service.send(friend_id, &request).await.is_ok() {
+            let mut state = service.state.lock().await;
+            if let Some(share) = state.owned_by_id_mut(&share_id) {
+                share.pending_notify.retain(|m| m != friend_id);
+            }
+            state.save();
+        }
+    }
+
+    for share_id in joined {
+        let key = format!("{friend_id}/{share_id}");
+        let due = {
+            let mut last = LAST_PREFETCH.lock().unwrap_or_else(|e| e.into_inner());
+            let due = last
+                .get(&key)
+                .is_none_or(|t| t.elapsed() >= PREFETCH_INTERVAL);
+            if due {
+                last.insert(key, std::time::Instant::now());
+            }
+            due
+        };
+        if due {
+            if let Err(e) = prefetch_update(service, friend_id, &share_id).await {
+                tracing::warn!("Prefetch of shared instance {} failed: {}", share_id, e);
+            }
+        }
+    }
 }
 
 fn remove_content(game_dir: &Path, kind: ContentKind, entry: &SharedContentEntry) {
@@ -617,6 +734,19 @@ pub(super) async fn handle_share_request(
                 state.save();
                 drop(state);
                 service.notify_changed();
+                // Neuen Stand gleich vorab laden, solange der Besitzer online ist
+                let owner = remote.to_string();
+                tokio::spawn(async move {
+                    if let Ok(service) = super::service() {
+                        if let Err(e) = prefetch_update(&service, &owner, &share_id).await {
+                            tracing::warn!(
+                                "Prefetch of shared instance {} failed: {}",
+                                share_id,
+                                e
+                            );
+                        }
+                    }
+                });
             }
             protocol::encode_ok(&Response::Ok)
         }
@@ -678,6 +808,11 @@ pub(super) async fn deliver_pending_invites(service: &Arc<FriendsService>) {
             let mut state = service.state.lock().await;
             if let Some(share) = state.owned_by_id_mut(&share_id) {
                 share.pending_invites.retain(|f| f != &friend);
+            }
+            for message in state.messages.iter_mut().filter(|m| {
+                m.friend_id == friend && m.share_id.as_deref() == Some(share_id.as_str())
+            }) {
+                message.delivered = true;
             }
             state.save();
         }
@@ -762,6 +897,8 @@ pub enum ShareStatus {
         managed_mods: Vec<String>,
         managed_resourcepacks: Vec<String>,
         managed_shaderpacks: Vec<String>,
+        /// Projekt-IDs der Inhalte des Besitzers (keine andere Version installierbar)
+        managed_projects: Vec<String>,
     },
 }
 
@@ -815,6 +952,11 @@ async fn status_for(service: &FriendsService, profile_id: &str) -> ShareStatus {
             managed_mods: managed_files(&joined.manifest, ContentKind::Mods),
             managed_resourcepacks: managed_files(&joined.manifest, ContentKind::ResourcePacks),
             managed_shaderpacks: managed_files(&joined.manifest, ContentKind::ShaderPacks),
+            managed_projects: ALL_KINDS
+                .iter()
+                .flat_map(|kind| joined.manifest.content(*kind).iter())
+                .filter_map(|e| e.project_id.clone())
+                .collect(),
         };
     }
     ShareStatus::None
@@ -846,6 +988,7 @@ pub async fn share_create(profile_id: String) -> Result<ShareStatus, String> {
             members: Vec::new(),
             invited: Vec::new(),
             pending_invites: Vec::new(),
+            pending_notify: Vec::new(),
             config_files: Vec::new(),
             manifest,
         });
@@ -930,14 +1073,29 @@ pub async fn share_push(profile_id: String, mode: String) -> Result<ShareStatus,
         let mut state = service.state.lock().await;
         if let Some(share) = state.owned_by_profile_mut(&profile_id) {
             share.manifest = manifest;
+            // Bis zur Bestätigung gilt jedes Mitglied als "noch nicht informiert"
+            share.pending_notify = members.clone();
         }
         state.save();
     }
-    notify_members(
-        service.clone(),
-        members,
-        Request::ShareUpdated { share_id, revision },
-    );
+    for member in members {
+        let service = service.clone();
+        let share_id = share_id.clone();
+        tokio::spawn(async move {
+            let request = Request::ShareUpdated {
+                share_id: share_id.clone(),
+                revision,
+            };
+            // Offline-Mitglieder werden nachträglich informiert, sobald sie erreichbar sind
+            if service.send(&member, &request).await.is_ok() {
+                let mut state = service.state.lock().await;
+                if let Some(share) = state.owned_by_id_mut(&share_id) {
+                    share.pending_notify.retain(|m| m != &member);
+                }
+                state.save();
+            }
+        });
+    }
     service.notify_changed();
     Ok(status_for(&service, &profile_id).await)
 }
@@ -967,24 +1125,39 @@ pub async fn share_invite_friend(profile_id: String, friend_id: String) -> Resul
         state.save();
         result
     };
-    service.notify_changed();
-
-    match send_invite(&service, &friend_id, &share_id, &name, icon).await {
-        Ok(()) => Ok("Einladung gesendet".to_string()),
-        Err(_) => {
-            let mut state = service.state.lock().await;
+    let delivered = send_invite(&service, &friend_id, &share_id, &name, icon)
+        .await
+        .is_ok();
+    {
+        let mut state = service.state.lock().await;
+        // Einladung erscheint auch im eigenen Chat mit dem Freund
+        state.push_message(store::ChatMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            friend_id: friend_id.clone(),
+            outgoing: true,
+            text: String::new(),
+            sent_at: store::now_rfc3339(),
+            delivered,
+            read: true,
+            share_id: Some(share_id.clone()),
+            share_name: Some(name),
+        });
+        if !delivered {
             if let Some(share) = state.owned_by_profile_mut(&profile_id) {
                 if !share.pending_invites.contains(&friend_id) {
                     share.pending_invites.push(friend_id);
                 }
             }
-            state.save();
-            Ok(
-                "Dein Freund ist offline – die Einladung wird zugestellt, sobald er online ist"
-                    .to_string(),
-            )
         }
+        state.save();
     }
+    service.notify_changed();
+
+    Ok(if delivered {
+        "Einladung gesendet".to_string()
+    } else {
+        "Dein Freund ist offline – die Einladung wird zugestellt, sobald er online ist".to_string()
+    })
 }
 
 #[tauri::command]
@@ -1308,6 +1481,7 @@ pub async fn share_accept(
             latest_revision: manifest.revision,
             manifest,
             ended: false,
+            pending: None,
         });
         state.save();
     }
@@ -1340,96 +1514,116 @@ pub struct UpdateCheck {
     pub message: Option<String>,
 }
 
-/// Prüft beim Besitzer, ob es einen neuen Stand gibt (wird vor dem Spielstart aufgerufen).
-#[tauri::command]
-pub async fn share_check_update(profile_id: String) -> Result<UpdateCheck, String> {
-    let service = service()?;
-    let joined = load_state_snapshot(|state| state.joined_by_profile(&profile_id).cloned())
+/// Prüft, ob es für eine geteilte Instanz einen neuen Stand gibt. Ist der Besitzer online, wird
+/// sein neuester Stand (samt Dateien) vorab geladen; sonst wird ein früher vorab geladener Stand
+/// verwendet – so kommen Updates auch an, wenn der Besitzer gerade offline ist.
+async fn check_update_for(
+    service: &FriendsService,
+    profile_id: &str,
+) -> Result<UpdateCheck, String> {
+    let joined = load_state_snapshot(|state| state.joined_by_profile(profile_id).cloned())
         .await?
         .ok_or_else(|| "Diese Instanz ist keine geteilte Instanz".to_string())?;
     let revision = joined.manifest.revision;
-
-    if joined.ended {
-        return Ok(UpdateCheck {
-            available: false,
-            owner_online: service.is_online(&joined.owner_id),
-            ended: true,
-            revision,
-            latest_revision: revision,
-            diff: None,
-            message: Some(format!(
-                "{} teilt diese Instanz nicht mehr",
-                joined.owner_name
-            )),
-        });
-    }
-
-    let request = Request::GetManifest {
-        share_id: joined.share_id.clone(),
-    };
-    let manifest = match manifest_from(&service, &joined.owner_id, request).await {
-        Ok(manifest) => manifest,
-        Err(e) => {
-            return Ok(UpdateCheck {
-                available: false,
-                owner_online: false,
-                ended: false,
-                revision,
-                latest_revision: joined.latest_revision.max(revision),
-                diff: None,
-                message: Some(e),
-            })
-        }
-    };
-
-    let latest_revision = manifest.revision;
-    {
-        let mut state = service.state.lock().await;
-        if let Some(j) = state.joined_by_profile_mut(&profile_id) {
-            j.latest_revision = latest_revision;
-        }
-        state.save();
-    }
-    if latest_revision <= revision {
-        return Ok(UpdateCheck {
-            available: false,
-            owner_online: true,
-            ended: false,
-            revision,
-            latest_revision,
-            diff: None,
-            message: None,
-        });
-    }
-
-    let diff = diff_manifests(&joined.manifest, &manifest);
-    PENDING_UPDATES
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(profile_id, manifest);
-    Ok(UpdateCheck {
-        available: true,
-        owner_online: true,
-        ended: false,
+    let mut check = UpdateCheck {
+        available: false,
+        owner_online: false,
+        ended: joined.ended,
         revision,
-        latest_revision,
-        diff: Some(diff),
+        latest_revision: joined.latest_revision.max(revision),
+        diff: None,
         message: None,
-    })
+    };
+    if joined.ended {
+        check.message = Some(format!(
+            "{} teilt diese Instanz nicht mehr",
+            joined.owner_name
+        ));
+        return Ok(check);
+    }
+
+    let pending = match prefetch_update(service, &joined.owner_id, &joined.share_id).await {
+        Ok(fresh) => {
+            check.owner_online = true;
+            fresh.or(joined.pending.clone())
+        }
+        Err(e) => {
+            check.message = Some(e);
+            joined.pending.clone()
+        }
+    };
+
+    if let Some(pending) = pending.filter(|p| p.revision > revision) {
+        check.latest_revision = pending.revision;
+        check.diff = Some(diff_manifests(&joined.manifest, &pending));
+        check.available = true;
+    }
+    Ok(check)
 }
 
-/// Wendet das zuvor mit `share_check_update` geladene Update an.
+/// Prüft eine geteilte Instanz (z.B. vor dem Spielstart).
+#[tauri::command]
+pub async fn share_check_update(profile_id: String) -> Result<UpdateCheck, String> {
+    let service = service()?;
+    check_update_for(&service, &profile_id).await
+}
+
+#[derive(Serialize)]
+pub struct SharedUpdate {
+    pub profile_id: String,
+    pub name: String,
+    pub owner_name: String,
+    pub check: UpdateCheck,
+}
+
+/// Prüft beim Start alle geteilten Instanzen nacheinander und liefert die mit Update.
+#[tauri::command]
+pub async fn share_check_all_updates() -> Result<Vec<SharedUpdate>, String> {
+    let service = service()?;
+    let joined: Vec<(String, String, String)> = load_state_snapshot(|state| {
+        state
+            .joined_shares
+            .iter()
+            .filter(|j| !j.ended)
+            .map(|j| {
+                (
+                    j.profile_id.clone(),
+                    j.manifest.name.clone(),
+                    j.owner_name.clone(),
+                )
+            })
+            .collect()
+    })
+    .await?;
+
+    let mut updates = Vec::new();
+    for (profile_id, name, owner_name) in joined {
+        match check_update_for(&service, &profile_id).await {
+            Ok(check) if check.available => updates.push(SharedUpdate {
+                profile_id,
+                name,
+                owner_name,
+                check,
+            }),
+            Ok(_) => {}
+            Err(e) => tracing::warn!("Update check for shared instance failed: {}", e),
+        }
+    }
+    Ok(updates)
+}
+
+/// Übernimmt den vorab geladenen neuen Stand einer geteilten Instanz.
 #[tauri::command]
 pub async fn share_apply_update(profile_id: String) -> Result<ApplyResult, String> {
     let service = service()?;
-    let new = PENDING_UPDATES
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remove(&profile_id)
-        .ok_or_else(|| "Kein Update geladen – bitte erneut prüfen".to_string())?;
     let joined = load_state_snapshot(|state| state.joined_by_profile(&profile_id).cloned())
         .await?
         .ok_or_else(|| "Diese Instanz ist keine geteilte Instanz".to_string())?;
+    let new = joined
+        .pending
+        .clone()
+        .filter(|p| p.revision > joined.manifest.revision)
+        .ok_or_else(|| "Kein Update vorhanden – bitte erneut prüfen".to_string())?;
     let profile = content_share::load_profile(&profile_id).await?;
 
     let result = apply_manifest(
@@ -1446,6 +1640,7 @@ pub async fn share_apply_update(profile_id: String) -> Result<ApplyResult, Strin
         if let Some(j) = state.joined_by_profile_mut(&profile_id) {
             j.latest_revision = new.revision;
             j.manifest = new;
+            j.pending = None;
         }
         state.save();
     }
@@ -1555,6 +1750,7 @@ mod tests {
             members: vec!["m".into()],
             invited: vec!["i".into()],
             pending_invites: vec![],
+            pending_notify: vec![],
             config_files: vec![],
             manifest: ShareManifest::default(),
         };

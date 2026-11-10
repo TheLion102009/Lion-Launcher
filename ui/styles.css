@@ -1877,7 +1877,7 @@ button.server-address-badge:hover {
 /* ── Freunde-Kasten (rechts auf Home, Local Servers, Skins) ────────────────── */
 .page.has-friends:not(.hidden) {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 260px;
+    grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
         "header header"
         "content friends";
@@ -1894,9 +1894,11 @@ button.server-address-badge:hover {
 }
 
 .friends-panel {
+    --friends-width: 260px;
+    --friends-rail-width: 58px;
     grid-area: friends;
-    display: flex;
-    flex-direction: column;
+    position: relative;
+    width: var(--friends-width);
     /* Beginnt knapp unter dem goldenen Strich (fest bei 80px) und endet 12px über dem Fensterrand */
     height: calc(100vh - 102px);
     margin: 10px 12px 12px 0;
@@ -1904,6 +1906,46 @@ button.server-address-badge:hover {
     border: 1px solid var(--bg-light);
     border-radius: 12px;
     overflow: hidden;
+    /* Swipe beim Ein-/Ausklappen */
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.friends-panel.collapsed {
+    width: var(--friends-rail-width);
+}
+
+.friends-expanded {
+    display: flex;
+    flex-direction: column;
+    width: var(--friends-width);
+    height: 100%;
+    transition: opacity 0.2s, transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.friends-panel.collapsed .friends-expanded {
+    opacity: 0;
+    transform: translateX(40px);
+    pointer-events: none;
+}
+
+.friends-rail {
+    position: absolute;
+    inset: 0;
+    width: var(--friends-rail-width);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+}
+
+.friends-panel.collapsed .friends-rail {
+    opacity: 1;
+    pointer-events: auto;
+    transition-delay: 0.1s;
 }
 
 /* In der Profil-Detailansicht wird der Platz für den Inhalt gebraucht */
@@ -1917,7 +1959,6 @@ button.server-address-badge:hover {
 }
 
 
-.friends-add.hidden,
 .share-config-row.hidden {
     display: none;
 }
@@ -1973,11 +2014,61 @@ button.server-address-badge:hover {
     color: #4caf50;
 }
 
-.friends-add {
+.friends-add,
+.friends-chat-form {
     display: flex;
     gap: 6px;
     padding: 10px 12px;
+}
+
+.friends-add {
     border-bottom: 1px solid var(--bg-light);
+}
+
+.friends-chat-form {
+    border-top: 1px solid var(--bg-light);
+}
+
+.friends-chat-form input {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 9px;
+    background: var(--bg-dark);
+    border: 1px solid var(--bg-light);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 12px;
+    outline: none;
+}
+
+.friends-chat-form input:focus {
+    border-color: var(--gold);
+}
+
+/* Gelber Plus-/Senden-Button links neben der Eingabe */
+.friends-add-btn,
+.friends-rail-add {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background: var(--gold);
+    color: var(--bg-dark);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 15px;
+    transition: transform 0.15s, filter 0.15s;
+}
+
+.friends-add-btn:hover,
+.friends-rail-add:hover {
+    filter: brightness(1.1);
+    transform: scale(1.05);
 }
 
 .friends-add input {
@@ -2032,10 +2123,6 @@ button.server-address-badge:hover {
     background: var(--bg-light);
 }
 
-.friends-row.invite {
-    cursor: pointer;
-}
-
 /* Offline: ausgegraut */
 .friends-row.is-offline {
     opacity: 0.45;
@@ -2064,11 +2151,6 @@ button.server-address-badge:hover {
     image-rendering: pixelated;
     background: var(--bg-dark);
     object-fit: cover;
-}
-
-.friends-avatar.square {
-    border-radius: 6px;
-    image-rendering: auto;
 }
 
 .friends-dot {
@@ -2133,9 +2215,8 @@ button.server-address-badge:hover {
     opacity: 1;
 }
 
-/* Anfragen und Einladungen brauchen immer sichtbare Buttons */
-.friends-row.is-pending .friends-row-actions,
-.friends-row.invite .friends-row-actions {
+/* Anfragen brauchen immer sichtbare Buttons */
+.friends-row.is-pending .friends-row-actions {
     opacity: 1;
 }
 
@@ -2148,12 +2229,33 @@ button.server-address-badge:hover {
 }
 
 .friends-me {
+    padding: 6px;
+    background: var(--bg-dark);
+    border-top: 1px solid var(--bg-light);
+}
+
+/* Klick auf Kopf oder Name kopiert den eigenen Freundescode */
+.friends-me-copy {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 12px;
-    background: var(--bg-dark);
-    border-top: 1px solid var(--bg-light);
+    width: 100%;
+    padding: 6px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.friends-me-copy:hover {
+    background: var(--bg-light);
+}
+
+.friends-me-text {
+    display: flex;
+    flex-direction: column;
 }
 
 .friends-me:empty {
@@ -2599,4 +2701,257 @@ button.server-address-badge:hover {
     color: var(--text-secondary);
     font-size: 12px;
     cursor: pointer;
+}
+
+/* ── An/Aus-Schalter (Mods, Server-Inhalte) ──────────────────────────────── */
+.lion-toggle {
+    position: relative;
+    display: inline-block;
+    flex-shrink: 0;
+    width: 40px;
+    height: 22px;
+    cursor: pointer;
+}
+
+.lion-toggle input {
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+}
+
+.lion-toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--bg-light);
+    border-radius: 999px;
+    transition: background 0.2s;
+}
+
+.lion-toggle-slider::before {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    background: #9e9e9e;
+    border-radius: 50%;
+    transition: transform 0.2s, background 0.2s;
+}
+
+.lion-toggle input:checked + .lion-toggle-slider {
+    background: var(--gold);
+}
+
+.lion-toggle input:checked + .lion-toggle-slider::before {
+    transform: translateX(18px);
+    background: var(--bg-dark);
+}
+
+.lion-toggle input:focus-visible + .lion-toggle-slider {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+}
+
+.lion-toggle input:disabled + .lion-toggle-slider {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ── Freunde-Leiste (eingeklappt) ─────────────────────────────────────────── */
+.friends-rail-list {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    overflow-y: auto;
+    width: 100%;
+    padding-top: 4px;
+}
+
+.friends-rail-head {
+    position: relative;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.15s, opacity 0.15s;
+}
+
+.friends-rail-head:hover {
+    transform: scale(1.08);
+}
+
+.friends-rail-head.is-offline {
+    opacity: 0.45;
+}
+
+.friends-rail-head.is-offline .friends-avatar {
+    filter: grayscale(1);
+}
+
+/* Zähler für ungelesene Nachrichten / offene Anfragen */
+.friends-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border-radius: 999px;
+    background: var(--gold);
+    color: var(--bg-dark);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+}
+
+/* Auf dem gelben Plus-Button rot, damit die Zahl lesbar bleibt */
+.friends-rail-add .friends-badge {
+    background: #e53935;
+    color: #fff;
+}
+
+.friends-badge.hidden {
+    display: none;
+}
+
+.friends-icon-btn {
+    position: relative;
+}
+
+.friends-row {
+    cursor: default;
+}
+
+.friends-row[onclick] {
+    cursor: pointer;
+}
+
+/* Ungelesenes: Buttons dauerhaft sichtbar */
+.friends-row.has-unread .friends-row-actions {
+    opacity: 1;
+}
+
+.friends-row.has-unread .friends-sub {
+    color: var(--gold);
+}
+
+/* ── Chat im Freunde-Kasten ──────────────────────────────────────────────── */
+.friends-list.hidden,
+.friends-chat.hidden {
+    display: none;
+}
+
+.friends-chat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.friends-chat-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--bg-light);
+}
+
+.friends-chat-messages {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+}
+
+.chat-message {
+    display: flex;
+    flex-direction: column;
+    max-width: 85%;
+}
+
+.chat-message.incoming {
+    align-self: flex-start;
+}
+
+.chat-message.outgoing {
+    align-self: flex-end;
+    align-items: flex-end;
+}
+
+.chat-bubble {
+    padding: 7px 10px;
+    border-radius: 12px;
+    background: var(--bg-dark);
+    color: var(--text-primary);
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.chat-message.outgoing .chat-bubble {
+    background: var(--gold);
+    color: var(--bg-dark);
+}
+
+.chat-meta {
+    margin-top: 2px;
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+
+.chat-invite {
+    padding: 10px;
+    background: var(--bg-dark);
+    border: 1px solid var(--gold);
+    border-radius: 10px;
+}
+
+.chat-invite-title {
+    color: var(--gold);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.chat-invite-name {
+    margin: 4px 0 8px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.chat-invite-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+/* ── Datenschutz-Einstellungen ───────────────────────────────────────────── */
+.privacy-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 10px 0;
+    border-top: 1px solid var(--bg-light);
+}
+
+.privacy-row:first-of-type {
+    border-top: none;
+}
+
+.privacy-title {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 2px;
 }

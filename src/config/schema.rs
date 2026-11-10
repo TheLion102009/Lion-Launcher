@@ -8,6 +8,32 @@ pub struct LauncherConfig {
     pub game_settings: GameSettings,
     pub mod_sources: ModSources,
     pub appearance: AppearanceSettings,
+    #[serde(default)]
+    pub privacy: PrivacySettings,
+}
+
+/// Funktionen, die ohne direkte Aktion Verbindungen ins Internet aufbauen (siehe PRIVACY.md).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrivacySettings {
+    /// Beim Start und regelmäßig bei GitHub nach Launcher-Updates suchen
+    #[serde(default = "enabled")]
+    pub auto_update_check: bool,
+    /// P2P-Freunde-System (Online-Status, Chat, geteilte Instanzen) starten
+    #[serde(default = "enabled")]
+    pub friends_enabled: bool,
+}
+
+fn enabled() -> bool {
+    true
+}
+
+impl Default for PrivacySettings {
+    fn default() -> Self {
+        Self {
+            auto_update_check: true,
+            friends_enabled: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +72,7 @@ impl Default for LauncherConfig {
             game_settings: GameSettings::default(),
             mod_sources: ModSources::default(),
             appearance: AppearanceSettings::default(),
+            privacy: PrivacySettings::default(),
         }
     }
 }

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath-Artefakt-Konfiguration für den Windows-Installer (in SignPath unter
+  Project → Artifact Configurations mit dem Slug "nsis-installer" anlegen und diesen Inhalt einfügen).
+
+  * Das GitHub-Artefakt ist ein ZIP (Standard von actions/upload-artifact) → Wurzel <zip-file>.
+  * Signiert wird der NSIS-Installer "Lion Launcher_<version>_x64-setup.exe".
+  * Produktname und -version werden erzwungen (Pflicht bei SignPath Foundation);
+    "version" übergibt der Workflow aus tauri.conf.json.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="*-setup.exe" product-name="Lion Launcher" product-version="${version}">
+      <authenticode-sign/>
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

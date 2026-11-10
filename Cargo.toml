@@ -2,6 +2,9 @@
 name = "Lion-Launcher"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+authors = ["Thorben Hess"]
+repository = "https://github.com/TheLion102009/Lion-Launcher"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

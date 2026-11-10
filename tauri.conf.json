@@ -53,6 +53,9 @@
     "shortDescription": "Ein moderner Minecraft Launcher",
     "longDescription": "Lion Launcher ist ein moderner, schneller Minecraft Launcher mit Unterstützung für Fabric, Quilt, Forge und NeoForge. Er bietet eine intuitive Benutzeroberfläche, einfache Mod-Installation und umfassende Profilverwaltung.",
     "publisher": "Thorben Hess",
+    "copyright": "Copyright (c) 2026 Thorben Hess – MIT License",
+    "license": "MIT",
+    "licenseFile": "pkg/installer-notice.txt",
     "linux": {
       "appimage": {
         "bundleMediaFramework": true

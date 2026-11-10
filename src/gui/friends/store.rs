@@ -129,6 +129,9 @@ pub struct OwnedShare {
     /// Vom Besitzer ausgewählte Konfig-Dateien
     #[serde(default)]
     pub config_files: Vec<String>,
+    /// Mitglieder, die vom letzten Update noch nichts wissen (waren offline)
+    #[serde(default)]
+    pub pending_notify: Vec<String>,
     pub manifest: ShareManifest,
 }
 
@@ -147,6 +150,10 @@ pub struct JoinedShare {
     /// Besitzer hat das Teilen beendet
     #[serde(default)]
     pub ended: bool,
+    /// Vorab geladener, noch nicht übernommener Stand (inkl. Dateien im Blob-Speicher) –
+    /// so lässt sich ein Update auch übernehmen, wenn der Besitzer gerade offline ist
+    #[serde(default)]
+    pub pending: Option<ShareManifest>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -170,7 +177,36 @@ pub struct FriendsState {
     pub joined_shares: Vec<JoinedShare>,
     #[serde(default)]
     pub invites: Vec<ShareInvite>,
+    #[serde(default)]
+    pub messages: Vec<ChatMessage>,
 }
+
+/// Chat-Nachricht mit einem Freund. Einladungen zu geteilten Instanzen erscheinen ebenfalls
+/// als Nachricht (`share_id` gesetzt).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub id: String,
+    pub friend_id: String,
+    /// `true` = von mir gesendet
+    pub outgoing: bool,
+    #[serde(default)]
+    pub text: String,
+    pub sent_at: String,
+    /// Ausgehend: beim Freund angekommen
+    #[serde(default)]
+    pub delivered: bool,
+    /// Eingehend: schon angesehen
+    #[serde(default)]
+    pub read: bool,
+    /// Einladung zu dieser geteilten Instanz
+    #[serde(default)]
+    pub share_id: Option<String>,
+    #[serde(default)]
+    pub share_name: Option<String>,
+}
+
+/// Maximale Anzahl gespeicherter Nachrichten pro Freund.
+pub const MAX_MESSAGES_PER_FRIEND: usize = 500;
 
 impl FriendsState {
     pub fn load() -> Self {
@@ -217,6 +253,35 @@ impl FriendsState {
         self.friend(id)
             .map(|f| f.name.clone())
             .unwrap_or_else(|| short_id(id))
+    }
+
+    /// Speichert eine Nachricht; pro Freund bleiben nur die neuesten erhalten.
+    pub fn push_message(&mut self, message: ChatMessage) {
+        let friend_id = message.friend_id.clone();
+        self.messages.push(message);
+        let count = self
+            .messages
+            .iter()
+            .filter(|m| m.friend_id == friend_id)
+            .count();
+        if count > MAX_MESSAGES_PER_FRIEND {
+            let mut excess = count - MAX_MESSAGES_PER_FRIEND;
+            self.messages.retain(|m| {
+                if excess > 0 && m.friend_id == friend_id {
+                    excess -= 1;
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+    }
+
+    pub fn unread_count(&self, friend_id: &str) -> usize {
+        self.messages
+            .iter()
+            .filter(|m| m.friend_id == friend_id && !m.outgoing && !m.read)
+            .count()
     }
 
     pub fn owned_by_profile(&self, profile_id: &str) -> Option<&OwnedShare> {

@@ -128,3 +128,26 @@ bash scripts/wine-loader-test.sh --help
 - **Backend**: Rust
 - **Framework**: Tauri 2.0
 - **APIs**: Modrinth, Mojang, Microsoft/Xbox Live
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)
+
+Signiert werden nur die Windows-Installer der offiziellen Releases (Git-Tags `v*`). Sie werden
+ausschließlich auf GitHub-gehosteten Runnern aus dem Quellcode dieses Repositorys gebaut; jede
+Signatur wird vor dem Signieren manuell freigegeben.
+
+- Committers and reviewers: [TheLion102009](https://github.com/TheLion102009)
+- Approvers: [TheLion102009](https://github.com/TheLion102009)
+
+Pull Requests von Personen außerhalb des Teams werden vor dem Zusammenführen von einem Reviewer geprüft.
+
+## Datenschutz / Privacy
+
+Der Launcher hat keinen eigenen Server und sammelt keine Telemetrie. Automatische Verbindungen
+(Update-Prüfung bei GitHub, P2P-Freunde-System über die iroh-Relays) sind unter
+**Einstellungen → Datenschutz** abschaltbar. Details: [PRIVACY.md](PRIVACY.md)
+
+## Lizenz
+
+[MIT](LICENSE) – Copyright (c) 2026 Thorben Hess

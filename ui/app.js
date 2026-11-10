@@ -2287,28 +2287,6 @@ async function toggleSettingsSync(profileId, enabled) {
     }
 }
 
-async function syncSettingsFromProfile(profileId) {
-    try {
-        await invoke('sync_settings_from_profile', { profileId });
-        showToast('Settings synced to all profiles with sync enabled!', 'success', 3000);
-        debugLog('Settings synced from profile ' + profileId + ' to all other profiles');
-    } catch (error) {
-        debugLog('Failed to sync settings from profile: ' + error, 'error');
-        showToast('Fehler: ' + error, 'error', 3000);
-    }
-}
-
-async function syncSettingsToProfile(profileId) {
-    try {
-        await invoke('sync_settings_to_profile', { profileId });
-        showToast('Default settings applied to profile', 'success', 3000);
-        debugLog('Settings synced to profile ' + profileId);
-    } catch (error) {
-        debugLog('Failed to sync settings to profile: ' + error, 'error');
-        showToast('Fehler: ' + error, 'error', 3000);
-    }
-}
-
 async function saveProfileSettingsFromModal(profileId, silent = false) {
     const nameInput = document.getElementById('edit-profile-name');
     const memoryInput = document.getElementById('edit-profile-memory');
@@ -2488,59 +2466,6 @@ async function waitForMinecraftMenuReady(profileId, profileName) {
         await new Promise(r => setTimeout(r, pollMs));
     }
     return runningProfiles.has(profileId);
-}
-
-function showMicrosoftLoginInfo() {
-    const modalHTML = `
-        <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;" onclick="this.remove()">
-            <div style="background: var(--bg-dark); border: 2px solid var(--gold); border-radius: 10px; padding: 30px; max-width: 600px; max-height: 80vh; overflow-y: auto;" onclick="event.stopPropagation()">
-                <h2 style="color: var(--gold); margin: 0 0 20px 0;"><i class="bi bi-shield-lock"></i> Microsoft-Login (Coming Soon)</h2>
-                
-                <p style="color: var(--text-secondary); margin-bottom: 20px;">
-                    The Lion Launcher will implement <strong style="color: var(--gold);">real Microsoft login</strong>!
-                </p>
-                
-                <h3 style="color: var(--text-primary); margin-bottom: 10px;">How will it work?</h3>
-                
-                <ol style="color: var(--text-secondary); margin: 0 0 20px 20px; line-height: 1.8;">
-                    <li><strong>OAuth2 flow</strong> - a browser opens with Microsoft login</li>
-                    <li><strong>You sign in</strong> - with your real Microsoft account</li>
-                    <li><strong>Token is stored</strong> - encrypted on your PC</li>
-                    <li><strong>Automatic renewal</strong> - the token is refreshed automatically</li>
-                    <li><strong>Offline support</strong> - cached token for offline play</li>
-                </ol>
-                
-                <h3 style="color: var(--text-primary); margin-bottom: 10px;">What do you get?</h3>
-                
-                <ul style="color: var(--text-secondary); margin: 0 0 20px 20px; line-height: 1.8;">
-                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Your real Minecraft account</strong></li>
-                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Access to purchased skins & capes</strong></li>
-                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Multiplayer on all servers</strong></li>
-                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Realms support</strong></li>
-                    <li><i class="bi bi-check-circle-fill" style="color:#4caf50;"></i> <strong>Account security</strong></li>
-                </ul>
-                
-                <div style="background: var(--bg-light); border-left: 4px solid #4CAF50; padding: 15px; margin-top: 20px;">
-                    <p style="color: var(--text-primary); margin: 0 0 5px 0;">
-                        <strong><i class="bi bi-lock"></i> Security:</strong>
-                    </p>
-                    <p style="color: var(--text-secondary); margin: 0; font-size: 14px;">
-                        Your password is <strong>NEVER</strong> stored in the launcher!<br>
-                        Only Microsoft has access to your login data.<br>
-                        The launcher only stores an encrypted access token.
-                    </p>
-                </div>
-                
-                <button class="btn" onclick="this.closest('div[style*=\\'position: fixed\\']').remove()" style="width: 100%; margin-top: 25px; padding: 12px;">
-                    Schließen
-                </button>
-            </div>
-        </div>
-    `;
-
-    const modalDiv = document.createElement('div');
-    modalDiv.innerHTML = modalHTML;
-    document.body.appendChild(modalDiv.firstElementChild);
 }
 
 async function deleteProfile(profileId) {
@@ -2982,42 +2907,6 @@ function renderLogsContent(profile) {
     `;
 }
 
-function switchProfileTab(tabName) {
-    debugLog('Switching to tab: ' + tabName, 'info');
-
-    // Update tab styles
-    document.querySelectorAll('.profile-tab').forEach(tab => {
-        if (tab.dataset.tab === tabName) {
-            tab.style.color = 'var(--text-primary)';
-            tab.style.borderBottom = '3px solid var(--gold)';
-            tab.classList.add('active');
-        } else {
-            tab.style.color = 'var(--text-secondary)';
-            tab.style.borderBottom = '3px solid transparent';
-            tab.classList.remove('active');
-        }
-    });
-
-    // Update content
-    const content = document.getElementById('profile-tab-content');
-    if (content && currentProfile) {
-        content.innerHTML = renderProfileTabContent(tabName, currentProfile);
-
-        // Lade Tab-spezifische Daten
-        if (tabName === 'mods') {
-            loadInstalledMods(currentProfile.id);
-            startModsWatcher(currentProfile.id);
-        } else if (tabName === 'logs') {
-            loadLogs(currentProfile.id);
-        } else if (tabName === 'resourcepacks') {
-            loadInstalledResourcePacks(currentProfile.id);
-        } else if (tabName === 'shaderpacks') {
-            loadInstalledShaderPacks(currentProfile.id);
-        }
-        updateProfileScrollableBoxes();
-    }
-}
-
 function renderProfileTabContent(tabName, profile) {
     switch (tabName) {
         case 'mods':
@@ -3025,9 +2914,10 @@ function renderProfileTabContent(tabName, profile) {
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                     <h3 style="color: var(--gold); margin: 0;">Installierte Mods</h3>
                     <div style="display: flex; gap: 8px;">
+                        ${isSharedMemberProfile(profile.id) ? '' : `
                         <button id="mod-updates-btn" class="btn btn-secondary" onclick="checkForModUpdates('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
                             <i class="bi bi-search"></i> Updates
-                        </button>
+                        </button>`}
                         <button class="btn btn-secondary" onclick="refreshInstalledMods('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
                             <i class="bi bi-arrow-clockwise"></i>
                         </button>
@@ -3347,18 +3237,6 @@ async function openProfileFolder(profileId) {
         showToast('Ordner wird geöffnet...', 'info', 2000);
     } catch (error) {
         debugLog('Failed to open profile folder: ' + error, 'error');
-        showToast('Fehler beim Öffnen: ' + error, 'error', 3000);
-    }
-}
-
-// Öffnet den Game-Ordner (gleich wie Profil-Ordner)
-async function openGameFolder(profileId) {
-    debugLog('Opening game folder for: ' + profileId, 'info');
-    try {
-        await invoke('open_profile_folder', { profileId: profileId, subfolder: null });
-        showToast('Ordner wird geöffnet...', 'info', 2000);
-    } catch (error) {
-        debugLog('Failed to open game folder: ' + error, 'error');
         showToast('Fehler beim Öffnen: ' + error, 'error', 3000);
     }
 }
@@ -3761,50 +3639,14 @@ function updateLogStats(logs) {
     }
 }
 
-function refreshLogs() {
-    if (currentProfile) {
-        debugLog('Manually refreshing logs', 'info');
-        loadLogs(currentProfile.id);
-    }
-}
-
 // Auto-Refresh für Logs
 let logsRefreshInterval = null;
-
-function startLogsAutoRefresh(profileId) {
-    stopLogsAutoRefresh();
-
-    debugLog('Starting logs auto-refresh', 'info');
-
-    // Aktualisiere alle 3 Sekunden
-    logsRefreshInterval = setInterval(() => {
-        if (currentProfile && currentProfile.id === profileId) {
-            // Nur aktualisieren wenn auf der Logs-Seite
-            const logsTab = document.querySelector('[data-category="logs"].active');
-            if (logsTab) {
-                loadLogs(profileId);
-            }
-        }
-    }, 3000);
-}
 
 function stopLogsAutoRefresh() {
     if (logsRefreshInterval) {
         clearInterval(logsRefreshInterval);
         logsRefreshInterval = null;
         debugLog('Stopped logs auto-refresh', 'info');
-    }
-}
-
-async function clearLogs() {
-    const confirmed = await showConfirmModal({
-        title: 'Logs löschen',
-        message: 'Möchtest du wirklich alle Logs löschen',
-        confirmText: 'Löschen'
-    });
-    if (confirmed) {
-        debugLog('Clearing logs...', 'info');
-        // TODO: Implement log clearing
     }
 }
 
@@ -4007,6 +3849,16 @@ function filterInstalledMods(query) {
     renderInstalledModsList(filtered, cachedModsProfileId);
 }
 
+/** An/Aus-Schalter (gelb = aktiv, grau = deaktiviert) für Mods und Server-Inhalte. */
+function renderToggleSwitch({ checked, onChange, title, disabled = false }) {
+    return `
+        <label class="lion-toggle" title="${escapeAttr(title)}" onclick="event.stopPropagation()">
+            <input type="checkbox" aria-label="${escapeAttr(title)}" onchange="${onChange}"
+                   ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
+            <span class="lion-toggle-slider"></span>
+        </label>`;
+}
+
 /** Rendert eine Liste von installierten Mods in #profile-mods-list */
 function renderInstalledModsList(mods, profileId) {
     const modsList = document.getElementById('profile-mods-list');
@@ -4020,10 +3872,12 @@ function renderInstalledModsList(mods, profileId) {
         // In geteilten Instanzen sind die Mods des Besitzers gesperrt
         const sharedOwner = isManagedSharedMod(profileId, mod.filename);
         const lockTitle = sharedOwner ? escapeAttr(`Gehört zur geteilten Instanz von ${sharedOwner}`) : '';
+        // Mitglieder geteilter Instanzen bekommen Updates nur vom Besitzer
+        const updateButton = isSharedMemberProfile(profileId) ? '' : renderModUpdateButton(profileId, updateStatus);
 
         return `
         <div class="installed-mod-card${mod.disabled ? ' is-disabled' : ''}" data-filename="${file}" data-mod-id="${escapeAttr(updateStatus?.project_id || mod.mod_id || '')}"
-             onclick="if(!event.target.closest('input, button')) { showModDetailsFromProfile(this.dataset.modId, 'modrinth'); }">
+             onclick="if(!event.target.closest('input, button, label')) { showModDetailsFromProfile(this.dataset.modId, 'modrinth'); }">
             <!-- Checkbox -->
             <input type="checkbox" class="mod-checkbox" data-filename="${file}" aria-label="Auswählen"
                    onchange="toggleModSelection('${jsFile}')"
@@ -4056,11 +3910,13 @@ function renderInstalledModsList(mods, profileId) {
 
             <!-- Actions -->
             <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
-                <span class="mod-update-slot" style="display: contents;">${sharedOwner ? '' : renderModUpdateButton(profileId, updateStatus)}</span>
-                <button class="btn btn-secondary content-action-btn" onclick="event.stopPropagation(); toggleMod('${escapeAttr(profileId)}', '${jsFile}', ${mod.disabled})"
-                        ${sharedOwner ? `disabled title="${lockTitle}"` : `title="${mod.disabled ? 'Aktivieren' : 'Deaktivieren'}"`}>
-                    ${mod.disabled ? '<i class="bi bi-check-lg"></i>' : '||'}
-                </button>
+                <span class="mod-update-slot" style="display: contents;">${updateButton}</span>
+                ${renderToggleSwitch({
+                    checked: !mod.disabled,
+                    disabled: !!sharedOwner,
+                    title: sharedOwner ? `Gehört zur geteilten Instanz von ${sharedOwner}` : (mod.disabled ? 'Aktivieren' : 'Deaktivieren'),
+                    onChange: `toggleMod('${escapeAttr(profileId)}', '${jsFile}', ${mod.disabled})`
+                })}
                 <button class="btn btn-secondary content-action-btn content-action-delete" onclick="event.stopPropagation(); deleteMod('${escapeAttr(profileId)}', '${jsFile}')"
                         ${sharedOwner ? `disabled title="${lockTitle}"` : 'title="Löschen"'}>
                     ×
@@ -4987,19 +4843,6 @@ async function deleteResourcePack(profileId, name) {
     }
 }
 
-function browseResourcePacks(profileId) {
-    // Speichere aktuelles Profil und wechsle zum Content Browser
-    const profile = profiles.find(p => p.id === profileId);
-    if (profile) {
-        currentProfile = profile;
-        openedFromProfile = true; // Wichtig! Sonst werden Filter zurückgesetzt
-    }
-
-    // Wechsle zu Resource Packs
-    switchPage('mods');
-    switchContentType('resourcepacks', { force: true });
-}
-
 function openContentBrowser(profileId) {
     // Speichere aktuelles Profil und setze Flag VOR switchPage
     const profile = profiles.find(p => p.id === profileId);
@@ -5021,58 +4864,32 @@ function openContentBrowser(profileId) {
     switchPage('mods');
     if (profile) browserViewKey = `browser:profile:${profileId}`;
 
-    // Setze Filter ZUERST (bevor Content geladen wird!)
-    if (currentProfile) {
-        // Setze nur selectedFilters, OHNE DOM zu ändern (das passiert später)
-        selectedFilters.version = currentProfile.minecraft_version;
-
-        // Loader nur für Mods/Modpacks
-        if (currentProfileSubTab === 'mods' || currentProfileSubTab === 'modpacks') {
-            const loaderName = currentProfile.loader.loader;
-            if (loaderName && loaderName !== 'vanilla') {
-                selectedFilters.loader = loaderName;
-            } else {
-                selectedFilters.loader = '';
-            }
-        } else {
-            selectedFilters.loader = ''; // Kein Loader für Resource Packs/Shader Packs
-        }
-
-        debugLog('Pre-set filters: version=' + selectedFilters.version + ', loader=' + selectedFilters.loader, 'info');
-    }
-
-    // JETZT wechsle zum richtigen Content Type (mit bereits gesetzten Filtern!)
+    // Wechselt zum Inhaltstyp des Profil-Tabs; dabei werden die Profil-Filter gesetzt
     switchContentType(currentProfileSubTab, { force: true });
 
-    debugLog('Content Browser opened: currentContentType = ' + currentContentType, 'info');
-
-    // Update DOM-Elemente (Dropdowns etc.) nach dem Content geladen wurde
+    // Dropdowns werden erst nach dem Seitenwechsel befüllt → Filter danach noch einmal anzeigen
     setTimeout(() => {
-        if (currentProfile) {
-            // Update Version Dropdown
-            const versionFilter = document.getElementById('filter-version');
-            if (versionFilter && currentProfile.minecraft_version) {
-                versionFilter.value = currentProfile.minecraft_version;
-            }
-
-            // Update Loader Dropdown (nur für Mods/Modpacks)
-            if (currentContentType === 'mods' || currentContentType === 'modpacks') {
-                const loaderName = currentProfile.loader.loader;
-                const loaderSelect = document.getElementById('filter-loader');
-                if (loaderSelect && loaderName && loaderName !== 'vanilla') {
-                    loaderSelect.value = loaderName;
-                } else if (loaderSelect) {
-                    loaderSelect.value = '';
-                }
-            }
-        }
-
-        // Verstecke Modpacks Button wenn aus Profil geöffnet
+        applyProfileBrowserFilters(currentContentType);
+        // Modpacks legen eigene Profile an → aus einem Profil heraus nicht anbieten
         const modpacksBtn = document.querySelector('[data-content-type="modpacks"]');
-        if (modpacksBtn && currentProfile) {
-            modpacksBtn.style.display = 'none';
-        }
+        if (modpacksBtn && currentProfile) modpacksBtn.style.display = 'none';
     }, 50);
+}
+
+/**
+ * Content Browser aus einem Profil: Filter immer auf dessen Minecraft-Version, bei Mods/Modpacks
+ * zusätzlich auf dessen Loader (Resource-/Shader-Packs haben keinen Loader).
+ */
+function applyProfileBrowserFilters(type) {
+    if (!currentProfile || serverBrowserContext) return;
+    const loader = currentProfile.loader?.loader;
+    selectedFilters.version = currentProfile.minecraft_version || '';
+    selectedFilters.loader = (type === 'mods' || type === 'modpacks') && loader && loader !== 'vanilla' ? loader : '';
+
+    const versionSelect = document.getElementById('filter-version');
+    if (versionSelect) versionSelect.value = selectedFilters.version;
+    const loaderSelect = document.getElementById('filter-loader');
+    if (loaderSelect) loaderSelect.value = selectedFilters.loader;
 }
 
 // ==================== SHADER PACKS (Profil) ====================
@@ -6873,7 +6690,7 @@ function renderServerInstalledContent(items, serverId, isFiltered = false) {
 
         return `
             <div class="installed-mod-card server-content-card ${item.disabled ? 'disabled' : ''}" data-filename="${file}"
-                 ${clickable ? `onclick="if(!event.target.closest('input, button')) { showServerContentDetails('${safeId}', '${escapeAttr(item.project_id)}'); }"` : ''}
+                 ${clickable ? `onclick="if(!event.target.closest('input, button, label')) { showServerContentDetails('${safeId}', '${escapeAttr(item.project_id)}'); }"` : ''}
                  style="cursor: ${clickable ? 'pointer' : 'default'};">
                 <input type="checkbox" class="server-content-checkbox" data-filename="${file}" ${checked}
                        onchange="toggleServerContentSelection('${jsFile}')"
@@ -6891,13 +6708,14 @@ function renderServerInstalledContent(items, serverId, isFiltered = false) {
                     </p>
                     ${item.version ? `<p style="margin: 2px 0 0 0; color: var(--gold); font-size: 10px;">v${escapeHtml(item.version)}</p>` : ''}
                 </div>
-                <div style="display: flex; gap: 6px; flex-shrink: 0;">
-                    <button class="btn btn-secondary" onclick="event.stopPropagation(); toggleServerContentItem('${safeId}', '${jsFile}', ${item.disabled})"
-                            style="padding: 5px 10px; font-size: 11px;" title="${item.disabled ? 'Aktivieren' : 'Deaktivieren'}">
-                        ${item.disabled ? '<i class="bi bi-check"></i>' : '<i class="bi bi-pause-fill"></i>'}
-                    </button>
-                    <button class="btn btn-secondary" onclick="event.stopPropagation(); deleteServerContentItem('${safeId}', '${jsFile}')"
-                            style="padding: 5px 10px; font-size: 11px; color: #f44336;" title="Löschen">
+                <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+                    ${renderToggleSwitch({
+                        checked: !item.disabled,
+                        title: item.disabled ? 'Aktivieren' : 'Deaktivieren',
+                        onChange: `toggleServerContentItem('${safeId}', '${jsFile}', ${item.disabled})`
+                    })}
+                    <button class="btn btn-secondary content-action-btn content-action-delete" onclick="event.stopPropagation(); deleteServerContentItem('${safeId}', '${jsFile}')"
+                            title="Löschen">
                         <i class="bi bi-trash"></i>
                     </button>
                 </div>
@@ -8066,55 +7884,6 @@ async function updateEditLoaderVersions() {
     }
 }
 
-async function saveProfileSettings(profileId) {
-    const nameInput = document.getElementById('edit-profile-name');
-    const memoryInput = document.getElementById('edit-profile-memory');
-    const mcVersionSelect = document.getElementById('edit-profile-mc-version');
-    const loaderSelect = document.getElementById('edit-profile-loader');
-    const loaderVersionSelect = document.getElementById('edit-profile-loader-version');
-    const javaArgsTextarea = document.getElementById('edit-profile-java-args');
-
-    if (!nameInput || !memoryInput) {
-        debugLog('Form elements not found', 'error');
-        return;
-    }
-
-    try {
-        debugLog('Saving profile settings...', 'info');
-
-        const updates = {
-            name: nameInput.value,
-            minecraft_version: mcVersionSelect?.value || currentProfile.minecraft_version,
-            loader: loaderSelect?.value || currentProfile.loader.loader,
-            loader_version: loaderVersionSelect?.value || currentProfile.loader.version,
-            memory_mb: parseInt(memoryInput.value) || 4096,
-            java_args: javaArgsTextarea?.value.split(' ').filter(a => a.trim()) || [],
-            icon_path: selectedProfileIcon || currentProfile.icon_path
-        };
-
-        await invoke('update_profile', {
-            profileId: profileId,
-            updates: updates
-        });
-        if (browserViewKey === `browser:profile:${profileId}`) browserViewKey = null;
-
-        showToast('Profil-Einstellungen gespeichert!', 'success', 3000);
-        selectedProfileIcon = null;
-
-        // Reload profiles
-        await loadProfiles();
-
-        // Zeige aktualisiertes Profil
-        const updatedProfile = profiles.find(p => p.id === profileId);
-        if (updatedProfile) {
-            showProfileDetails(profileId);
-        }
-    } catch (error) {
-        debugLog('Failed to save settings: ' + error, 'error');
-        showToast('Fehler beim Speichern: ' + error, 'error', 5000);
-    }
-}
-
 // Modals
 function openCreateProfileModal() {
     const modal = document.getElementById('create-profile-modal');
@@ -8720,24 +8489,18 @@ function setupSearch() {
 
 // Content Type Switching
 function switchContentType(type, options = {}) {
-    debugLog('switchContentType called with type: ' + type, 'warn');
-    debugLog('currentContentType BEFORE: ' + currentContentType, 'warn');
-
-    const forceReload = !!options.force;
-    if (!forceReload && currentContentType === type) {
-        return;
-    }
+    if (!options.force && currentContentType === type) return;
 
     currentContentType = type;
     patchCurrentNavLocation(e => e.type === 'browser', { contentType: type });
-
-    debugLog('currentContentType AFTER: ' + currentContentType, 'warn');
 
     currentModPage = 0;
     currentModSearchQuery = '';
 
     // Reset categories beim Wechsel
     selectedFilters.categories = [];
+    // Aus einem Profil geöffnet: Version/Loader passend zum neuen Inhaltstyp setzen
+    applyProfileBrowserFilters(type);
 
     // Update Button States
     document.querySelectorAll('[data-content-type]').forEach(btn => {
@@ -8776,24 +8539,17 @@ function switchContentType(type, options = {}) {
     loadPopularContent();
 }
 
-function loadPopularContent() {
-    debugLog('loadPopularContent called with currentContentType: ' + currentContentType, 'warn');
+const POPULAR_CONTENT_LOADERS = {
+    mods: () => loadPopularMods(),
+    resourcepacks: () => loadPopularResourcePacks(),
+    shaderpacks: () => loadPopularShaderPacks(),
+    modpacks: () => loadPopularModpacks()
+};
 
-    if (currentContentType === 'mods') {
-        debugLog('Loading MODS', 'warn');
-        loadPopularMods();
-    } else if (currentContentType === 'resourcepacks') {
-        debugLog('Loading RESOURCEPACKS', 'warn');
-        loadPopularResourcePacks();
-    } else if (currentContentType === 'shaderpacks') {
-        debugLog('Loading SHADERPACKS', 'warn');
-        loadPopularShaderPacks();
-    } else if (currentContentType === 'modpacks') {
-        debugLog('Loading MODPACKS', 'warn');
-        loadPopularModpacks();
-    } else {
-        debugLog('UNKNOWN currentContentType: ' + currentContentType, 'error');
-    }
+function loadPopularContent() {
+    const load = POPULAR_CONTENT_LOADERS[currentContentType];
+    if (load) load();
+    else debugLog('Unknown content type: ' + currentContentType, 'error');
 }
 
 // Lade Kategorien von der Modrinth API (gruppiert nach header wie im Modrinth Launcher)
@@ -9983,26 +9739,6 @@ async function installMod(modId, source) {
     }
 }
 
-function showModInstallError(title, htmlContent) {
-    const modalHTML = `
-        <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;" onclick="this.remove()">
-            <div style="background: var(--bg-dark); border: 2px solid #f44336; border-radius: 10px; padding: 30px; max-width: 500px;" onclick="event.stopPropagation()">
-                <h2 style="color: #f44336; margin: 0 0 20px 0;"><i class="bi bi-x-circle-fill"></i> ${title}</h2>
-                <div style="color: var(--text-secondary); line-height: 1.6;">
-                    ${htmlContent}
-                </div>
-                <button class="btn btn-secondary" onclick="this.closest('div[style*=\\'position: fixed\\']').remove()" style="width: 100%; margin-top: 20px; padding: 12px;">
-                    Schließen
-                </button>
-            </div>
-        </div>
-    `;
-
-    const modalDiv = document.createElement('div');
-    modalDiv.innerHTML = modalHTML;
-    document.body.appendChild(modalDiv.firstElementChild);
-}
-
 // Profil-Auswahl Dialog für Mod-Installation
 function showProfileSelectDialog() {
     return new Promise((resolve) => {
@@ -10638,8 +10374,6 @@ let skinViewer = null;
 let currentViewingUuid = null;  // UUID des aktuell angezeigten Skins (null = eigener)
 let currentViewingSkinUrl = null; // Skin-URL für "Übernehmen"
 let skinViewerInitialized = false;
-let skinDefaultRotationY = 0;
-let skinDefaultRotationX = 0;
 
 function initSkinViewer() {
     if (skinViewerInitialized && skinViewer) return;
@@ -11709,6 +11443,8 @@ async function renderVersionsTab(mod, versions, allLoaders, sortedMcVersions) {
         }
     }
     const canInstall = canInstallFromDetails();
+    // Geteilte Instanz eines Freundes: die Version dieses Projekts legt der Besitzer fest
+    const lockedBy = currentProfile ? isManagedSharedProject(currentProfile.id, mod.id) : null;
 
     // Filtere Versionen basierend auf Filter
     let filteredVersions = versions;
@@ -11826,10 +11562,15 @@ async function renderVersionsTab(mod, versions, allLoaders, sortedMcVersions) {
                                         `<button class="btn btn-secondary" disabled style="padding: 8px 20px; font-size: 13px; opacity: 0.6;">
                                             <i class="bi bi-check"></i> Installed
                                         </button>` :
-                                        `<button class="btn btn-primary" onclick="installModVersion('${escapeAttr(mod.id)}', '${escapeAttr(version.id)}', this)"
-                                                 style="padding: 8px 20px; font-size: 13px;">
-                                            Install
-                                        </button>`
+                                        lockedBy
+                                            ? `<button class="btn btn-secondary" disabled title="Die Version legt ${escapeAttr(lockedBy)} fest (geteilte Instanz)"
+                                                       style="padding: 8px 20px; font-size: 13px; opacity: 0.5; cursor: not-allowed;">
+                                                   <i class="bi bi-lock-fill"></i> Gesperrt
+                                               </button>`
+                                            : `<button class="btn btn-primary" onclick="installModVersion('${escapeAttr(mod.id)}', '${escapeAttr(version.id)}', this)"
+                                                       style="padding: 8px 20px; font-size: 13px;">
+                                                   Install
+                                               </button>`
                                     ) :
                                     `<button class="btn btn-secondary" disabled style="padding: 8px 20px; font-size: 13px; opacity: 0.5; cursor: not-allowed;">
                                         Create a profile first
@@ -12202,6 +11943,11 @@ async function installProjectFromDetails(projectId, versionId = null, button = n
     }
 
     let profile = currentProfile;
+    const lockedBy = profile ? isManagedSharedProject(profile.id, projectId) : null;
+    if (lockedBy) {
+        showToast(`Gehört zur geteilten Instanz von ${lockedBy} – die Version legt der Besitzer fest`, 'warning', 4500);
+        return false;
+    }
     if (!profile) {
         if (!profiles.length) {
             showToast('Bitte erstelle zuerst ein Profil!', 'warning', 4000);
@@ -12255,4 +12001,2162 @@ async function installModVersion(modId, versionId, button = null) {
     if (!ok) return;
     setDetailsInstallButtonInstalled();
     await switchModDetailsTab('versions'); // "INSTALLED"-Markierung aktualisieren
+}
+
+// ============================================================================
+// Markdown-Rendering für Projektbeschreibungen
+// ============================================================================
+
+// Markdown → sicheres HTML für Projektbeschreibungen (Modrinth-Bodies).
+//
+// Modrinth-Beschreibungen mischen Markdown und rohes HTML (z.B. <center>, <img>, Badges wie
+// [![Discord](badge.svg)](https://discord.gg/...)). Der Parser orientiert sich an
+// CommonMark/GFM (wie Modrinth selbst): Überschriften, Listen, Zitate, Code, Tabellen,
+// Links/Bilder inkl. Referenz-Links, Autolinks und HTML-Blöcke.
+// Das Ergebnis wird anschließend per Whitelist bereinigt (keine Skripte, Event-Handler,
+// Styles oder gefährlichen URLs).
+(function (global) {
+    'use strict';
+
+    // ── Hilfen ─────────────────────────────────────────────────────────────────
+    function esc(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    const HTML_ATTR = String.raw`\s+[a-zA-Z_:][a-zA-Z0-9_.:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>\x60]+))?`;
+    const HTML_OPEN_TAG = new RegExp(String.raw`^<[a-zA-Z][a-zA-Z0-9-]*(?:${HTML_ATTR})*\s*\/?>`);
+    const HTML_CLOSE_TAG = /^<\/[a-zA-Z][a-zA-Z0-9-]*\s*>/;
+    const HTML_COMMENT = /^<!--[\s\S]*?-->/;
+    const HTML_ONLY_TAG_LINE = new RegExp(
+        String.raw`^(?:<[a-zA-Z][a-zA-Z0-9-]*(?:${HTML_ATTR})*\s*\/?>|<\/[a-zA-Z][a-zA-Z0-9-]*\s*>)\s*$`
+    );
+
+    // CommonMark HTML-Block-Typ 6: diese Tags beginnen einen HTML-Block
+    const BLOCK_HTML_TAGS = new Set([
+        'address', 'article', 'aside', 'base', 'basefont', 'blockquote', 'body', 'caption', 'center',
+        'col', 'colgroup', 'dd', 'details', 'dialog', 'dir', 'div', 'dl', 'dt', 'fieldset',
+        'figcaption', 'figure', 'footer', 'form', 'frame', 'frameset', 'h1', 'h2', 'h3', 'h4', 'h5',
+        'h6', 'head', 'header', 'hr', 'html', 'iframe', 'legend', 'li', 'link', 'main', 'menu',
+        'menuitem', 'nav', 'noframes', 'ol', 'optgroup', 'option', 'p', 'param', 'search', 'section',
+        'summary', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'title', 'tr', 'track', 'ul'
+    ]);
+
+    const LIST_ITEM_RE = /^( *)([-*+]|\d{1,9}[.)])([ \t]+|$)(.*)$/;
+    const THEMATIC_BREAK_RE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+    const FENCE_RE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
+    const ATX_HEADING_RE = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
+    const TABLE_DELIMITER_RE = /^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
+    const REF_DEF_RE = /^ {0,3}\[([^\]]+)]:[ \t]*<?([^\s>]+)>?(?:[ \t]+(?:"([^"]*)"|'([^']*)'|\(([^)]*)\)))?[ \t]*$/;
+
+    function htmlBlockType(line, inParagraph) {
+        if (!/^ {0,3}</.test(line)) return null;
+        const s = line.replace(/^ {0,3}/, '');
+        if (/^<(pre|script|style|textarea)(?=[\s>]|$)/i.test(s)) {
+            return { endRe: /<\/(pre|script|style|textarea)>/i };
+        }
+        if (s.startsWith('<!--')) return { endRe: /-->/ };
+        const m = s.match(/^<\/?([a-zA-Z][a-zA-Z0-9-]*)(?=[\s/>]|$)/);
+        if (!m) return null;
+        if (BLOCK_HTML_TAGS.has(m[1].toLowerCase())) return { endRe: null };
+        // Typ 7: ein einzelnes vollständiges Tag allein in der Zeile (unterbricht keinen Absatz)
+        if (!inParagraph && HTML_ONLY_TAG_LINE.test(s)) return { endRe: null };
+        return null;
+    }
+
+    function isListItem(line) {
+        return LIST_ITEM_RE.test(line) && !THEMATIC_BREAK_RE.test(line);
+    }
+
+    function startsBlock(line) {
+        return /^ {0,3}(?:#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,})/.test(line) ||
+            THEMATIC_BREAK_RE.test(line) ||
+            isListItem(line) ||
+            !!htmlBlockType(line, true);
+    }
+
+    function indentOf(line) {
+        return line.match(/^ */)[0].length;
+    }
+
+    // ── Block-Ebene ────────────────────────────────────────────────────────────
+    function parseBlocks(lines, ctx, tight) {
+        const out = [];
+        let para = [];
+
+        const flushParagraph = () => {
+            if (!para.length) return;
+            const inner = parseInline(para.join('\n').replace(/\s+$/, ''), ctx);
+            out.push(tight ? inner : `<p>${inner}</p>`);
+            para = [];
+        };
+
+        let i = 0;
+        while (i < lines.length) {
+            const line = lines[i];
+
+            if (!line.trim()) {
+                flushParagraph();
+                i++;
+                continue;
+            }
+
+            // Code-Block mit ``` oder ~~~
+            let m = line.match(FENCE_RE);
+            if (m && !(m[2][0] === '`' && m[3].includes('`'))) {
+                flushParagraph();
+                const fence = m[2];
+                const indent = m[1].length;
+                const closeRe = new RegExp(`^ {0,3}${fence[0] === '`' ? '`' : '~'}{${fence.length},}[ \\t]*$`);
+                const code = [];
+                i++;
+                while (i < lines.length && !closeRe.test(lines[i])) {
+                    code.push(indent ? lines[i].replace(new RegExp(`^ {0,${indent}}`), '') : lines[i]);
+                    i++;
+                }
+                i++; // schließende Fence
+                out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`);
+                continue;
+            }
+
+            // # Überschrift
+            m = line.match(ATX_HEADING_RE);
+            if (m) {
+                flushParagraph();
+                const level = m[1].length;
+                out.push(`<h${level}>${parseInline((m[2] || '').trim(), ctx)}</h${level}>`);
+                i++;
+                continue;
+            }
+
+            // Setext-Überschrift (Text, darunter === oder ---)
+            if (para.length && /^ {0,3}(=+|-{2,})[ \t]*$/.test(line)) {
+                const level = line.trim()[0] === '=' ? 1 : 2;
+                const inner = parseInline(para.join('\n').trim(), ctx);
+                para = [];
+                out.push(`<h${level}>${inner}</h${level}>`);
+                i++;
+                continue;
+            }
+
+            // Trennlinie
+            if (THEMATIC_BREAK_RE.test(line)) {
+                flushParagraph();
+                out.push('<hr>');
+                i++;
+                continue;
+            }
+
+            // > Zitat
+            if (/^ {0,3}>/.test(line)) {
+                flushParagraph();
+                const quote = [];
+                while (i < lines.length) {
+                    const l = lines[i];
+                    if (/^ {0,3}>/.test(l)) {
+                        quote.push(l.replace(/^ {0,3}> ?/, ''));
+                        i++;
+                    } else if (l.trim() && quote.length && quote[quote.length - 1].trim() && !startsBlock(l)) {
+                        quote.push(l); // "lazy" Fortsetzung des Absatzes
+                        i++;
+                    } else {
+                        break;
+                    }
+                }
+                out.push(`<blockquote>${parseBlocks(quote, ctx, false)}</blockquote>`);
+                continue;
+            }
+
+            // Listen (leere Einträge / Nummern ≠ 1 unterbrechen keinen Absatz)
+            m = line.match(LIST_ITEM_RE);
+            if (m && !(para.length && (!m[4].trim() || (/\d/.test(m[2]) && parseInt(m[2], 10) !== 1)))) {
+                flushParagraph();
+                const list = parseList(lines, i, ctx);
+                out.push(list.html);
+                i = list.next;
+                continue;
+            }
+
+            // GFM-Tabelle
+            if (line.includes('|') && i + 1 < lines.length &&
+                lines[i + 1].includes('|') && TABLE_DELIMITER_RE.test(lines[i + 1])) {
+                const header = splitTableRow(line);
+                const aligns = splitTableRow(lines[i + 1]).map(cell => {
+                    const left = cell.startsWith(':');
+                    const right = cell.endsWith(':');
+                    return left && right ? 'center' : right ? 'right' : left ? 'left' : '';
+                });
+                if (header.length === aligns.length) {
+                    flushParagraph();
+                    i += 2;
+                    const rows = [];
+                    while (i < lines.length && lines[i].trim() && lines[i].includes('|')) {
+                        rows.push(splitTableRow(lines[i]));
+                        i++;
+                    }
+                    const cell = (tag, text, idx) =>
+                        `<${tag}${aligns[idx] ? ` align="${aligns[idx]}"` : ''}>${parseInline(text || '', ctx)}</${tag}>`;
+                    let table = `<table><thead><tr>${header.map((c, idx) => cell('th', c, idx)).join('')}</tr></thead>`;
+                    if (rows.length) {
+                        table += `<tbody>${rows.map(r =>
+                            `<tr>${aligns.map((_, idx) => cell('td', r[idx], idx)).join('')}</tr>`
+                        ).join('')}</tbody>`;
+                    }
+                    out.push(table + '</table>');
+                    continue;
+                }
+            }
+
+            // HTML-Block: wird unverändert übernommen (Bereinigung erfolgt später)
+            const htmlType = htmlBlockType(line, para.length > 0);
+            if (htmlType) {
+                flushParagraph();
+                const block = [line];
+                i++;
+                if (htmlType.endRe) {
+                    if (!htmlType.endRe.test(line)) {
+                        while (i < lines.length) {
+                            block.push(lines[i]);
+                            i++;
+                            if (htmlType.endRe.test(lines[i - 1])) break;
+                        }
+                    }
+                } else {
+                    while (i < lines.length && lines[i].trim()) {
+                        block.push(lines[i]);
+                        i++;
+                    }
+                }
+                out.push(block.join('\n'));
+                continue;
+            }
+
+            para.push(line.replace(/^[ \t]+/, ''));
+            i++;
+        }
+
+        flushParagraph();
+        return out.join('\n');
+    }
+
+    function parseList(lines, start, ctx) {
+        const first = lines[start].match(LIST_ITEM_RE);
+        const ordered = /\d/.test(first[2]);
+        const sameKind = mm => /\d/.test(mm[2]) === ordered;
+        const items = [];
+        let current = null;
+        let loose = false;
+        let pendingBlank = false;
+        let i = start;
+
+        while (i < lines.length) {
+            const line = lines[i];
+
+            if (!line.trim()) {
+                if (!current) break;
+                let j = i + 1;
+                while (j < lines.length && !lines[j].trim()) j++;
+                if (j >= lines.length) break;
+                const nextMatch = lines[j].match(LIST_ITEM_RE);
+                const continues = indentOf(lines[j]) >= current.contentIndent ||
+                    (nextMatch && sameKind(nextMatch) && !THEMATIC_BREAK_RE.test(lines[j]));
+                if (!continues) break;
+                current.lines.push('');
+                pendingBlank = true;
+                i++;
+                continue;
+            }
+
+            const indent = indentOf(line);
+            const mm = line.match(LIST_ITEM_RE);
+
+            if (mm && !THEMATIC_BREAK_RE.test(line) && (!current || indent < current.contentIndent)) {
+                if (!sameKind(mm)) break;
+                if (current) items.push(current);
+                if (pendingBlank && current) loose = true;
+                const spaces = mm[3].length;
+                const contentIndent = indent + mm[2].length + (spaces === 0 || spaces > 4 ? 1 : spaces);
+                current = {
+                    lines: [mm[4]],
+                    contentIndent,
+                    number: ordered ? parseInt(mm[2], 10) : null,
+                    innerBlank: false
+                };
+                pendingBlank = false;
+                i++;
+                continue;
+            }
+
+            // Eine Liste beginnt immer mit einem Eintrag – ohne ihn gibt es nichts fortzusetzen
+            if (!current) break;
+
+            if (indent >= current.contentIndent) {
+                const content = line.slice(current.contentIndent);
+                if (pendingBlank && !isListItem(content)) current.innerBlank = true;
+                current.lines.push(content);
+                pendingBlank = false;
+                i++;
+                continue;
+            }
+
+            // "lazy" Fortsetzungszeile des Absatzes im Listeneintrag
+            if (!pendingBlank && !startsBlock(line)) {
+                current.lines.push(line.trim());
+                i++;
+                continue;
+            }
+            break;
+        }
+        if (current) items.push(current);
+        if (items.some(item => item.innerBlank)) loose = true;
+
+        const tag = ordered ? 'ol' : 'ul';
+        const startAttr = ordered && items[0].number !== 1 ? ` start="${items[0].number}"` : '';
+        const body = items.map(item => {
+            let content = parseBlocks(item.lines, ctx, !loose);
+            // GFM-Aufgabenliste: - [ ] / - [x]
+            content = content.replace(/^(<p>)?\[([ xX])][ \t]+/, (_, p, mark) =>
+                (p || '') + (mark === ' ' ? '☐ ' : '☑ '));
+            return `<li>${content}</li>`;
+        }).join('');
+
+        return { html: `<${tag}${startAttr}>${body}</${tag}>`, next: i };
+    }
+
+    function splitTableRow(row) {
+        let s = row.trim();
+        if (s.startsWith('|')) s = s.slice(1);
+        if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1);
+        const cells = [];
+        let cur = '';
+        let inCode = false;
+        for (let k = 0; k < s.length; k++) {
+            const c = s[k];
+            if (c === '\\' && s[k + 1] === '|') {
+                cur += '|';
+                k++;
+                continue;
+            }
+            if (c === '`') inCode = !inCode;
+            if (c === '|' && !inCode) {
+                cells.push(cur.trim());
+                cur = '';
+                continue;
+            }
+            cur += c;
+        }
+        cells.push(cur.trim());
+        return cells;
+    }
+
+    // ── Inline-Ebene ───────────────────────────────────────────────────────────
+    function matchHtmlAt(text, pos) {
+        const rest = text.slice(pos);
+        const m = rest.match(HTML_COMMENT) || rest.match(HTML_OPEN_TAG) || rest.match(HTML_CLOSE_TAG);
+        return m ? m[0] : null;
+    }
+
+    function skipCodeSpan(text, pos) {
+        let run = 0;
+        while (text[pos + run] === '`') run++;
+        const ticks = '`'.repeat(run);
+        let search = pos + run;
+        while (true) {
+            const close = text.indexOf(ticks, search);
+            if (close === -1) return { found: false, end: pos + run };
+            let after = close + run;
+            if (text[after] === '`') {
+                // längerer Backtick-Lauf → kein passender Abschluss
+                while (text[after] === '`') after++;
+                search = after;
+                continue;
+            }
+            return { found: true, contentStart: pos + run, contentEnd: close, end: after };
+        }
+    }
+
+    function findClosingBracket(text, open) {
+        let depth = 0;
+        for (let k = open; k < text.length; k++) {
+            const c = text[k];
+            if (c === '\\') {
+                k++;
+                continue;
+            }
+            if (c === '`') {
+                k = skipCodeSpan(text, k).end - 1;
+                continue;
+            }
+            if (c === '<') {
+                const html = matchHtmlAt(text, k);
+                if (html) {
+                    k += html.length - 1;
+                    continue;
+                }
+            }
+            if (c === '[') depth++;
+            else if (c === ']') {
+                depth--;
+                if (depth === 0) return k;
+            }
+        }
+        return -1;
+    }
+
+    /** Parst `(ziel "titel")` ab der öffnenden Klammer. */
+    function parseLinkDestination(text, pos) {
+        let k = pos + 1;
+        while (k < text.length && /[ \t\n]/.test(text[k])) k++;
+        let dest = '';
+        if (text[k] === '<') {
+            const close = text.indexOf('>', k);
+            if (close === -1 || text.slice(k, close).includes('\n')) return null;
+            dest = text.slice(k + 1, close);
+            k = close + 1;
+        } else {
+            let depth = 0;
+            while (k < text.length) {
+                const c = text[k];
+                if (c === '\\' && k + 1 < text.length && /[!-/:-@[-`{-~]/.test(text[k + 1])) {
+                    dest += text[k + 1];
+                    k += 2;
+                    continue;
+                }
+                if (/\s/.test(c)) break;
+                if (c === '(') depth++;
+                if (c === ')') {
+                    if (depth === 0) break;
+                    depth--;
+                }
+                dest += c;
+                k++;
+            }
+        }
+        while (k < text.length && /[ \t\n]/.test(text[k])) k++;
+        let title = '';
+        const quote = text[k];
+        if (quote === '"' || quote === "'" || (quote === '(' && dest)) {
+            const closeChar = quote === '(' ? ')' : quote;
+            const close = text.indexOf(closeChar, k + 1);
+            if (close === -1) return null;
+            title = text.slice(k + 1, close);
+            k = close + 1;
+            while (k < text.length && /[ \t\n]/.test(text[k])) k++;
+        }
+        if (text[k] !== ')') return null;
+        return { dest, title, end: k + 1 };
+    }
+
+    /** Link `[text](url)` / Bild `![alt](url)` inkl. Referenz-Varianten. `open` zeigt auf `[`. */
+    function parseLinkOrImage(text, open, ctx, isImage) {
+        const close = findClosingBracket(text, open);
+        if (close === -1) return null;
+        const label = text.slice(open + 1, close);
+        let target = null;
+        let end = close + 1;
+
+        if (text[close + 1] === '(') {
+            const parsed = parseLinkDestination(text, close + 1);
+            if (parsed) {
+                target = { href: parsed.dest, title: parsed.title };
+                end = parsed.end;
+            }
+        }
+        if (!target && text[close + 1] === '[') {
+            const refClose = text.indexOf(']', close + 2);
+            if (refClose !== -1) {
+                const refName = (text.slice(close + 2, refClose) || label).trim().toLowerCase();
+                if (ctx.refs.has(refName)) {
+                    target = ctx.refs.get(refName);
+                    end = refClose + 1;
+                }
+            }
+        }
+        if (!target) {
+            const refName = label.trim().toLowerCase();
+            if (ctx.refs.has(refName)) target = ctx.refs.get(refName);
+        }
+        if (!target) return null;
+
+        const titleAttr = target.title ? ` title="${esc(target.title)}"` : '';
+        if (isImage) {
+            const alt = parseInline(label, ctx).replace(/<[^>]*>/g, '');
+            return { html: `<img src="${esc(target.href)}" alt="${alt}"${titleAttr}>`, end };
+        }
+        // Links in Links sind nicht erlaubt → Inhalt ohne weitere Links rendern
+        const inner = parseInline(label, Object.assign({}, ctx, { inLink: true }));
+        return { html: `<a href="${esc(target.href)}"${titleAttr}>${inner}</a>`, end };
+    }
+
+    function findEmphasisCloser(text, from, ch, size) {
+        const isWordChar = c => !!c && /[\p{L}\p{N}]/u.test(c);
+        let fallback = -1;
+        let k = from;
+        while (k < text.length) {
+            const c = text[k];
+            if (c === '\\') {
+                k += 2;
+                continue;
+            }
+            if (c === '`') {
+                k = skipCodeSpan(text, k).end;
+                continue;
+            }
+            if (c === '<') {
+                const html = matchHtmlAt(text, k);
+                if (html) {
+                    k += html.length;
+                    continue;
+                }
+            }
+            if (c === '[') {
+                const close = findClosingBracket(text, k);
+                if (close !== -1) {
+                    const dest = text[close + 1] === '(' ? parseLinkDestination(text, close + 1) : null;
+                    k = dest ? dest.end : close + 1;
+                    continue;
+                }
+            }
+            if (c === ch) {
+                let len = 1;
+                while (text[k + len] === ch) len++;
+                const before = text[k - 1];
+                const after = text[k + len];
+                const rightFlanking = k > from && !/\s/.test(before);
+                const underscoreOk = ch !== '_' || !isWordChar(after);
+                if (rightFlanking && underscoreOk) {
+                    if (len === size) return k;
+                    if (len > size && fallback === -1) fallback = k + len - size;
+                }
+                k += len;
+                continue;
+            }
+            k++;
+        }
+        return fallback;
+    }
+
+    function parseEmphasis(text, i, ctx) {
+        const ch = text[i];
+        let run = 1;
+        while (text[i + run] === ch) run++;
+        const next = text[i + run];
+        const prev = i > 0 ? text[i - 1] : '';
+        if (!next || /\s/.test(next)) return null;
+        if (ch === '_' && prev && /[\p{L}\p{N}]/u.test(prev)) return null;
+
+        if (ch === '~') {
+            if (run !== 2) return null;
+            const close = findEmphasisCloser(text, i + 2, '~', 2);
+            if (close === -1) return null;
+            return { html: `<del>${parseInline(text.slice(i + 2, close), ctx)}</del>`, end: close + 2 };
+        }
+
+        for (let size = Math.min(run, 3); size >= 1; size--) {
+            const contentStart = i + run;
+            const close = findEmphasisCloser(text, contentStart, ch, size);
+            if (close === -1 || close <= contentStart) continue;
+            const inner = parseInline(text.slice(contentStart, close), ctx);
+            const wrapped = size === 3
+                ? `<strong><em>${inner}</em></strong>`
+                : size === 2 ? `<strong>${inner}</strong>` : `<em>${inner}</em>`;
+            return { html: esc(ch.repeat(run - size)) + wrapped, end: close + size };
+        }
+        return null;
+    }
+
+    const BARE_URL_RE = /^(?:https?:\/\/|www\.)[^\s<]*[^\s<?!.,:;*_~)'"]/i;
+
+    function parseInline(text, ctx) {
+        let out = '';
+        let i = 0;
+        const n = text.length;
+
+        while (i < n) {
+            const c = text[i];
+
+            if (c === '\\' && i + 1 < n) {
+                const next = text[i + 1];
+                if (next === '\n') {
+                    out += '<br>\n';
+                    i += 2;
+                    continue;
+                }
+                if (/[!-/:-@[-`{-~]/.test(next)) {
+                    out += esc(next);
+                    i += 2;
+                    continue;
+                }
+            }
+
+            if (c === '`') {
+                const span = skipCodeSpan(text, i);
+                if (span.found) {
+                    let code = text.slice(span.contentStart, span.contentEnd).replace(/\n/g, ' ');
+                    if (/^ .*[^ ].* $/.test(code)) code = code.slice(1, -1);
+                    out += `<code>${esc(code)}</code>`;
+                } else {
+                    out += text.slice(i, span.end);
+                }
+                i = span.end;
+                continue;
+            }
+
+            if (c === '<') {
+                const rest = text.slice(i, i + 2048);
+                const auto = rest.match(/^<((?:https?:\/\/|mailto:)[^\s<>]+)>/i);
+                if (auto) {
+                    out += ctx.inLink ? esc(auto[1]) : `<a href="${esc(auto[1])}">${esc(auto[1])}</a>`;
+                    i += auto[0].length;
+                    continue;
+                }
+                const html = matchHtmlAt(text, i);
+                if (html) {
+                    out += html;
+                    i += html.length;
+                    continue;
+                }
+                out += '&lt;';
+                i++;
+                continue;
+            }
+
+            if (c === '!' && text[i + 1] === '[') {
+                const image = parseLinkOrImage(text, i + 1, ctx, true);
+                if (image) {
+                    out += image.html;
+                    i = image.end;
+                    continue;
+                }
+            }
+
+            if (c === '[' && !ctx.inLink) {
+                const link = parseLinkOrImage(text, i, ctx, false);
+                if (link) {
+                    out += link.html;
+                    i = link.end;
+                    continue;
+                }
+            }
+
+            if (c === '*' || c === '_' || c === '~') {
+                const emphasis = parseEmphasis(text, i, ctx);
+                if (emphasis) {
+                    out += emphasis.html;
+                    i = emphasis.end;
+                    continue;
+                }
+                let run = 1;
+                while (text[i + run] === c) run++;
+                out += c.repeat(run);
+                i += run;
+                continue;
+            }
+
+            if ((c === 'h' || c === 'w' || c === 'H' || c === 'W') && !ctx.inLink &&
+                (i === 0 || /[\s(*_~]/.test(text[i - 1]))) {
+                const lower = text.slice(i, i + 8).toLowerCase();
+                if (lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('www.')) {
+                    const m = text.slice(i, i + 2048).match(BARE_URL_RE);
+                    if (m) {
+                        const href = /^www\./i.test(m[0]) ? 'https://' + m[0] : m[0];
+                        out += `<a href="${esc(href)}">${esc(m[0])}</a>`;
+                        i += m[0].length;
+                        continue;
+                    }
+                }
+            }
+
+            if (c === ' ' && text[i + 1] === ' ') {
+                const m = text.slice(i).match(/^ {2,}\n/);
+                if (m) {
+                    out += '<br>\n';
+                    i += m[0].length;
+                    continue;
+                }
+            }
+
+            if (c === '&') {
+                const m = text.slice(i, i + 40).match(/^&(?:#\d{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z][a-zA-Z0-9]{1,31});/);
+                if (m) {
+                    out += m[0];
+                    i += m[0].length;
+                    continue;
+                }
+                out += '&amp;';
+                i++;
+                continue;
+            }
+
+            out += c === '>' ? '&gt;' : c === '"' ? '&quot;' : c;
+            i++;
+        }
+        return out;
+    }
+
+    function markdownToHtml(source) {
+        const text = String(source || '').replace(/\r\n?/g, '\n').replace(/\t/g, '    ');
+        const refs = new Map();
+        const lines = [];
+        let fence = null;
+        for (const line of text.split('\n')) {
+            const fenceMatch = line.match(FENCE_RE);
+            if (fenceMatch) {
+                if (!fence) fence = fenceMatch[2][0];
+                else if (fenceMatch[2][0] === fence && !fenceMatch[3].trim()) fence = null;
+                lines.push(line);
+                continue;
+            }
+            if (!fence) {
+                const def = line.match(REF_DEF_RE);
+                if (def) {
+                    const name = def[1].trim().toLowerCase();
+                    if (!refs.has(name)) refs.set(name, { href: def[2], title: def[3] || def[4] || def[5] || '' });
+                    continue;
+                }
+            }
+            lines.push(line);
+        }
+        return parseBlocks(lines, { refs, inLink: false }, false);
+    }
+
+    // ── Bereinigung (Whitelist) ────────────────────────────────────────────────
+    const ALLOWED_TAGS = new Set([
+        'a', 'abbr', 'b', 'bdi', 'bdo', 'blockquote', 'br', 'caption', 'center', 'cite', 'code',
+        'col', 'colgroup', 'dd', 'del', 'details', 'dfn', 'div', 'dl', 'dt', 'em', 'figcaption',
+        'figure', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'ins', 'kbd', 'li', 'mark',
+        'ol', 'p', 'pre', 'q', 'rp', 'rt', 'ruby', 's', 'samp', 'small', 'span', 'strike', 'strong',
+        'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'time', 'tr', 'tt',
+        'u', 'ul', 'var', 'wbr'
+    ]);
+    // Werden samt Inhalt entfernt
+    const DROPPED_TAGS = new Set([
+        'script', 'style', 'noscript', 'template', 'object', 'embed', 'applet', 'form', 'input',
+        'button', 'select', 'option', 'optgroup', 'textarea', 'svg', 'math', 'link', 'meta', 'base',
+        'head', 'title', 'frame', 'frameset', 'canvas', 'dialog', 'source', 'track', 'portal'
+    ]);
+    const GLOBAL_ATTRS = new Set(['title', 'align', 'lang', 'dir']);
+    const TAG_ATTRS = {
+        a: ['href'],
+        img: ['src', 'alt', 'width', 'height'],
+        td: ['colspan', 'rowspan', 'valign'],
+        th: ['colspan', 'rowspan', 'valign', 'scope'],
+        ol: ['start', 'type', 'reversed'],
+        li: ['value'],
+        details: ['open'],
+        col: ['span'],
+        colgroup: ['span'],
+        time: ['datetime']
+    };
+    const URL_BASE = 'https://modrinth.com/';
+
+    function safeUrl(value, protocols) {
+        if (!value) return null;
+        try {
+            const url = new URL(String(value).trim(), URL_BASE);
+            return protocols.includes(url.protocol) ? url.href : null;
+        } catch (_e) {
+            return null;
+        }
+    }
+
+    function safeImageUrl(value) {
+        const raw = String(value || '').trim();
+        if (/^data:image\/(png|gif|jpe?g|webp|avif);base64,/i.test(raw)) return raw;
+        return safeUrl(raw, ['https:', 'http:']);
+    }
+
+    function youtubeWatchUrl(src) {
+        const url = safeUrl(src, ['https:', 'http:']);
+        if (!url) return null;
+        const m = url.match(/^https?:\/\/(?:www\.)?(?:youtube(?:-nocookie)?\.com\/embed\/|youtu\.be\/)([\w-]{6,})/i);
+        return m ? `https://www.youtube.com/watch?v=${m[1]}` : null;
+    }
+
+    function mediaLink(doc, href, label) {
+        const p = doc.createElement('p');
+        const a = doc.createElement('a');
+        a.setAttribute('href', href);
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener noreferrer');
+        a.textContent = label;
+        p.appendChild(a);
+        return p;
+    }
+
+    function sanitizeChildren(parent, doc) {
+        for (const node of Array.from(parent.childNodes)) {
+            if (node.nodeType === 3) continue; // Text
+            if (node.nodeType !== 1) {
+                node.remove(); // Kommentare etc.
+                continue;
+            }
+            const tag = node.tagName.toLowerCase();
+
+            if (tag === 'iframe') {
+                const watch = youtubeWatchUrl(node.getAttribute('src'));
+                if (watch) node.replaceWith(mediaLink(doc, watch, '▶ Video auf YouTube ansehen'));
+                else node.remove();
+                continue;
+            }
+            if (tag === 'video' || tag === 'audio') {
+                const src = node.getAttribute('src') || node.querySelector('source[src]')?.getAttribute('src');
+                const href = safeUrl(src, ['https:', 'http:']);
+                if (href) node.replaceWith(mediaLink(doc, href, tag === 'video' ? '▶ Video ansehen' : '▶ Audio anhören'));
+                else node.remove();
+                continue;
+            }
+            if (DROPPED_TAGS.has(tag)) {
+                node.remove();
+                continue;
+            }
+            if (!ALLOWED_TAGS.has(tag)) {
+                // Unbekannte Tags (z.B. <font>, <picture>) auflösen, Inhalt behalten
+                sanitizeChildren(node, doc);
+                node.replaceWith(...Array.from(node.childNodes));
+                continue;
+            }
+
+            const allowed = TAG_ATTRS[tag] || [];
+            for (const attr of Array.from(node.attributes)) {
+                const name = attr.name.toLowerCase();
+                if (!GLOBAL_ATTRS.has(name) && !allowed.includes(name)) node.removeAttribute(attr.name);
+            }
+            for (const dim of ['width', 'height']) {
+                const v = node.getAttribute(dim);
+                if (v != null && !/^\d{1,5}(\.\d+)?(%|px)?$/.test(v.trim())) node.removeAttribute(dim);
+            }
+
+            if (tag === 'a') {
+                const href = safeUrl(node.getAttribute('href'), ['https:', 'http:', 'mailto:']);
+                if (href) {
+                    node.setAttribute('href', href);
+                    node.setAttribute('target', '_blank');
+                    node.setAttribute('rel', 'noopener noreferrer');
+                } else {
+                    node.removeAttribute('href');
+                }
+            } else if (tag === 'img') {
+                const src = safeImageUrl(node.getAttribute('src'));
+                if (!src) {
+                    node.remove();
+                    continue;
+                }
+                node.setAttribute('src', src);
+                node.setAttribute('loading', 'lazy');
+                node.setAttribute('decoding', 'async');
+                // Manche Bild-Hoster blockieren fremde Referrer (Hotlink-Schutz)
+                node.setAttribute('referrerpolicy', 'no-referrer');
+            }
+
+            sanitizeChildren(node, doc);
+        }
+    }
+
+    function sanitizeHtml(html) {
+        const doc = new DOMParser().parseFromString(`<!DOCTYPE html><body><div id="lion-md-root">${html}</div></body>`, 'text/html');
+        const root = doc.getElementById('lion-md-root');
+        if (!root) return '';
+        sanitizeChildren(root, doc);
+        return root.innerHTML;
+    }
+
+    function renderMarkdown(source) {
+        return sanitizeHtml(markdownToHtml(source));
+    }
+
+    const api = { markdownToHtml, sanitizeHtml, renderMarkdown };    global.LionMarkdown = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+// ============================================================================
+// Freunde & geteilte Instanzen
+// ============================================================================
+
+// Freunde & geteilte Instanzen (angelehnt an "Shared Instances" der Modrinth App).
+//
+// Die Launcher verbinden sich direkt per P2P (iroh, Ende-zu-Ende-verschlüsselt) – es gibt
+// keinen eigenen Server. Freunde werden per Freundescode hinzugefügt, Instanzen per
+// Einladung oder Einladungslink geteilt. Updates werden beim Spielstart geprüft und erst
+// nach Bestätigung übernommen.
+//
+// Nutzt Hilfsfunktionen aus app.js (invoke, showToast, escapeHtml, escapeAttr, showConfirmModal,
+// closeDynamicModal, profiles, prepareProfileDownloadFlow, refreshProfilesInBackground, ...).
+
+const friendsUi = {
+    state: null,
+    ready: false,
+    refreshTimer: null,
+    /** Freund, dessen Chat gerade offen ist */
+    chatFriendId: null,
+    messages: []
+};
+
+/** Vom Besitzer verwaltete Dateien pro Profil (für die Sperre im Content-Tab). */
+const sharedManagedFiles = new Map();
+
+const SHARE_KIND_LABELS = { mods: 'Mod', resourcepacks: 'Resource Pack', shaderpacks: 'Shader Pack' };
+
+function playerHeadUrl(uuid, name, size = 32) {
+    const key = uuid || name || 'MHF_Steve';
+    return `https://mc-heads.net/avatar/${encodeURIComponent(key)}/${size}`;
+}
+
+function copyToClipboard(text, successMessage) {
+    navigator.clipboard.writeText(text)
+        .then(() => showToast(successMessage, 'success', 2200))
+        .catch(() => showToast('Kopieren fehlgeschlagen', 'error', 2500));
+}
+
+// ==================== Freunde-Kasten ====================
+//
+// Ausgeklappt: Kopf (mit Einklapp-Button), Eingabe für Freundescode/Einladungslink, Liste bzw.
+// Chat mit einem Freund, unten das eigene Profil (Klick auf Kopf/Name kopiert den Freundescode).
+// Eingeklappt: schmale Leiste mit Plus-Button und den Köpfen der Freunde (hell = online).
+
+const FRIENDS_COLLAPSED_KEY = 'friendsPanelCollapsed';
+
+async function initFriends() {
+    document.querySelectorAll('[data-friends-panel]').forEach(buildFriendsPanelSkeleton);
+    setFriendsPanelCollapsed(localStorage.getItem(FRIENDS_COLLAPSED_KEY) === '1', { save: false });
+
+    // In den Einstellungen abgeschaltet (Datenschutz) → keine Verbindungen, nur Hinweis
+    if (!(await getPrivacySettings()).friends_enabled) {
+        document.querySelectorAll('[data-friends-list]').forEach(list => {
+            list.innerHTML = '<div class="friends-empty"><i class="bi bi-shield-lock"></i> Das Freunde-System ist in den Einstellungen unter „Datenschutz“ abgeschaltet.</div>';
+        });
+        return;
+    }
+    refreshFriends();
+
+    try {
+        window.__TAURI__.event.listen('friends-changed', () => scheduleFriendsRefresh());
+    } catch (_e) {
+        // Event-API nicht verfügbar – Polling reicht
+    }
+    // Online-Status läuft ab, auch ohne Event → regelmäßig neu zeichnen
+    setInterval(refreshFriends, 15000);
+    // Geteilte Instanzen beim Start auf Updates prüfen (kurz warten, bis der P2P-Dienst verbunden ist)
+    setTimeout(checkAllSharedUpdatesOnStartup, 8000);
+}
+
+function scheduleFriendsRefresh() {
+    clearTimeout(friendsUi.refreshTimer);
+    friendsUi.refreshTimer = setTimeout(refreshFriends, 250);
+}
+
+async function refreshFriends() {
+    try {
+        friendsUi.state = await invoke('friends_state');
+        friendsUi.ready = true;
+    } catch (_e) {
+        // Dienst startet noch
+        friendsUi.ready = false;
+    }
+    renderFriendsPanels();
+    if (friendsUi.chatFriendId) loadChatMessages();
+    refreshOpenShareTab();
+}
+
+function buildFriendsPanelSkeleton(panel) {
+    panel.innerHTML = `
+        <div class="friends-expanded">
+            <div class="friends-header">
+                <span class="friends-title"><i class="bi bi-people-fill"></i> Freunde</span>
+                <span class="friends-online-count" data-friends-count></span>
+                <button class="friends-icon-btn" data-friends-collapse title="Einklappen" aria-label="Freunde einklappen">
+                    <i class="bi bi-chevron-double-right"></i>
+                </button>
+            </div>
+            <form class="friends-add" data-friends-add-form>
+                <button type="submit" class="friends-add-btn" title="Hinzufügen" aria-label="Hinzufügen"><i class="bi bi-plus-lg"></i></button>
+                <input type="text" data-friends-add-input aria-label="Freundescode oder Einladungslink"
+                       placeholder="Code oder Einladungslink" autocomplete="off" spellcheck="false">
+            </form>
+            <div class="friends-list" data-friends-list></div>
+            <div class="friends-chat hidden" data-friends-chat>
+                <div class="friends-chat-head" data-chat-head></div>
+                <div class="friends-chat-messages" data-chat-messages></div>
+                <form class="friends-chat-form" data-chat-form>
+                    <input type="text" data-chat-input aria-label="Nachricht" placeholder="Nachricht schreiben…" autocomplete="off" maxlength="2000">
+                    <button type="submit" class="friends-add-btn" title="Senden" aria-label="Senden"><i class="bi bi-send-fill"></i></button>
+                </form>
+            </div>
+            <div class="friends-me" data-friends-me></div>
+        </div>
+        <div class="friends-rail">
+            <button class="friends-rail-add" data-friends-expand-add title="Freund hinzufügen" aria-label="Freund hinzufügen">
+                <i class="bi bi-plus-lg"></i><span class="friends-badge hidden" data-rail-requests></span>
+            </button>
+            <div class="friends-rail-list" data-friends-rail-list></div>
+        </div>
+    `;
+
+    const addInput = panel.querySelector('[data-friends-add-input]');
+    panel.querySelector('[data-friends-collapse]').addEventListener('click', () => setFriendsPanelCollapsed(true));
+    panel.querySelector('[data-friends-expand-add]').addEventListener('click', () => {
+        setFriendsPanelCollapsed(false);
+        // Nach der Ausklapp-Animation in das Eingabefeld springen
+        setTimeout(() => addInput.focus(), 320);
+    });
+    panel.querySelector('[data-friends-add-form]').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const value = addInput.value.trim();
+        if (value && await addFriendOrJoin(value)) addInput.value = '';
+    });
+
+    const chatInput = panel.querySelector('[data-chat-input]');
+    panel.querySelector('[data-chat-form]').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const text = chatInput.value.trim();
+        if (!text) return;
+        chatInput.value = '';
+        await sendChatMessage(text);
+    });
+}
+
+/** Ein-/Ausklappen gilt für alle Seiten mit Freunde-Kasten. */
+function setFriendsPanelCollapsed(collapsed, { save = true } = {}) {
+    document.querySelectorAll('[data-friends-panel]').forEach(panel => panel.classList.toggle('collapsed', collapsed));
+    if (save) localStorage.setItem(FRIENDS_COLLAPSED_KEY, collapsed ? '1' : '0');
+}
+
+/** Freundescode → Anfrage senden; Einladungslink → Vorschau der geteilten Instanz. */
+async function addFriendOrJoin(value) {
+    if (value.startsWith('lion://share/')) {
+        openSharePreview({ link: value });
+        return true;
+    }
+    try {
+        const message = await invoke('friends_add', { code: value });
+        showToast(message, 'success', 3500);
+        refreshFriends();
+        return true;
+    } catch (error) {
+        showToast(String(error), 'error', 4000);
+        return false;
+    }
+}
+
+function renderFriendsPanels() {
+    const state = friendsUi.ready ? friendsUi.state : null;
+    const chatFriend = state?.friends.find(f => f.id === friendsUi.chatFriendId && f.state === 'accepted');
+    if (!chatFriend) friendsUi.chatFriendId = null;
+
+    document.querySelectorAll('[data-friends-panel]').forEach(panel => {
+        const list = panel.querySelector('[data-friends-list]');
+        const chat = panel.querySelector('[data-friends-chat]');
+        const me = panel.querySelector('[data-friends-me]');
+        const count = panel.querySelector('[data-friends-count]');
+        const rail = panel.querySelector('[data-friends-rail-list]');
+        const railRequests = panel.querySelector('[data-rail-requests]');
+
+        list.classList.toggle('hidden', !!chatFriend);
+        chat.classList.toggle('hidden', !chatFriend);
+
+        if (!state) {
+            count.textContent = '';
+            list.innerHTML = `<div class="friends-empty"><span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span> Verbinde…</div>`;
+            me.innerHTML = '';
+            rail.innerHTML = '';
+            return;
+        }
+
+        const accepted = state.friends.filter(f => f.state === 'accepted');
+        const incoming = state.friends.filter(f => f.state === 'incoming');
+        const outgoing = state.friends.filter(f => f.state === 'outgoing');
+        const online = accepted.filter(f => f.online);
+        const offline = accepted.filter(f => !f.online);
+        count.textContent = accepted.length ? `${online.length} online` : '';
+
+        list.innerHTML = [
+            friendsSection('Anfragen', [...incoming, ...outgoing].map(friendRow)),
+            friendsSection(`Online — ${online.length}`, online.map(friendRow)),
+            friendsSection(`Offline — ${offline.length}`, offline.map(friendRow)),
+            state.friends.length ? '' : `<div class="friends-empty">Noch keine Freunde. Füge oben einen Freundescode ein – deinen eigenen kopierst du mit einem Klick auf deinen Namen unten.</div>`
+        ].join('');
+
+        if (chatFriend) panel.querySelector('[data-chat-head]').innerHTML = chatHeadHtml(chatFriend);
+
+        // Eingeklappt: nur Köpfe (hell = online), Anfragen als Zahl am Plus-Button
+        rail.innerHTML = accepted.map(f => `
+            <button class="friends-rail-head${f.online ? '' : ' is-offline'}" onclick="openFriendChat('${escapeAttr(f.id)}', { expand: true })"
+                    title="${escapeAttr(f.name)} – ${f.online ? 'Online' : 'Offline'}" aria-label="${escapeAttr(f.name)}">
+                <img class="friends-avatar" alt="" src="${escapeAttr(playerHeadUrl(f.uuid, f.name))}">
+                ${f.unread ? `<span class="friends-badge">${f.unread}</span>` : ''}
+            </button>`).join('');
+        railRequests.textContent = incoming.length ? String(incoming.length) : '';
+        railRequests.classList.toggle('hidden', !incoming.length);
+
+        const self = state.me;
+        me.innerHTML = `
+            <button class="friends-me-copy" data-copy-code title="Klicken, um deinen Freundescode zu kopieren">
+                <img class="friends-avatar" alt="" src="${escapeAttr(playerHeadUrl(self.uuid, self.name))}">
+                <span class="friends-me-text">
+                    <span class="friends-name">${escapeHtml(self.name)}</span>
+                    <span class="friends-sub"><span class="friends-dot online"></span> Online · Code kopieren</span>
+                </span>
+            </button>`;
+        me.querySelector('[data-copy-code]').addEventListener('click',
+            () => copyToClipboard(self.code, 'Freundescode kopiert – schick ihn deinem Freund'));
+    });
+
+    if (chatFriend) renderChatMessages();
+}
+
+function friendsSection(title, rows) {
+    if (!rows.length) return '';
+    return `<div class="friends-section"><div class="friends-section-title">${escapeHtml(title)}</div>${rows.join('')}</div>`;
+}
+
+function friendRow(friend) {
+    const id = escapeAttr(friend.id);
+    const avatar = `
+        <div class="friends-avatar-wrap">
+            <img class="friends-avatar" alt="" src="${escapeAttr(playerHeadUrl(friend.uuid, friend.name))}">
+            ${friend.state === 'accepted' ? `<span class="friends-dot ${friend.online ? 'online' : ''}"></span>` : ''}
+        </div>`;
+
+    if (friend.state !== 'accepted') {
+        const incoming = friend.state === 'incoming';
+        return `
+            <div class="friends-row is-pending">
+                ${avatar}
+                <div class="friends-row-text">
+                    <div class="friends-name">${escapeHtml(friend.name)}</div>
+                    <div class="friends-sub">${incoming ? 'Möchte dein Freund sein' : 'Anfrage gesendet'}</div>
+                </div>
+                <div class="friends-row-actions">
+                    ${incoming ? `<button class="friends-icon-btn accept" onclick="acceptFriend('${id}')" title="Annehmen" aria-label="Annehmen"><i class="bi bi-check-lg"></i></button>` : ''}
+                    <button class="friends-icon-btn" onclick="removeFriend('${id}', true)" title="${incoming ? 'Ablehnen' : 'Anfrage zurückziehen'}" aria-label="Ablehnen"><i class="bi bi-x-lg"></i></button>
+                </div>
+            </div>`;
+    }
+
+    return `
+        <div class="friends-row${friend.online ? '' : ' is-offline'}${friend.unread ? ' has-unread' : ''}"
+             onclick="openFriendChat('${id}')" title="Chat mit ${escapeAttr(friend.name)}">
+            ${avatar}
+            <div class="friends-row-text">
+                <div class="friends-name">${escapeHtml(friend.name)}</div>
+                <div class="friends-sub">${friend.unread ? `${friend.unread} neue Nachricht(en)` : (friend.online ? 'Online' : 'Offline')}</div>
+            </div>
+            <div class="friends-row-actions">
+                <button class="friends-icon-btn" onclick="event.stopPropagation(); openFriendChat('${id}')" title="Chat" aria-label="Chat">
+                    <i class="bi bi-envelope${friend.unread ? '-fill' : ''}"></i>${friend.unread ? `<span class="friends-badge">${friend.unread}</span>` : ''}
+                </button>
+                <button class="friends-icon-btn" onclick="event.stopPropagation(); removeFriend('${id}')" title="Freund entfernen" aria-label="Freund entfernen"><i class="bi bi-x-lg"></i></button>
+            </div>
+        </div>`;
+}
+
+async function acceptFriend(id) {
+    try {
+        await invoke('friends_accept', { id });
+        showToast('Freundschaftsanfrage angenommen', 'success', 2500);
+    } catch (error) {
+        showToast(String(error), 'error', 4000);
+    }
+    refreshFriends();
+}
+
+async function removeFriend(id, isRequest = false) {
+    const friend = friendsUi.state?.friends.find(f => f.id === id);
+    if (!isRequest) {
+        const confirmed = await showConfirmModal({
+            title: 'Freund entfernen',
+            message: 'Möchtest du ',
+            highlight: friend?.name || 'diesen Freund',
+            suffix: ' wirklich entfernen?',
+            confirmText: 'Entfernen',
+            icon: 'bi-person-dash'
+        });
+        if (!confirmed) return;
+    }
+    try {
+        await invoke('friends_remove', { id });
+    } catch (error) {
+        showToast(String(error), 'error', 4000);
+    }
+    refreshFriends();
+}
+
+async function declineShareInvite(ownerId, shareId) {
+    try {
+        await invoke('share_decline_invite', { ownerId, shareId });
+    } catch (error) {
+        showToast(String(error), 'error', 4000);
+    }
+    refreshFriends();
+}
+
+/** Freunde-Kasten in der Profil-Detailansicht ausblenden (dort wird der Platz gebraucht). */
+function setFriendsPanelHidden(hidden) {
+    document.getElementById('page-profiles')?.classList.toggle('friends-collapsed', hidden);
+}
+
+// ==================== Chat ====================
+
+async function openFriendChat(friendId, { expand = false } = {}) {
+    if (expand) setFriendsPanelCollapsed(false);
+    friendsUi.chatFriendId = friendId;
+    friendsUi.messages = [];
+    renderFriendsPanels();
+    await loadChatMessages();
+    document.querySelector('.page:not(.hidden) [data-chat-input]')?.focus();
+}
+
+function closeFriendChat() {
+    friendsUi.chatFriendId = null;
+    renderFriendsPanels();
+}
+
+async function loadChatMessages() {
+    const friendId = friendsUi.chatFriendId;
+    if (!friendId) return;
+    try {
+        const messages = await invoke('friends_messages', { friendId });
+        if (friendsUi.chatFriendId === friendId) friendsUi.messages = messages;
+    } catch (error) {
+        debugLog('Could not load chat: ' + error, 'error');
+    }
+    renderChatMessages();
+}
+
+async function sendChatMessage(text) {
+    const friendId = friendsUi.chatFriendId;
+    if (!friendId) return;
+    try {
+        const message = await invoke('friends_send_message', { friendId, text });
+        friendsUi.messages.push(message);
+        renderChatMessages();
+    } catch (error) {
+        showToast('Nachricht konnte nicht gesendet werden: ' + error, 'error', 4000);
+    }
+}
+
+function chatHeadHtml(friend) {
+    return `
+        <button class="friends-icon-btn" onclick="closeFriendChat()" title="Zurück" aria-label="Zurück"><i class="bi bi-arrow-left"></i></button>
+        <div class="friends-avatar-wrap">
+            <img class="friends-avatar" alt="" src="${escapeAttr(playerHeadUrl(friend.uuid, friend.name))}">
+            <span class="friends-dot ${friend.online ? 'online' : ''}"></span>
+        </div>
+        <div class="friends-row-text">
+            <div class="friends-name">${escapeHtml(friend.name)}</div>
+            <div class="friends-sub">${friend.online ? 'Online' : 'Offline – Nachrichten werden zugestellt, sobald er online ist'}</div>
+        </div>`;
+}
+
+function chatMessageHtml(message) {
+    const time = new Date(message.sent_at).toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const status = message.outgoing && !message.delivered
+        ? '<i class="bi bi-clock" title="Wird zugestellt, sobald dein Freund online ist"></i>'
+        : '';
+
+    if (message.share_id) {
+        const owner = escapeAttr(message.friend_id);
+        const share = escapeAttr(message.share_id);
+        const open = !message.outgoing && friendsUi.state?.invites.some(i => i.owner_id === message.friend_id && i.share_id === message.share_id);
+        const actions = message.outgoing
+            ? '<span class="share-muted">Einladung gesendet</span>'
+            : open
+                ? `<button class="btn share-small-btn" onclick="openSharePreview({ ownerId: '${owner}', shareId: '${share}' })">Ansehen</button>
+                   <button class="btn btn-secondary share-small-btn" onclick="declineShareInvite('${owner}', '${share}')">Ablehnen</button>`
+                : '<span class="share-muted">Erledigt</span>';
+        return `
+            <div class="chat-message ${message.outgoing ? 'outgoing' : 'incoming'}">
+                <div class="chat-invite">
+                    <div class="chat-invite-title"><i class="bi bi-box-seam"></i> Einladung zur geteilten Instanz</div>
+                    <div class="chat-invite-name">${escapeHtml(message.share_name || '')}</div>
+                    <div class="chat-invite-actions">${actions}</div>
+                </div>
+                <div class="chat-meta">${escapeHtml(time)} ${status}</div>
+            </div>`;
+    }
+
+    return `
+        <div class="chat-message ${message.outgoing ? 'outgoing' : 'incoming'}">
+            <div class="chat-bubble">${escapeHtml(message.text)}</div>
+            <div class="chat-meta">${escapeHtml(time)} ${status}</div>
+        </div>`;
+}
+
+function renderChatMessages() {
+    document.querySelectorAll('[data-chat-messages]').forEach(container => {
+        const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 40;
+        container.innerHTML = friendsUi.messages.length
+            ? friendsUi.messages.map(chatMessageHtml).join('')
+            : '<div class="friends-empty">Noch keine Nachrichten. Schreib etwas – Einladungen zu geteilten Instanzen erscheinen auch hier.</div>';
+        if (atBottom || container.dataset.scrolled !== '1') {
+            container.scrollTop = container.scrollHeight;
+            container.dataset.scrolled = '1';
+        }
+    });
+}
+
+// ==================== Einladung ansehen & annehmen ====================
+
+function shareModalShell(id, innerHtml) {
+    closeDynamicModal(id);
+    const modal = document.createElement('div');
+    modal.id = id;
+    modal.className = 'share-modal-backdrop';
+    modal.innerHTML = `<div class="share-modal" onclick="event.stopPropagation()">${innerHtml}</div>`;
+    modal.addEventListener('click', () => closeDynamicModal(id));
+    document.body.appendChild(modal);
+    return modal;
+}
+
+function shareItemRow(item, extraClass = '') {
+    const version = item.version || item.new_version || '';
+    return `
+        <div class="share-item ${extraClass}">
+            <span class="share-item-kind">${escapeHtml(SHARE_KIND_LABELS[item.kind] || item.kind)}</span>
+            <span class="share-item-name">${escapeHtml(item.name)}</span>
+            ${item.old_version && item.new_version ? `<span class="share-item-version">${escapeHtml(item.old_version)} → ${escapeHtml(item.new_version)}</span>`
+                : version ? `<span class="share-item-version">${escapeHtml(version)}</span>` : ''}
+            ${item.unpublished ? '<span class="share-badge warn" title="Nicht auf Modrinth veröffentlicht – kommt direkt vom Besitzer">Nicht auf Modrinth</span>' : ''}
+        </div>`;
+}
+
+/** params: { link } oder { ownerId, shareId } */
+async function openSharePreview(params) {
+    const modal = shareModalShell('share-preview-modal', `
+        <div class="share-modal-loading"><span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span> Lade Einladung…</div>`);
+    let preview;
+    try {
+        preview = await invoke('share_preview', {
+            link: params.link || null,
+            ownerId: params.ownerId || null,
+            shareId: params.shareId || null
+        });
+    } catch (error) {
+        modal.remove();
+        showToast('Einladung konnte nicht geladen werden: ' + error, 'error', 5000);
+        return;
+    }
+
+    const items = preview.items.slice().sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
+    const icon = preview.icon || LION_LOGO_URL;
+    modal.querySelector('.share-modal').innerHTML = `
+        <div class="share-modal-head">
+            <img class="share-modal-icon" alt="" src="${escapeAttr(icon)}" data-fallback="logo">
+            <div>
+                <h2>${escapeHtml(preview.name)}</h2>
+                <div class="share-modal-sub">Geteilt von <strong>${escapeHtml(preview.owner_name)}</strong> ·
+                    Minecraft ${escapeHtml(preview.minecraft_version)} · ${escapeHtml(preview.loader)} ${escapeHtml(preview.loader_version || '')}</div>
+            </div>
+        </div>
+        ${preview.unpublished_count ? `
+            <div class="share-warning"><i class="bi bi-exclamation-triangle-fill"></i>
+                ${preview.unpublished_count} Datei(en) sind nicht auf Modrinth veröffentlicht und kommen direkt vom Besitzer.
+                Prüfe sie, bevor du annimmst.</div>` : ''}
+        <div class="share-modal-section-title">Inhalt (${items.length})</div>
+        <div class="share-item-list">${items.map(item => shareItemRow(item)).join('') || '<div class="share-muted">Keine Mods oder Packs</div>'}</div>
+        ${preview.configs.length ? `
+            <details class="share-configs"><summary>${preview.configs.length} Konfig-Datei(en)</summary>
+                ${preview.configs.map(path => `<div class="share-config-path">${escapeHtml(path)}</div>`).join('')}
+            </details>` : ''}
+        <div class="share-trust-note"><i class="bi bi-shield-exclamation"></i>
+            Geteilte Instanzen werden nicht geprüft wie veröffentlichte Projekte. Nimm nur Einladungen von Leuten an, denen du vertraust.</div>
+        <div class="share-modal-actions">
+            <button class="btn btn-secondary" data-share-decline>${params.link ? 'Abbrechen' : 'Ablehnen'}</button>
+            <button class="btn" data-share-accept><i class="bi bi-download"></i> Annehmen & installieren</button>
+        </div>
+    `;
+
+    modal.querySelector('[data-share-decline]').addEventListener('click', () => {
+        modal.remove();
+        if (!params.link) declineShareInvite(preview.owner_id, preview.share_id);
+    });
+    modal.querySelector('[data-share-accept]').addEventListener('click', () => {
+        modal.remove();
+        acceptShare({
+            link: params.link || null,
+            ownerId: params.link ? null : preview.owner_id,
+            shareId: params.link ? null : preview.share_id
+        }, preview.name);
+    });
+}
+
+async function acceptShare(params, name) {
+    setSessionWidgetState({
+        profileId: null,
+        profileName: name,
+        phase: 'spin',
+        status: 'Installiere geteilte Instanz…',
+        percent: null,
+        canStop: false,
+        activity: 'import'
+    });
+    animateSessionFlyIn(name);
+    try {
+        const result = await invoke('share_accept', params);
+        await refreshProfilesInBackground();
+        await prepareProfileDownloadFlow(result.profile_id, name, { from: 60, to: 100, activity: 'import' });
+        await refreshProfilesInBackground();
+        showToast(`"${name}" wurde hinzugefügt`, result.failed.length ? 'warning' : 'success', 4500);
+        showImportIssues(result.failed, result.warnings);
+    } catch (error) {
+        setSessionWidgetState({ phase: 'idle', percent: null, canStop: false, activity: null });
+        syncSessionWidgetWithRunningProfiles();
+        showToast('Beitreten fehlgeschlagen: ' + error, 'error', 5000);
+    }
+    refreshFriends();
+}
+
+// ==================== Share-Tab im Profil ====================
+
+function renderShareTabShell(profile) {
+    return `<div id="share-tab-content" data-profile-id="${escapeAttr(profile.id)}">
+        <div class="share-modal-loading"><span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span> Lade…</div>
+    </div>`;
+}
+
+function refreshOpenShareTab() {
+    const container = document.getElementById('share-tab-content');
+    if (!container) return;
+    // Nicht neu zeichnen, während der Nutzer gerade etwas tut (Dialog offen, Details aufgeklappt, Feld fokussiert)
+    const busy = document.getElementById('share-config-modal') ||
+        container.querySelector('details[open]') ||
+        container.contains(document.activeElement);
+    if (!busy) loadShareTab(container.dataset.profileId, { quiet: true });
+}
+
+async function loadShareTab(profileId, { quiet = false } = {}) {
+    const container = document.getElementById('share-tab-content');
+    if (!container || container.dataset.profileId !== profileId) return;
+
+    let status;
+    try {
+        status = await invoke('share_status', { profileId });
+    } catch (error) {
+        if (!quiet) container.innerHTML = `<div class="share-card"><span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span> ${escapeHtml(String(error))}</div>`;
+        return;
+    }
+    rememberManagedFiles(profileId, status);
+
+    if (status.role === 'owner') {
+        container.innerHTML = renderOwnerShare(profileId, status);
+        if (!quiet || !container.dataset.changesLoaded) loadPendingChanges(profileId);
+        else container.querySelector('[data-share-changes]').innerHTML = container.dataset.changesHtml || '';
+    } else if (status.role === 'member') {
+        container.innerHTML = renderMemberShare(profileId, status);
+    } else {
+        container.innerHTML = `
+            <div class="share-card share-intro">
+                <i class="bi bi-share-fill share-intro-icon"></i>
+                <h3>Instanz mit Freunden teilen</h3>
+                <p>Teile Inhalte und ausgewählte Konfig-Dateien dieser Instanz. Wenn du etwas änderst,
+                   veröffentlichst du ein Update – deine Freunde sehen beim Spielstart genau, was sich geändert hat,
+                   und übernehmen es mit einem Klick.</p>
+                <button class="btn" onclick="createShare('${escapeAttr(profileId)}')"><i class="bi bi-share"></i> Instanz teilen</button>
+            </div>`;
+    }
+}
+
+function memberRow(profileId, member, pending) {
+    return `
+        <div class="friends-row${member.online ? '' : ' is-offline'}">
+            <div class="friends-avatar-wrap">
+                <img class="friends-avatar" alt="" src="${escapeAttr(playerHeadUrl(member.uuid, member.name))}">
+                <span class="friends-dot ${member.online ? 'online' : ''}"></span>
+            </div>
+            <div class="friends-row-text">
+                <div class="friends-name">${escapeHtml(member.name)}</div>
+                <div class="friends-sub">${pending ? 'Eingeladen' : (member.online ? 'Online' : 'Offline')}</div>
+            </div>
+            <div class="friends-row-actions" style="opacity: 1;">
+                <button class="friends-icon-btn" onclick="removeShareMember('${escapeAttr(profileId)}', '${escapeAttr(member.id)}')"
+                        title="${pending ? 'Einladung zurückziehen' : 'Aus der Instanz entfernen'}" aria-label="Entfernen"><i class="bi bi-x-lg"></i></button>
+            </div>
+        </div>`;
+}
+
+function renderOwnerShare(profileId, status) {
+    const pid = escapeAttr(profileId);
+    const involved = new Set([...status.members, ...status.invited].map(m => m.id));
+    const invitable = (friendsUi.state?.friends || []).filter(f => f.state === 'accepted' && !involved.has(f.id));
+
+    return `
+        <div class="share-grid">
+            <div class="share-card share-span">
+                <div class="share-card-head">
+                    <h3><i class="bi bi-arrow-repeat"></i> Updates</h3>
+                    <span class="share-muted">Veröffentlicht: Revision ${status.revision}</span>
+                </div>
+                <div data-share-changes><span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span> Prüfe Änderungen…</div>
+            </div>
+
+            <div class="share-card">
+                <div class="share-card-head"><h3><i class="bi bi-person-plus"></i> Freunde einladen</h3></div>
+                ${invitable.length ? invitable.map(f => `
+                    <div class="friends-row${f.online ? '' : ' is-offline-avatar'}" title="${f.online ? '' : 'Offline – die Einladung wird zugestellt, sobald er online ist'}">
+                        <div class="friends-avatar-wrap">
+                            <img class="friends-avatar" alt="" src="${escapeAttr(playerHeadUrl(f.uuid, f.name))}">
+                            <span class="friends-dot ${f.online ? 'online' : ''}"></span>
+                        </div>
+                        <div class="friends-row-text"><div class="friends-name">${escapeHtml(f.name)}</div></div>
+                        <button class="btn btn-secondary share-small-btn" onclick="inviteToShare('${pid}', '${escapeAttr(f.id)}')">Einladen</button>
+                    </div>`).join('') : '<div class="share-muted">Alle Freunde sind schon dabei – oder füge rechts neue Freunde hinzu.</div>'}
+                <div class="share-link-row">
+                    <input type="text" readonly value="${escapeAttr(status.link)}" aria-label="Einladungslink">
+                    <button class="btn btn-secondary share-small-btn" onclick="copyToClipboard('${escapeAttr(status.link)}', 'Einladungslink kopiert')"><i class="bi bi-link-45deg"></i> Kopieren</button>
+                </div>
+                <div class="share-muted" style="font-size: 11px;">Jeder mit diesem Link kann beitreten.</div>
+            </div>
+
+            <div class="share-card">
+                <div class="share-card-head"><h3><i class="bi bi-people"></i> Mitglieder (${status.members.length})</h3></div>
+                ${status.members.map(m => memberRow(profileId, m, false)).join('')}
+                ${status.invited.map(m => memberRow(profileId, m, true)).join('')}
+                ${!status.members.length && !status.invited.length ? '<div class="share-muted">Noch niemand ist beigetreten.</div>' : ''}
+            </div>
+
+            <div class="share-card">
+                <div class="share-card-head"><h3><i class="bi bi-file-earmark-code"></i> Konfig-Dateien</h3></div>
+                <p class="share-muted">${status.config_files.length
+                    ? `${status.config_files.length} Datei(en) werden geteilt.`
+                    : 'Es werden noch keine Konfig-Dateien geteilt.'}</p>
+                <button class="btn btn-secondary" onclick="openShareConfigPicker('${pid}')"><i class="bi bi-check2-square"></i> Dateien auswählen</button>
+            </div>
+
+            <div class="share-card">
+                <div class="share-card-head"><h3><i class="bi bi-x-octagon"></i> Teilen beenden</h3></div>
+                <p class="share-muted">Mitglieder behalten ihre Instanz, bekommen aber keine Updates mehr.</p>
+                <button class="btn btn-secondary share-danger" onclick="stopShare('${pid}')">Teilen beenden</button>
+            </div>
+        </div>`;
+}
+
+function renderDiffSummary(diff) {
+    const chips = [];
+    if (diff.version_change) chips.push(`<span class="share-chip">${escapeHtml(diff.version_change)}</span>`);
+    if (diff.added.length) chips.push(`<span class="share-chip add">+${diff.added.length} neu</span>`);
+    if (diff.updated.length) chips.push(`<span class="share-chip upd">${diff.updated.length} aktualisiert</span>`);
+    if (diff.removed.length) chips.push(`<span class="share-chip rem">−${diff.removed.length} entfernt</span>`);
+    const configs = diff.configs_added.length + diff.configs_changed.length + diff.configs_removed.length;
+    if (configs) chips.push(`<span class="share-chip">${configs} Konfig-Datei(en)</span>`);
+    return chips.join('');
+}
+
+function renderDiffDetails(diff) {
+    const configRows = [
+        ...diff.configs_added.map(p => `<div class="share-item add"><span class="share-item-kind">Konfig</span><span class="share-item-name">${escapeHtml(p)}</span><span class="share-item-version">neu</span></div>`),
+        ...diff.configs_changed.map(p => `<div class="share-item upd"><span class="share-item-kind">Konfig</span><span class="share-item-name">${escapeHtml(p)}</span><span class="share-item-version">geändert</span></div>`),
+        ...diff.configs_removed.map(p => `<div class="share-item rem"><span class="share-item-kind">Konfig</span><span class="share-item-name">${escapeHtml(p)}</span><span class="share-item-version">nicht mehr geteilt</span></div>`)
+    ];
+    return `
+        ${diff.version_change ? `<div class="share-warning"><i class="bi bi-exclamation-triangle-fill"></i> Version/Loader ändert sich: ${escapeHtml(diff.version_change)}</div>` : ''}
+        <div class="share-item-list">
+            ${diff.added.map(i => shareItemRow(i, 'add')).join('')}
+            ${diff.updated.map(i => shareItemRow(i, 'upd')).join('')}
+            ${diff.removed.map(i => shareItemRow(i, 'rem')).join('')}
+            ${configRows.join('')}
+        </div>`;
+}
+
+async function loadPendingChanges(profileId) {
+    const container = document.getElementById('share-tab-content');
+    const target = container?.querySelector('[data-share-changes]');
+    if (!target) return;
+    let changes;
+    try {
+        changes = await invoke('share_pending_changes', { profileId });
+    } catch (error) {
+        target.innerHTML = `<div class="share-muted">Änderungen konnten nicht geprüft werden: ${escapeHtml(String(error))}</div>`;
+        return;
+    }
+    const pid = escapeAttr(profileId);
+    const html = changes.ahead ? `
+        <div class="share-ahead"><i class="bi bi-cloud-arrow-up-fill"></i> Deine Instanz ist deinen Freunden voraus</div>
+        <div class="share-chips">${renderDiffSummary(changes.diff)}</div>
+        <details class="share-configs"><summary>Änderungen anzeigen</summary>${renderDiffDetails(changes.diff)}</details>
+        <div class="share-actions">
+            <button class="btn" onclick="pushShare('${pid}', 'all')"><i class="bi bi-cloud-upload"></i> Alle Änderungen veröffentlichen</button>
+            ${changes.configs_changed && changes.content_changed ? `<button class="btn btn-secondary" onclick="pushShare('${pid}', 'configs')">Nur Konfig-Dateien veröffentlichen</button>` : ''}
+        </div>`
+        : `<div class="share-uptodate"><i class="bi bi-check-circle-fill"></i> Alle Mitglieder sind auf deinem aktuellen Stand.</div>`;
+    const current = document.getElementById('share-tab-content');
+    if (current) {
+        current.dataset.changesLoaded = '1';
+        current.dataset.changesHtml = html;
+        const slot = current.querySelector('[data-share-changes]');
+        if (slot) slot.innerHTML = html;
+    }
+}
+
+function renderMemberShare(profileId, status) {
+    const pid = escapeAttr(profileId);
+    const updateAvailable = status.latest_revision > status.revision;
+    return `
+        <div class="share-grid">
+            <div class="share-card share-span">
+                <div class="share-card-head">
+                    <h3><i class="bi bi-share-fill"></i> Geteilte Instanz</h3>
+                    <span class="share-muted">Revision ${status.revision}</span>
+                </div>
+                <div class="friends-row${status.owner_online ? '' : ' is-offline'}">
+                    <div class="friends-avatar-wrap">
+                        <img class="friends-avatar" alt="" src="${escapeAttr(playerHeadUrl(null, status.owner_name))}">
+                        <span class="friends-dot ${status.owner_online ? 'online' : ''}"></span>
+                    </div>
+                    <div class="friends-row-text">
+                        <div class="friends-name">${escapeHtml(status.owner_name)}</div>
+                        <div class="friends-sub">Besitzer · ${status.owner_online ? 'Online' : 'Offline'}</div>
+                    </div>
+                </div>
+                ${status.ended
+                    ? `<div class="share-warning"><i class="bi bi-info-circle-fill"></i> ${escapeHtml(status.owner_name)} teilt diese Instanz nicht mehr. Sie bleibt als normale Instanz erhalten.</div>`
+                    : updateAvailable
+                        ? `<div class="share-ahead"><i class="bi bi-cloud-arrow-down-fill"></i> Update verfügbar (Revision ${status.latest_revision})</div>`
+                        : ''}
+                <div class="share-actions">
+                    ${status.ended ? '' : `<button class="btn${updateAvailable ? '' : ' btn-secondary'}" onclick="checkSharedUpdateManually('${pid}')">
+                        <i class="bi bi-arrow-repeat"></i> ${updateAvailable ? 'Update ansehen' : 'Nach Updates suchen'}</button>`}
+                    <button class="btn btn-secondary share-danger" onclick="leaveShare('${pid}')">${status.ended ? 'Aus geteilten Instanzen entfernen' : 'Instanz verlassen'}</button>
+                </div>
+            </div>
+            <div class="share-card share-span share-muted">
+                <i class="bi bi-lock-fill"></i> Inhalte des Besitzers sind gesperrt. Du kannst eigene Inhalte hinzufügen –
+                Änderungen an Minecraft-Version oder Loader durch den Besitzer können diese aber beschädigen.
+                Updates werden beim Spielstart geprüft.
+            </div>
+        </div>`;
+}
+
+function rememberManagedFiles(profileId, status) {
+    if (status.role === 'member') {
+        sharedManagedFiles.set(profileId, {
+            owner: status.owner_name,
+            mods: new Set(status.managed_mods),
+            projects: new Set(status.managed_projects)
+        });
+    } else {
+        sharedManagedFiles.delete(profileId);
+    }
+}
+
+/** Lädt beim Öffnen eines Profils, welche Mods vom Besitzer verwaltet (gesperrt) sind. */
+async function loadSharedManagedFiles(profileId) {
+    try {
+        const status = await invoke('share_status', { profileId });
+        const hadLock = sharedManagedFiles.has(profileId);
+        rememberManagedFiles(profileId, status);
+        if (status.role === 'member') document.getElementById('mod-updates-btn')?.remove();
+        if (status.role === 'member' || hadLock) loadInstalledMods(profileId, { force: true });
+    } catch (_e) {
+        // Freunde-System noch nicht bereit
+    }
+}
+
+/** Gehört die Mod-Datei zur geteilten Instanz des Besitzers? */
+function isManagedSharedMod(profileId, filename) {
+    const managed = sharedManagedFiles.get(profileId);
+    if (!managed) return null;
+    const base = String(filename).replace(/\.disabled$/, '');
+    return managed.mods.has(base) ? managed.owner : null;
+}
+
+/** Ist das Profil eine geteilte Instanz eines Freundes (Updates nur vom Besitzer)? */
+function isSharedMemberProfile(profileId) {
+    return sharedManagedFiles.has(profileId);
+}
+
+/** Gehört das Projekt zur geteilten Instanz? Dann legt der Besitzer die Version fest. */
+function isManagedSharedProject(profileId, projectId) {
+    const managed = sharedManagedFiles.get(profileId);
+    return managed?.projects.has(projectId) ? managed.owner : null;
+}
+
+async function createShare(profileId) {
+    const container = document.getElementById('share-tab-content');
+    if (container) container.innerHTML = `<div class="share-card"><span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span> Bereite Instanz zum Teilen vor…</div>`;
+    try {
+        await invoke('share_create', { profileId });
+        showToast('Instanz wird jetzt geteilt – lade deine Freunde ein', 'success', 3500);
+    } catch (error) {
+        showToast('Teilen fehlgeschlagen: ' + error, 'error', 5000);
+    }
+    loadShareTab(profileId);
+}
+
+async function pushShare(profileId, mode) {
+    const slot = document.querySelector('#share-tab-content [data-share-changes]');
+    if (slot) slot.innerHTML = `<span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span> Veröffentliche…`;
+    try {
+        await invoke('share_push', { profileId, mode });
+        showToast(mode === 'configs' ? 'Konfig-Dateien veröffentlicht' : 'Änderungen veröffentlicht', 'success', 3000);
+    } catch (error) {
+        showToast('Veröffentlichen fehlgeschlagen: ' + error, 'error', 5000);
+    }
+    loadShareTab(profileId);
+}
+
+async function inviteToShare(profileId, friendId) {
+    try {
+        const message = await invoke('share_invite_friend', { profileId, friendId });
+        showToast(message, 'success', 3500);
+    } catch (error) {
+        showToast(String(error), 'error', 4000);
+    }
+    loadShareTab(profileId, { quiet: true });
+}
+
+async function removeShareMember(profileId, memberId) {
+    try {
+        await invoke('share_remove_member', { profileId, memberId });
+    } catch (error) {
+        showToast(String(error), 'error', 4000);
+    }
+    loadShareTab(profileId, { quiet: true });
+}
+
+async function stopShare(profileId) {
+    const confirmed = await showConfirmModal({
+        title: 'Teilen beenden',
+        message: 'Möchtest du das Teilen dieser Instanz wirklich beenden',
+        details: 'Mitglieder behalten ihre Instanz, bekommen aber keine Updates mehr.',
+        confirmText: 'Teilen beenden',
+        icon: 'bi-x-octagon'
+    });
+    if (!confirmed) return;
+    try {
+        await invoke('share_stop', { profileId });
+        showToast('Teilen beendet', 'info', 2500);
+    } catch (error) {
+        showToast(String(error), 'error', 4000);
+    }
+    loadShareTab(profileId);
+}
+
+async function leaveShare(profileId) {
+    const confirmed = await showConfirmModal({
+        title: 'Instanz verlassen',
+        message: 'Möchtest du diese geteilte Instanz verlassen',
+        details: 'Die Instanz bleibt als normale Instanz erhalten, bekommt aber keine Updates mehr.',
+        confirmText: 'Verlassen',
+        icon: 'bi-box-arrow-left'
+    });
+    if (!confirmed) return;
+    try {
+        await invoke('share_leave', { profileId });
+        showToast('Geteilte Instanz verlassen', 'info', 2500);
+    } catch (error) {
+        showToast(String(error), 'error', 4000);
+    }
+    sharedManagedFiles.delete(profileId);
+    loadShareTab(profileId);
+}
+
+async function openShareConfigPicker(profileId) {
+    const modal = shareModalShell('share-config-modal', `
+        <div class="share-modal-loading"><span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span> Lade Konfig-Dateien…</div>`);
+    let files;
+    try {
+        files = await invoke('share_list_config_files', { profileId });
+    } catch (error) {
+        modal.remove();
+        showToast(String(error), 'error', 4000);
+        return;
+    }
+    modal.querySelector('.share-modal').innerHTML = `
+        <div class="share-modal-head"><div><h2><i class="bi bi-file-earmark-code"></i> Konfig-Dateien teilen</h2>
+            <div class="share-modal-sub">Ausgewählte Dateien werden beim nächsten Veröffentlichen an deine Freunde übertragen.</div></div></div>
+        <input type="text" class="share-config-filter" placeholder="Dateien filtern…" aria-label="Dateien filtern" data-config-filter>
+        <div class="share-config-list" data-config-list>
+            ${files.length ? files.map(f => `
+                <label class="share-config-row" data-path="${escapeAttr(f.path.toLowerCase())}">
+                    <input type="checkbox" value="${escapeAttr(f.path)}" ${f.selected ? 'checked' : ''}>
+                    <span class="share-config-path-text">${escapeHtml(f.path)}</span>
+                    <span class="share-muted">${(f.size / 1024).toFixed(1)} KB</span>
+                </label>`).join('') : '<div class="share-muted">Keine Konfig-Dateien gefunden (config/, defaultconfigs/, kubejs/, options.txt).</div>'}
+        </div>
+        <div class="share-modal-actions">
+            <button class="btn btn-secondary" data-config-cancel>Abbrechen</button>
+            <button class="btn" data-config-save>Speichern</button>
+        </div>`;
+
+    modal.querySelector('[data-config-filter]').addEventListener('input', (event) => {
+        const query = event.target.value.toLowerCase();
+        modal.querySelectorAll('.share-config-row').forEach(row => {
+            row.classList.toggle('hidden', !!query && !row.dataset.path.includes(query));
+        });
+    });
+    modal.querySelector('[data-config-cancel]').addEventListener('click', () => modal.remove());
+    modal.querySelector('[data-config-save]').addEventListener('click', async () => {
+        const paths = Array.from(modal.querySelectorAll('[data-config-list] input:checked')).map(input => input.value);
+        try {
+            await invoke('share_set_config_files', { profileId, paths });
+            showToast('Auswahl gespeichert – veröffentliche ein Update, um sie zu teilen', 'success', 3500);
+        } catch (error) {
+            showToast(String(error), 'error', 4000);
+        }
+        modal.remove();
+        loadShareTab(profileId);
+    });
+}
+
+// ==================== Updates beim Spielstart ====================
+
+/** Zeigt die Änderungen eines Updates. Ergebnis: 'apply' | 'skip' | 'cancel'. */
+/**
+ * Zeigt die Änderungen eines Updates. Ergebnis: 'apply' | 'skip' | 'cancel'.
+ * Beim Start (`startup`) gibt es nur "Später" und "Übernehmen".
+ */
+function showShareUpdateReview(check, ownerName, { packName = '', startup = false } = {}) {
+    return new Promise((resolve) => {
+        const modal = shareModalShell('share-update-modal', `
+            <div class="share-modal-head"><div>
+                <h2><i class="bi bi-cloud-arrow-down"></i> Update${packName ? ` für „${escapeHtml(packName)}"` : ' für geteilte Instanz'}</h2>
+                <div class="share-modal-sub">${escapeHtml(ownerName)} hat Änderungen veröffentlicht (Revision ${check.revision} → ${check.latest_revision}).</div>
+            </div></div>
+            <div class="share-chips">${renderDiffSummary(check.diff)}</div>
+            ${renderDiffDetails(check.diff)}
+            ${[...check.diff.added, ...check.diff.updated].some(i => i.unpublished) ? `
+                <div class="share-warning"><i class="bi bi-exclamation-triangle-fill"></i>
+                    Das Update enthält Dateien, die nicht auf Modrinth veröffentlicht sind. Übernimm es nur, wenn du dem Besitzer vertraust.</div>` : ''}
+            <div class="share-modal-actions">
+                ${startup ? '' : '<button class="btn btn-secondary" data-update-cancel>Abbrechen</button>'}
+                <button class="btn btn-secondary" data-update-skip>${startup ? 'Später' : 'Ohne Update spielen'}</button>
+                <button class="btn" data-update-apply><i class="bi bi-check-lg"></i> Übernehmen</button>
+            </div>`);
+        const finish = (result) => {
+            modal.remove();
+            resolve(result);
+        };
+        // Klick daneben = abbrechen
+        modal.addEventListener('click', () => resolve('cancel'), { once: true });
+        modal.querySelector('[data-update-cancel]')?.addEventListener('click', () => finish('cancel'));
+        modal.querySelector('[data-update-skip]').addEventListener('click', () => finish('skip'));
+        modal.querySelector('[data-update-apply]').addEventListener('click', () => finish('apply'));
+    });
+}
+
+async function applySharedUpdate(profileId) {
+    const profile = profiles.find(p => p.id === profileId);
+    setSessionWidgetState({
+        profileId,
+        profileName: profile?.name || 'Instanz',
+        phase: 'spin',
+        status: 'Übernehme Update…',
+        percent: null,
+        canStop: false,
+        activity: null
+    });
+    try {
+        const result = await invoke('share_apply_update', { profileId });
+        await refreshProfilesInBackground();
+        invalidateProfileContentCaches(profileId);
+        sharedManagedFiles.delete(profileId);
+        await loadSharedManagedFiles(profileId);
+        showToast('Update übernommen', result.failed.length ? 'warning' : 'success', 3000);
+        showImportIssues(result.failed, result.warnings);
+    } finally {
+        setSessionWidgetState({ profileId: null, phase: 'idle', percent: null, canStop: false, activity: null });
+        syncSessionWidgetWithRunningProfiles();
+    }
+}
+
+/**
+ * Beim Start alle geteilten Instanzen der Reihe nach prüfen. Neue Stände werden auch angeboten,
+ * wenn der Besitzer gerade offline ist (sie wurden vorab geladen, als er online war).
+ */
+async function checkAllSharedUpdatesOnStartup() {
+    let updates;
+    try {
+        updates = await invoke('share_check_all_updates');
+    } catch (_e) {
+        return; // Freunde-System nicht bereit
+    }
+    for (const update of updates) {
+        const decision = await showShareUpdateReview(update.check, update.owner_name, { packName: update.name, startup: true });
+        if (decision !== 'apply') continue;
+        try {
+            await applySharedUpdate(update.profile_id);
+        } catch (error) {
+            showToast(`Update für "${update.name}" fehlgeschlagen: ${error}`, 'error', 5000);
+        }
+    }
+}
+
+/**
+ * Wird vor jedem Spielstart aufgerufen. Gibt false zurück, wenn der Start abgebrochen werden soll.
+ */
+async function syncSharedInstanceBeforeLaunch(profileId) {
+    let status;
+    try {
+        status = await invoke('share_status', { profileId });
+    } catch (_e) {
+        return true; // Freunde-System nicht bereit → normal starten
+    }
+    if (status.role !== 'member' || status.ended) return true;
+
+    let check;
+    try {
+        check = await invoke('share_check_update', { profileId });
+    } catch (error) {
+        showToast('Updates konnten nicht geprüft werden: ' + error, 'warning', 4000);
+        return true;
+    }
+    if (!check.available) {
+        if (!check.owner_online) {
+            showToast(`${status.owner_name} ist offline – Updates können gerade nicht geprüft werden`, 'info', 3500);
+        }
+        return true;
+    }
+
+    const profileName = profiles.find(p => p.id === profileId)?.name || '';
+    const decision = await showShareUpdateReview(check, status.owner_name, { packName: profileName });
+    if (decision === 'cancel') return false;
+    if (decision === 'apply') {
+        try {
+            await applySharedUpdate(profileId);
+        } catch (error) {
+            showToast('Update fehlgeschlagen: ' + error, 'error', 5000);
+            return false;
+        }
+    }
+    return true;
+}
+
+async function checkSharedUpdateManually(profileId) {
+    let status;
+    let check;
+    try {
+        status = await invoke('share_status', { profileId });
+        check = await invoke('share_check_update', { profileId });
+    } catch (error) {
+        showToast(String(error), 'error', 4000);
+        return;
+    }
+    if (!check.available) {
+        showToast(check.message || 'Du bist auf dem neuesten Stand', check.owner_online ? 'success' : 'info', 3500);
+        loadShareTab(profileId, { quiet: true });
+        return;
+    }
+    if (await showShareUpdateReview(check, status.owner_name) === 'apply') {
+        try {
+            await applySharedUpdate(profileId);
+        } catch (error) {
+            showToast('Update fehlgeschlagen: ' + error, 'error', 5000);
+        }
+    }
+    loadShareTab(profileId);
+}
+
+document.addEventListener('DOMContentLoaded', initFriends);
+
+// ============================================================================
+// Launcher-Updates
+// ============================================================================
+
+// Launcher-Updates über GitHub-Releases.
+//
+// * Prüft beim Start und danach alle paar Stunden.
+// * Gefundenes Update: gelber Punkt am Settings-Symbol, "Update verfügbar" im Aktivitäts-Kasten
+//   und ein Update-Button oben in den Einstellungen.
+// * Der Button lädt das passende Paket, prüft die Prüfsumme und installiert es.
+//
+// Nutzt aus app.js: invoke, showToast, escapeHtml, openExternalUrl, setSessionWidgetState,
+// syncSessionWidgetWithRunningProfiles, formatMarkdown.
+
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+const launcherUpdate = {
+    info: null,
+    checking: false,
+    installing: false,
+    progress: null,
+    error: null
+};
+
+function isLauncherUpdateAvailable() {
+    return !!launcherUpdate.info?.available;
+}
+
+async function checkLauncherUpdate({ manual = false } = {}) {
+    if (launcherUpdate.checking || launcherUpdate.installing) return;
+    launcherUpdate.checking = true;
+    launcherUpdate.error = null;
+    renderLauncherUpdate();
+    try {
+        launcherUpdate.info = await invoke('updater_check');
+        if (manual && !launcherUpdate.info.available) {
+            showToast(launcherUpdate.info.hint || 'Der Launcher ist auf dem neuesten Stand', 'success', 3000);
+        }
+    } catch (error) {
+        launcherUpdate.error = String(error);
+        if (manual) showToast('Update-Prüfung fehlgeschlagen: ' + error, 'error', 4500);
+    } finally {
+        launcherUpdate.checking = false;
+        renderLauncherUpdate();
+        syncSessionWidgetWithRunningProfiles();
+    }
+}
+
+async function installLauncherUpdate() {
+    const info = launcherUpdate.info;
+    if (!info?.can_install || launcherUpdate.installing) return;
+
+    launcherUpdate.installing = true;
+    launcherUpdate.progress = 0;
+    renderLauncherUpdate();
+
+    let unlisten = null;
+    try {
+        unlisten = await window.__TAURI__.event.listen('updater-progress', (event) => {
+            const { downloaded, total } = event.payload || {};
+            const percent = total ? Math.round((downloaded / total) * 100) : null;
+            launcherUpdate.progress = percent;
+            setSessionWidgetState({
+                profileId: null,
+                profileName: 'Launcher-Update',
+                phase: 'progress',
+                status: `Update wird heruntergeladen… ${percent ?? ''}%`,
+                percent,
+                canStop: false,
+                activity: 'update'
+            });
+            renderLauncherUpdate();
+        });
+    } catch (_e) {
+        // Ohne Event-API eben ohne Fortschrittsanzeige
+    }
+
+    try {
+        await invoke('updater_install');
+        // Der Launcher beendet sich gleich und der Installer bzw. die neue Version startet
+        setSessionWidgetState({
+            profileId: null,
+            profileName: 'Launcher-Update',
+            phase: 'spin',
+            status: 'Update wird installiert – der Launcher startet neu…',
+            percent: null,
+            canStop: false,
+            activity: 'update'
+        });
+        showToast('Update wird installiert – der Launcher startet neu', 'success', 5000);
+    } catch (error) {
+        launcherUpdate.installing = false;
+        launcherUpdate.error = String(error);
+        setSessionWidgetState({ phase: 'idle', percent: null, canStop: false, activity: null });
+        syncSessionWidgetWithRunningProfiles();
+        showToast('Update fehlgeschlagen: ' + error, 'error', 6000);
+    } finally {
+        if (typeof unlisten === 'function') unlisten();
+        renderLauncherUpdate();
+    }
+}
+
+function renderLauncherUpdate() {
+    // Gelber Punkt am Settings-Symbol
+    document.querySelector('.nav-item[data-page="settings"]')
+        ?.classList.toggle('has-update', isLauncherUpdateAvailable());
+
+    const card = document.getElementById('launcher-update-card');
+    if (!card) return;
+    const info = launcherUpdate.info;
+    const current = info
+        ? `Version ${escapeHtml(info.current_version)}${info.commit ? ` · ${escapeHtml(info.commit)}` : ''} · Kanal: ${escapeHtml(info.channel)}`
+        : '';
+
+    let body;
+    if (launcherUpdate.installing) {
+        const percent = launcherUpdate.progress;
+        body = `
+            <div class="launcher-update-status available"><span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span>
+                Update wird heruntergeladen… ${percent != null ? percent + '%' : ''}</div>
+            <div class="launcher-update-bar"><div style="width: ${percent || 0}%"></div></div>`;
+    } else if (launcherUpdate.checking) {
+        body = `<div class="launcher-update-status"><span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span> Suche nach Updates…</div>`;
+    } else if (info?.available) {
+        const published = info.published_at ? new Date(info.published_at).toLocaleDateString() : '';
+        body = `
+            <div class="launcher-update-status available"><i class="bi bi-stars"></i>
+                Neue Version verfügbar: <strong>${escapeHtml(info.latest_label || '')}</strong>${published ? ` <span class="share-muted">(${escapeHtml(published)})</span>` : ''}</div>
+            ${info.notes ? `<details class="launcher-update-notes"><summary>Änderungen</summary><div class="project-body">${formatMarkdown(info.notes)}</div></details>` : ''}
+            <div class="share-actions">
+                ${info.can_install
+                    ? `<button class="btn" onclick="installLauncherUpdate()"><i class="bi bi-download"></i> Jetzt aktualisieren${info.asset_size ? ` (${formatBytes(info.asset_size)})` : ''}</button>`
+                    : ''}
+                ${info.release_url ? `<button class="btn btn-secondary" onclick="openExternalUrl('${escapeAttr(info.release_url)}')"><i class="bi bi-box-arrow-up-right"></i> Release-Seite</button>` : ''}
+            </div>
+            ${info.hint ? `<div class="share-muted">${escapeHtml(info.hint)}</div>` : ''}`;
+    } else {
+        body = `
+            <div class="launcher-update-status ok"><i class="bi bi-check-circle-fill"></i>
+                ${info ? escapeHtml(info.hint || 'Der Launcher ist auf dem neuesten Stand') : 'Noch nicht geprüft'}</div>
+            ${launcherUpdate.error ? `<div class="share-muted">Letzte Prüfung fehlgeschlagen: ${escapeHtml(launcherUpdate.error)}</div>` : ''}
+            <div class="share-actions">
+                <button class="btn btn-secondary" onclick="checkLauncherUpdate({ manual: true })"><i class="bi bi-arrow-repeat"></i> Nach Updates suchen</button>
+            </div>`;
+    }
+
+    card.innerHTML = `
+        <div class="launcher-update-head">
+            <h3><i class="bi bi-cloud-arrow-down"></i> Launcher-Updates</h3>
+            <span class="share-muted">${current}</span>
+        </div>
+        ${body}`;
+}
+
+/** Automatische Prüfung nur, wenn sie in den Datenschutz-Einstellungen erlaubt ist. */
+async function autoCheckLauncherUpdate() {
+    if ((await getPrivacySettings()).auto_update_check) checkLauncherUpdate();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    renderLauncherUpdate();
+    initPrivacySettings();
+    // Etwas warten, damit der Start nicht ausgebremst wird
+    setTimeout(autoCheckLauncherUpdate, 5000);
+    setInterval(autoCheckLauncherUpdate, UPDATE_CHECK_INTERVAL_MS);
+});
+
+// ============================================================================
+// Datenschutz-Einstellungen
+// ============================================================================
+
+const DEFAULT_PRIVACY_SETTINGS = { auto_update_check: true, friends_enabled: true };
+
+async function getPrivacySettings() {
+    try {
+        const config = await invoke('get_config');
+        return { ...DEFAULT_PRIVACY_SETTINGS, ...(config?.privacy || {}) };
+    } catch (_e) {
+        return { ...DEFAULT_PRIVACY_SETTINGS };
+    }
+}
+
+async function savePrivacySetting(key, value) {
+    const config = await invoke('get_config');
+    config.privacy = { ...DEFAULT_PRIVACY_SETTINGS, ...(config.privacy || {}), [key]: value };
+    await invoke('save_config', { config });
+}
+
+async function initPrivacySettings() {
+    const settings = await getPrivacySettings();
+    const toggles = [
+        ['privacy-auto-update', 'auto_update_check', 'Automatische Update-Prüfung'],
+        ['privacy-friends', 'friends_enabled', 'Freunde-System']
+    ];
+    for (const [id, key, label] of toggles) {
+        const input = document.getElementById(id);
+        if (!input) continue;
+        input.checked = !!settings[key];
+        input.addEventListener('change', async () => {
+            try {
+                await savePrivacySetting(key, input.checked);
+                const restartHint = key === 'friends_enabled' ? ' – wirkt nach einem Neustart des Launchers' : '';
+                showToast(`${label} ${input.checked ? 'aktiviert' : 'deaktiviert'}${restartHint}`, 'success', 3500);
+            } catch (error) {
+                input.checked = !input.checked;
+                showToast('Einstellung konnte nicht gespeichert werden: ' + error, 'error', 4000);
+            }
+        });
+    }
 }

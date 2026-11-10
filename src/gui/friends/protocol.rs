@@ -38,6 +38,11 @@ pub enum Request {
         uuid: Option<String>,
     },
     RemoveFriend,
+    /// Chat-Nachricht (`id` verhindert doppelte Zustellung bei Wiederholungen)
+    Chat {
+        id: String,
+        text: String,
+    },
     ShareInvite {
         share_id: String,
         name: String,
