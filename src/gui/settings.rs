@@ -1,6 +1,6 @@
 use crate::config::schema::LauncherConfig;
-use crate::utils::process::HideConsoleWindow;
 use crate::types::version::MinecraftVersion;
+use crate::utils::process::HideConsoleWindow;
 use std::collections::BTreeSet;
 
 #[derive(serde::Serialize)]
@@ -34,7 +34,8 @@ async fn detect_latest_stable_jdk_major() -> u32 {
         available_releases: Option<Vec<u32>>,
     }
 
-    let response = crate::core::http::HTTP_CLIENT.clone()
+    let response = crate::core::http::HTTP_CLIENT
+        .clone()
         .get("https://api.adoptium.net/v3/info/available_releases")
         .send()
         .await;
@@ -336,4 +337,48 @@ pub async fn initialize_launcher() -> Result<(), String> {
     crate::core::fs::ensure_launcher_dirs()
         .await
         .map_err(|e| e.to_string())
+}
+// ==================== Oberflächen-Zustand ====================
+//
+// Kleine Oberflächen-Einstellungen (eingeklappter Freunde-Kasten, Theme, Akzentfarbe, ...)
+// liegen in einer Datei im Launcher-Ordner. Der localStorage der WebView allein reicht nicht:
+// Er wird verzögert geschrieben und geht verloren, wenn der Launcher kurz danach schließt.
+
+fn ui_state_file() -> std::path::PathBuf {
+    crate::config::defaults::launcher_dir().join("ui_state.json")
+}
+
+fn read_ui_state() -> serde_json::Map<String, serde_json::Value> {
+    std::fs::read_to_string(ui_state_file())
+        .ok()
+        .and_then(|content| serde_json::from_str(&content).ok())
+        .unwrap_or_default()
+}
+
+/// Serialisiert die Zugriffe auf die Datei (mehrere Änderungen kurz hintereinander).
+static UI_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[tauri::command]
+pub fn get_ui_state() -> serde_json::Map<String, serde_json::Value> {
+    let _guard = UI_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    read_ui_state()
+}
+
+#[tauri::command]
+pub fn set_ui_state(key: String, value: serde_json::Value) -> Result<(), String> {
+    let _guard = UI_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut state = read_ui_state();
+    if value.is_null() {
+        state.remove(&key);
+    } else {
+        state.insert(key, value);
+    }
+    let path = ui_state_file();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, content).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }

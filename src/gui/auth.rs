@@ -622,6 +622,16 @@ pub fn get_active_access_token() -> Option<(String, String, String)> {
     ))
 }
 
+/// Ob der aktive Account ein Microsoft-Account ist (nur diese haben eine Mojang-Sitzung).
+pub async fn active_account_is_microsoft() -> bool {
+    let state = AUTH_STATE.lock().await;
+    state
+        .active_account
+        .as_ref()
+        .and_then(|uuid| state.accounts.iter().find(|a| &a.uuid == uuid))
+        .is_some_and(|a| a.is_microsoft)
+}
+
 /// Gibt das Access-Token zurück und refreshed es automatisch wenn es abgelaufen ist
 pub async fn get_active_access_token_refreshed() -> Option<(String, String, String)> {
     let account_data = {

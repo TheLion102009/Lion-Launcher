@@ -72,6 +72,10 @@ fn main() {
             gui::friends::friends_remove,
             gui::friends::friends_messages,
             gui::friends::friends_send_message,
+            gui::friends::devices::friends_unlink_device,
+            gui::friends::devices::friends_find_devices,
+            gui::settings::get_ui_state,
+            gui::settings::set_ui_state,
             // Geteilte Instanzen
             gui::friends::share::share_status,
             gui::friends::share::share_create,

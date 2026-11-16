@@ -45,7 +45,47 @@ pub struct Friend {
     pub uuid: Option<String>,
     pub state: FriendState,
     pub added_at: String,
+    /// Weiteres Gerät desselben Freundes: ID des Geräts, über das es vorgestellt wurde
+    /// (gleiche Person → wird in der Liste zusammengefasst)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked_to: Option<String>,
+    /// Von einem meiner anderen Geräte übernommen; dem Freund muss dieses Gerät noch
+    /// vorgestellt werden, damit er es als mich erkennt
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_intro: bool,
 }
+
+/// Eines meiner eigenen Geräte (gleicher Minecraft-Account), mit dem die Freundesliste
+/// synchronisiert wird.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LinkedDevice {
+    /// iroh-Endpoint-ID des Geräts
+    pub id: String,
+    /// Rechnername
+    pub name: String,
+    pub linked_at: String,
+    #[serde(default)]
+    pub last_sync: Option<String>,
+}
+
+/// Bestätigung eines meiner Geräte, dass dieses Gerät zum selben Account gehört
+/// (Signatur des Geräts `signer` über meine Endpoint-ID).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DeviceVoucher {
+    pub signer: String,
+    pub signature: String,
+}
+
+/// Entfernter Freund – wird mit den eigenen Geräten abgeglichen, damit er nicht über die
+/// Synchronisation zurückkommt.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemovedFriend {
+    pub id: String,
+    pub removed_at: String,
+}
+
+/// Wie lange entfernte Freunde für den Abgleich gemerkt werden.
+const REMOVED_FRIEND_RETENTION_DAYS: i64 = 180;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConfigEntry {
@@ -179,6 +219,17 @@ pub struct FriendsState {
     pub invites: Vec<ShareInvite>,
     #[serde(default)]
     pub messages: Vec<ChatMessage>,
+    /// Meine anderen Geräte
+    #[serde(default)]
+    pub devices: Vec<LinkedDevice>,
+    /// Bestätigungen meiner anderen Geräte für dieses Gerät
+    #[serde(default)]
+    pub vouchers: Vec<DeviceVoucher>,
+    #[serde(default)]
+    pub removed_friends: Vec<RemovedFriend>,
+    /// Getrennte Geräte – werden nicht automatisch wieder verknüpft
+    #[serde(default)]
+    pub blocked_devices: Vec<String>,
 }
 
 /// Chat-Nachricht mit einem Freund. Einladungen zu geteilten Instanzen erscheinen ebenfalls
@@ -242,6 +293,68 @@ impl FriendsState {
 
     pub fn friend_mut(&mut self, id: &str) -> Option<&mut Friend> {
         self.friends.iter_mut().find(|f| f.id == id)
+    }
+
+    pub fn is_device(&self, id: &str) -> bool {
+        self.devices.iter().any(|d| d.id == id)
+    }
+
+    /// Erste ID einer Person (Geräte eines Freundes hängen per `linked_to` daran).
+    pub fn group_root(&self, id: &str) -> String {
+        let mut current = id.to_string();
+        // Kette begrenzen, falls die Daten einen Zyklus enthalten
+        for _ in 0..8 {
+            match self.friend(&current).and_then(|f| f.linked_to.clone()) {
+                Some(parent) if parent != current && self.friend(&parent).is_some() => {
+                    current = parent
+                }
+                _ => break,
+            }
+        }
+        current
+    }
+
+    /// Alle Einträge (Geräte), die zur selben Person wie `id` gehören.
+    pub fn group_ids(&self, id: &str) -> Vec<String> {
+        let root = self.group_root(id);
+        self.friends
+            .iter()
+            .filter(|f| f.id == root || self.group_root(&f.id) == root)
+            .map(|f| f.id.clone())
+            .collect()
+    }
+
+    /// Entfernt eine Person samt aller Geräte, merkt sie für den Geräteabgleich und liefert
+    /// die entfernten IDs.
+    pub fn remove_friend_group(&mut self, id: &str) -> Vec<String> {
+        let ids = self.group_ids(id);
+        let ids = if ids.is_empty() {
+            vec![id.to_string()]
+        } else {
+            ids
+        };
+        self.friends.retain(|f| !ids.contains(&f.id));
+        self.invites.retain(|i| !ids.contains(&i.owner_id));
+        self.messages.retain(|m| !ids.contains(&m.friend_id));
+        let now = now_rfc3339();
+        for removed in &ids {
+            self.removed_friends.retain(|r| &r.id != removed);
+            self.removed_friends.push(RemovedFriend {
+                id: removed.clone(),
+                removed_at: now.clone(),
+            });
+        }
+        self.prune_removed_friends();
+        ids
+    }
+
+    pub fn prune_removed_friends(&mut self) {
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(REMOVED_FRIEND_RETENTION_DAYS);
+        self.removed_friends.retain(|r| {
+            chrono::DateTime::parse_from_rfc3339(&r.removed_at)
+                .map(|t| t > cutoff)
+                .unwrap_or(false)
+        });
     }
 
     pub fn is_accepted_friend(&self, id: &str) -> bool {

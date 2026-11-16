@@ -7,7 +7,11 @@
 //!
 //! Online-Status: Jeder Launcher meldet sich regelmäßig bei seinen Freunden ("Hello").
 //! Wer innerhalb von [`ONLINE_TIMEOUT`] erreichbar war, gilt als online.
+//!
+//! Eigene Geräte mit demselben Minecraft-Account gleichen ihre Freundesliste ab
+//! (siehe [`devices`]).
 
+pub mod devices;
 mod protocol;
 pub mod share;
 mod store;
@@ -49,6 +53,7 @@ pub(crate) struct FriendsService {
     connections: Mutex<HashMap<EndpointId, Connection>>,
     /// Zuletzt bekannte eigene Minecraft-Identität (Name, UUID)
     identity: std::sync::Mutex<(String, Option<String>)>,
+    devices: devices::DeviceRuntime,
 }
 
 /// Startet den Dienst im Hintergrund (aufgerufen beim App-Start).
@@ -94,6 +99,13 @@ fn load_or_create_secret_key() -> Result<SecretKey, String> {
     }
     std::fs::write(&path, key.to_bytes()).map_err(|e| e.to_string())?;
     Ok(key)
+}
+
+fn encode_result(result: Result<Response, String>) -> Vec<u8> {
+    match result {
+        Ok(response) => protocol::encode_ok(&response),
+        Err(e) => protocol::encode_error(&e),
+    }
 }
 
 fn parse_endpoint_id(id: &str) -> Result<EndpointId, String> {
@@ -167,6 +179,8 @@ pub struct FriendsView {
     pub me: MeView,
     pub friends: Vec<FriendView>,
     pub invites: Vec<ShareInvite>,
+    /// Meine anderen Geräte (Freundesliste wird abgeglichen)
+    pub devices: Vec<devices::DeviceView>,
 }
 
 impl FriendsService {
@@ -188,6 +202,7 @@ impl FriendsService {
             last_seen: std::sync::Mutex::new(HashMap::new()),
             connections: Mutex::new(HashMap::new()),
             identity: std::sync::Mutex::new(("Spieler".to_string(), None)),
+            devices: devices::DeviceRuntime::default(),
         }))
     }
 
@@ -332,7 +347,7 @@ impl FriendsService {
 
     // ── Eingehende Anfragen ──────────────────────────────────────────────────
 
-    async fn handle_request(&self, remote: &str, request: Request) -> Vec<u8> {
+    async fn handle_request(self: &Arc<Self>, remote: &str, request: Request) -> Vec<u8> {
         self.touch(remote);
         match request {
             Request::Hello { name, uuid } => {
@@ -360,12 +375,36 @@ impl FriendsService {
             }
             Request::RemoveFriend => {
                 let mut state = self.state.lock().await;
-                state.friends.retain(|f| f.id != remote);
-                state.invites.retain(|i| i.owner_id != remote);
-                state.save();
-                drop(state);
-                self.notify_changed();
+                if state.friend(remote).is_some() {
+                    // Die Person samt all ihrer Geräte entfernen
+                    state.remove_friend_group(remote);
+                    state.save();
+                    drop(state);
+                    self.notify_changed();
+                }
                 protocol::encode_ok(&Response::Ok)
+            }
+            Request::LinkChallenge { nonce } => {
+                encode_result(devices::handle_link_challenge(self, remote, nonce).await)
+            }
+            Request::LinkDevice {
+                nonce,
+                name,
+                device_name,
+                voucher,
+            } => encode_result(
+                devices::handle_link_device(self, remote, nonce, name, device_name, voucher).await,
+            ),
+            Request::SyncFriends { data } => {
+                encode_result(devices::handle_sync(self, remote, data).await)
+            }
+            Request::IntroduceDevice {
+                name,
+                uuid,
+                vouchers,
+            } => encode_result(devices::handle_introduce(self, remote, name, uuid, vouchers).await),
+            Request::UnlinkDevice => {
+                protocol::encode_ok(&devices::handle_unlink(self, remote).await)
             }
             Request::ShareInvite {
                 share_id,
@@ -446,10 +485,15 @@ impl FriendsService {
         }
     }
 
-    async fn on_friend_request(&self, remote: &str, name: String, uuid: Option<String>) {
+    async fn on_friend_request(self: &Arc<Self>, remote: &str, name: String, uuid: Option<String>) {
         let mut state = self.state.lock().await;
+        if state.is_device(remote) {
+            return;
+        }
+        let mut already_accepted = false;
         match state.friend_mut(remote) {
             Some(friend) => {
+                already_accepted = friend.state == FriendState::Accepted;
                 // Beide haben sich gegenseitig angefragt → befreundet
                 if friend.state == FriendState::Outgoing {
                     friend.state = FriendState::Accepted;
@@ -463,11 +507,25 @@ impl FriendsService {
                 uuid,
                 state: FriendState::Incoming,
                 added_at: store::now_rfc3339(),
+                linked_to: None,
+                needs_intro: false,
             }),
         }
         state.save();
         drop(state);
         self.notify_changed();
+        // Schon angenommen (die Bestätigung kam damals nicht an) → erneut bestätigen,
+        // sonst bleibt die Anfrage beim Freund für immer offen
+        if already_accepted {
+            let service = self.clone();
+            let remote = remote.to_string();
+            tokio::spawn(async move {
+                let (name, uuid) = service.my_identity();
+                let _ = service
+                    .send(&remote, &Request::AcceptFriend { name, uuid })
+                    .await;
+            });
+        }
     }
 
     // ── Online-Status ────────────────────────────────────────────────────────
@@ -489,6 +547,10 @@ impl FriendsService {
             tasks.push(tokio::spawn(async move {
                 match friend.state {
                     FriendState::Accepted => {
+                        // Von einem meiner Geräte übernommen → erst vorstellen
+                        if friend.needs_intro {
+                            devices::introduce_to(&service, &friend.id).await;
+                        }
                         if let Ok(Response::Hello { name, uuid }) =
                             service.send(&friend.id, &service.hello_request()).await
                         {
@@ -509,9 +571,25 @@ impl FriendsService {
                 }
             }));
         }
+        // Freundesliste mit meinen anderen Geräten abgleichen
+        let own_devices: Vec<String> = self
+            .state
+            .lock()
+            .await
+            .devices
+            .iter()
+            .map(|d| d.id.clone())
+            .collect();
+        for device in own_devices {
+            let service = self.clone();
+            tasks.push(tokio::spawn(async move {
+                let _ = devices::sync_with(&service, &device).await;
+            }));
+        }
         for task in tasks {
             let _ = task.await;
         }
+        devices::discovery_round(self).await;
         share::deliver_pending_invites(self).await;
         // Abgelaufene Online-Status an die Oberfläche melden
         self.notify_changed();
@@ -555,17 +633,45 @@ impl FriendsService {
     pub(crate) async fn view(&self) -> FriendsView {
         let (name, uuid) = self.my_identity();
         let id = self.my_id();
+        let devices = devices::device_views(self).await;
         let state = self.state.lock().await;
-        let mut friends: Vec<FriendView> = state
-            .friends
-            .iter()
-            .map(|f| FriendView {
-                id: f.id.clone(),
-                name: f.name.clone(),
-                uuid: f.uuid.clone(),
-                state: f.state,
-                online: f.state == FriendState::Accepted && self.is_online(&f.id),
-                unread: state.unread_count(&f.id),
+        // Mehrere Geräte desselben Freundes erscheinen als eine Person
+        let mut groups: Vec<(String, Vec<&Friend>)> = Vec::new();
+        for friend in &state.friends {
+            let root = state.group_root(&friend.id);
+            match groups.iter_mut().find(|(r, _)| *r == root) {
+                Some((_, members)) => members.push(friend),
+                None => groups.push((root, vec![friend])),
+            }
+        }
+        let mut friends: Vec<FriendView> = groups
+            .into_iter()
+            .filter_map(|(root, members)| {
+                let main = members
+                    .iter()
+                    .find(|f| f.id == root)
+                    .or(members.first())
+                    .copied()?;
+                let online_member = members
+                    .iter()
+                    .find(|f| f.state == FriendState::Accepted && self.is_online(&f.id))
+                    .copied();
+                // Angenommen, sobald irgendein Gerät angenommen ist
+                let group_state = if members.iter().any(|f| f.state == FriendState::Accepted) {
+                    FriendState::Accepted
+                } else {
+                    main.state
+                };
+                // Nachrichten gehen an das Gerät, das gerade online ist
+                let shown = online_member.unwrap_or(main);
+                Some(FriendView {
+                    id: shown.id.clone(),
+                    name: shown.name.clone(),
+                    uuid: shown.uuid.clone().or_else(|| main.uuid.clone()),
+                    state: group_state,
+                    online: online_member.is_some(),
+                    unread: members.iter().map(|f| state.unread_count(&f.id)).sum(),
+                })
             })
             .collect();
         friends.sort_by_key(|f| (!f.online, f.name.to_lowercase()));
@@ -578,6 +684,7 @@ impl FriendsService {
             },
             friends,
             invites: state.invites.clone(),
+            devices,
         }
     }
 }
@@ -598,6 +705,9 @@ pub async fn friends_add(code: String) -> Result<String, String> {
     if id == service.my_id() {
         return Err("Das ist dein eigener Freundescode".to_string());
     }
+    if service.state.lock().await.is_device(&id) {
+        return Err("Das ist eines deiner eigenen Geräte".to_string());
+    }
 
     // Hat er mich schon angefragt, wird daraus direkt eine Freundschaft
     let accept_existing = {
@@ -608,6 +718,7 @@ pub async fn friends_add(code: String) -> Result<String, String> {
             }
             Some(friend) if friend.state == FriendState::Incoming => {
                 friend.state = FriendState::Accepted;
+                friend.added_at = store::now_rfc3339();
                 true
             }
             Some(_) => false,
@@ -618,6 +729,8 @@ pub async fn friends_add(code: String) -> Result<String, String> {
                     uuid: None,
                     state: FriendState::Outgoing,
                     added_at: store::now_rfc3339(),
+                    linked_to: None,
+                    needs_intro: false,
                 });
                 false
             }
@@ -662,6 +775,8 @@ pub async fn friends_accept(id: String) -> Result<(), String> {
             .friend_mut(&id)
             .ok_or_else(|| "Anfrage nicht gefunden".to_string())?;
         friend.state = FriendState::Accepted;
+        // Zeitpunkt der Freundschaft – zählt beim Abgleich mit eigenen Geräten
+        friend.added_at = store::now_rfc3339();
         state.save();
     }
     service.notify_changed();
@@ -677,15 +792,17 @@ pub async fn friends_accept(id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn friends_remove(id: String) -> Result<(), String> {
     let service = service()?;
-    {
+    // Die Person samt all ihrer Geräte; wird auch auf meinen anderen Geräten entfernt
+    let removed = {
         let mut state = service.state.lock().await;
-        state.friends.retain(|f| f.id != id);
-        state.invites.retain(|i| i.owner_id != id);
-        state.messages.retain(|m| m.friend_id != id);
+        let removed = state.remove_friend_group(&id);
         state.save();
-    }
+        removed
+    };
     service.notify_changed();
-    let _ = service.send(&id, &Request::RemoveFriend).await;
+    for removed_id in removed {
+        let _ = service.send(&removed_id, &Request::RemoveFriend).await;
+    }
     Ok(())
 }
 
@@ -694,21 +811,27 @@ pub async fn friends_remove(id: String) -> Result<(), String> {
 pub async fn friends_messages(friend_id: String) -> Result<Vec<ChatMessage>, String> {
     let service = service()?;
     let mut state = service.state.lock().await;
+    // Verlauf mit allen Geräten dieses Freundes
+    let mut ids = state.group_ids(&friend_id);
+    if ids.is_empty() {
+        ids.push(friend_id.clone());
+    }
     let mut changed = false;
     for message in state
         .messages
         .iter_mut()
-        .filter(|m| m.friend_id == friend_id && !m.read)
+        .filter(|m| ids.contains(&m.friend_id) && !m.read)
     {
         message.read = true;
         changed = true;
     }
-    let messages = state
+    let mut messages: Vec<ChatMessage> = state
         .messages
         .iter()
-        .filter(|m| m.friend_id == friend_id)
+        .filter(|m| ids.contains(&m.friend_id))
         .cloned()
         .collect();
+    messages.sort_by(|a, b| a.sent_at.cmp(&b.sent_at));
     if changed {
         state.save();
         drop(state);

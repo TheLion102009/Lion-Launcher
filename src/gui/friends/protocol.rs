@@ -5,7 +5,7 @@
 //! Antwort = 1 Status-Byte (0 = ok, 1 = Fehler) + Nutzdaten
 //! (JSON-[`Response`], bei Dateien die rohen Bytes, bei Fehlern der Fehlertext).
 
-use super::store::ShareManifest;
+use super::store::{DeviceVoucher, RemovedFriend, ShareManifest};
 use serde::{Deserialize, Serialize};
 
 /// Protokollkennung (ALPN). Bei inkompatiblen Änderungen die Versionsnummer erhöhen.
@@ -75,14 +75,71 @@ pub enum Request {
     ShareRemoved {
         share_id: String,
     },
+    /// Eigene Geräte verknüpfen, Schritt 1: Gegenseite soll per Mojang-Sitzung beweisen,
+    /// dass sie mit demselben Minecraft-Account angemeldet ist
+    LinkChallenge {
+        nonce: String,
+    },
+    /// Schritt 2: eigener Beweis (Mojang-Sitzung zu `nonce` der Gegenseite)
+    LinkDevice {
+        nonce: String,
+        name: String,
+        device_name: String,
+        /// Meine Bestätigung für das andere Gerät
+        voucher: String,
+    },
+    /// Freundesliste mit einem eigenen Gerät abgleichen
+    SyncFriends {
+        data: SyncData,
+    },
+    /// Ein Gerät stellt sich einem Freund vor, der bisher nur meine anderen Geräte kennt
+    IntroduceDevice {
+        name: String,
+        uuid: Option<String>,
+        vouchers: Vec<DeviceVoucher>,
+    },
+    /// Verknüpfung eines eigenen Geräts aufheben
+    UnlinkDevice,
+}
+
+/// Abgleich der Freundesliste zwischen eigenen Geräten.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SyncData {
+    pub friends: Vec<SyncedFriend>,
+    pub removed: Vec<RemovedFriend>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncedFriend {
+    pub id: String,
+    pub name: String,
+    pub uuid: Option<String>,
+    pub added_at: String,
+    pub linked_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
     Ok,
-    Hello { name: String, uuid: Option<String> },
-    Manifest { manifest: Box<ShareManifest> },
+    Hello {
+        name: String,
+        uuid: Option<String>,
+    },
+    Manifest {
+        manifest: Box<ShareManifest>,
+    },
+    Challenge {
+        nonce: String,
+        name: String,
+        device_name: String,
+    },
+    Linked {
+        voucher: String,
+    },
+    Sync {
+        data: SyncData,
+    },
 }
 
 pub fn encode_ok(response: &Response) -> Vec<u8> {

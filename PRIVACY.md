@@ -15,7 +15,8 @@ Er verbindet sich nur mit den unten genannten Diensten.
 
 ## Automatische Verbindungen (abschaltbar)
 
-Diese Funktionen laufen ohne direkte Aktion. Du kannst sie unter **Einstellungen → Datenschutz** abschalten:
+Diese Funktionen laufen ohne direkte Aktion. Du kannst sie in den **Einstellungen** abschalten (Update-Prüfung unter „Updates & Info“,
+Freunde-System unter „Freunde & Geräte“):
 
 1. **Update-Prüfung** – Beim Start und alle 6 Stunden fragt der Launcher bei GitHub
    (`api.github.com`, Repository `TheLion102009/Lion-Launcher`) nach einer neuen Version.
@@ -26,6 +27,14 @@ Diese Funktionen laufen ohne direkte Aktion. Du kannst sie unter **Einstellungen
    `iroh.link`, Betreiber: number 0, https://n0.computer). Die Relays leiten nur verschlüsselte
    Daten weiter und können keine Inhalte lesen. Sie sehen aber, welche Freundes-IDs miteinander
    verbunden sind, und deine IP-Adresse.
+3. **Abgleich zwischen eigenen Geräten** (Teil des Freunde-Systems, nur mit Microsoft-Account) –
+   Damit sich deine PCs mit demselben Minecraft-Account finden, trägt der Launcher die Freundes-IDs
+   deiner Geräte in einen signierten Eintrag beim pkarr-Dienst von number 0 (`dns.iroh.link`) ein.
+   Der Schlüssel dieses Eintrags wird aus deiner Minecraft-UUID abgeleitet. Bevor zwei Geräte ihre
+   Freundesliste abgleichen, beweisen beide über den Mojang-Sitzungsserver
+   (`sessionserver.mojang.com`, dasselbe Verfahren wie beim Betreten eines Minecraft-Servers), mit
+   demselben Account angemeldet zu sein. Dein Zugriffstoken geht dabei nur an Mojang, nie an das
+   andere Gerät.
 
 ## Gespeicherte Daten
 

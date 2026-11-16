@@ -145,8 +145,8 @@ Pull Requests von Personen außerhalb des Teams werden vor dem Zusammenführen v
 ## Datenschutz / Privacy
 
 Der Launcher hat keinen eigenen Server und sammelt keine Telemetrie. Automatische Verbindungen
-(Update-Prüfung bei GitHub, P2P-Freunde-System über die iroh-Relays) sind unter
-**Einstellungen → Datenschutz** abschaltbar. Details: [PRIVACY.md](PRIVACY.md)
+(Update-Prüfung bei GitHub, P2P-Freunde-System über die iroh-Relays) sind
+in den **Einstellungen** abschaltbar. Details: [PRIVACY.md](PRIVACY.md)
 
 ## Lizenz
 

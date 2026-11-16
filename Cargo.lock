@@ -15,6 +15,7 @@ dependencies = [
  "futures-util",
  "hex",
  "iroh",
+ "iroh-dns",
  "libc",
  "once_cell",
  "rayon",

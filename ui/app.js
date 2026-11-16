@@ -265,6 +265,35 @@ function getEffectiveLimit() {
 let currentTheme = 'dark';
 let currentAccentColor = 'gold';
 
+// ==================== Oberflächen-Zustand ====================
+// Kleine Oberflächen-Einstellungen werden zusätzlich in einer Datei im Launcher-Ordner
+// gespeichert: Der localStorage der WebView wird verzögert geschrieben und geht verloren,
+// wenn der Launcher direkt nach einer Änderung geschlossen wird.
+const uiState = { values: null, loading: null };
+
+function loadUiState() {
+    if (!uiState.loading) {
+        uiState.loading = invoke('get_ui_state')
+            .then(values => { uiState.values = values || {}; })
+            .catch(() => { uiState.values = {}; });
+    }
+    return uiState.loading;
+}
+
+function getUiPref(key, fallback = null) {
+    const value = uiState.values?.[key];
+    if (value !== undefined && value !== null) return String(value);
+    const stored = localStorage.getItem(key);
+    return stored === null ? fallback : stored;
+}
+
+function setUiPref(key, value) {
+    const text = String(value);
+    localStorage.setItem(key, text);
+    if (uiState.values) uiState.values[key] = text;
+    invoke('set_ui_state', { key, value: text }).catch(() => {});
+}
+
 // ── Running Instances State ──────────────────────────────────────────────────
 /** Set of all currently running profile IDs */
 const runningProfiles = new Set();
@@ -539,6 +568,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
 
         debugLog('Loading settings...', 'info');
+        await loadUiState();
+        restoreSavedLanguage();
         await loadSettings();
 
         debugLog('Loading accounts...', 'info');
@@ -9929,19 +9960,19 @@ async function loadSettings() {
     if (keepSearchToggle) keepSearchToggle.checked = isKeepSearchEnabled();
 
     // Theme laden
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    const savedAccent = localStorage.getItem('accentColor') || 'gold';
+    const savedTheme = getUiPref('theme', 'dark');
+    const savedAccent = getUiPref('accentColor', 'gold');
     setTheme(savedTheme, false);
     setAccentColor(savedAccent, false);
 }
 
 // "Suche beibehalten": Suchbegriff/Filter überstehen Detailansicht + Zurück (Standard: an)
 function isKeepSearchEnabled() {
-    return localStorage.getItem('keepSearch') !== 'false';
+    return getUiPref('keepSearch') !== 'false';
 }
 
 function setKeepSearch(enabled) {
-    localStorage.setItem('keepSearch', enabled ? 'true' : 'false');
+    setUiPref('keepSearch', enabled ? 'true' : 'false');
     if (!enabled) installedModsSearchByProfile.clear();
 }
 
@@ -9950,22 +9981,11 @@ function setTheme(theme, save = true) {
     currentTheme = theme;
     document.documentElement.setAttribute('data-theme', theme);
 
-    // Button-Styles aktualisieren
-    const darkBtn = document.getElementById('theme-dark-btn');
-    const lightBtn = document.getElementById('theme-light-btn');
-
-    if (darkBtn && lightBtn) {
-        if (theme === 'dark') {
-            darkBtn.style.borderColor = 'var(--gold)';
-            lightBtn.style.borderColor = 'transparent';
-        } else {
-            darkBtn.style.borderColor = 'transparent';
-            lightBtn.style.borderColor = 'var(--gold)';
-        }
-    }
+    document.getElementById('theme-dark-btn')?.classList.toggle('active', theme === 'dark');
+    document.getElementById('theme-light-btn')?.classList.toggle('active', theme === 'light');
 
     if (save) {
-        localStorage.setItem('theme', theme);
+        setUiPref('theme', theme);
         showToast(`${t('theme_changed')} ${theme === 'dark' ? t('toast_theme_dark') : t('toast_theme_light')}`, 'success', 2000);
     }
 }
@@ -9974,19 +9994,12 @@ function setAccentColor(color, save = true) {
     currentAccentColor = color;
     document.documentElement.setAttribute('data-accent', color);
 
-    // Farbauswahl-Styles aktualisieren
     document.querySelectorAll('.color-option').forEach(opt => {
-        if (opt.dataset.color === color) {
-            opt.style.borderColor = 'var(--gold)';
-            opt.style.transform = 'scale(1.1)';
-        } else {
-            opt.style.borderColor = 'transparent';
-            opt.style.transform = 'scale(1)';
-        }
+        opt.classList.toggle('active', opt.dataset.color === color);
     });
 
     if (save) {
-        localStorage.setItem('accentColor', color);
+        setUiPref('accentColor', color);
         showToast(t('toast_accent_changed'), 'success', 2000);
     }
 }
@@ -10026,7 +10039,6 @@ const saveSettingsBtn = document.getElementById('save-settings-btn');
 if (saveSettingsBtn) {
     saveSettingsBtn.addEventListener('click', async () => {
         const memoryInput = document.getElementById('settings-memory');
-        const languageSelect = document.getElementById('settings-language');
         const javaRuntimeSelect = document.getElementById('settings-java-runtime');
         const customJavaInput = document.getElementById('settings-java-custom-path');
 
@@ -10051,19 +10063,6 @@ if (saveSettingsBtn) {
             await invoke('save_config', { config });
 
             await populateJavaRuntimeOptions(javaPathToSave || null);
-
-            // Language change: save and reload
-            if (languageSelect) {
-                const newLang = languageSelect.value;
-                const oldLang = localStorage.getItem('language') || 'en';
-                localStorage.setItem('language', newLang);
-                if (newLang !== oldLang) {
-                    showToast(t('toast_settings_saved'), 'success', 1500);
-                    setTimeout(() => window.location.reload(), 1200);
-                    return;
-                }
-            }
-
             showToast(t('toast_settings_saved'), 'success', 3000);
         } catch (error) {
             showToast('Settings konnten nicht gespeichert werden: ' + error, 'error', 4200);
@@ -10121,53 +10120,51 @@ async function updateAccountsList() {
         const accounts = await invoke('get_accounts');
 
         // Aktiver Account anzeigen
+        const accountType = acc => acc.is_microsoft
+            ? '<i class="bi bi-microsoft"></i> Microsoft-Account'
+            : '<i class="bi bi-person"></i> Offline-Account';
+
         if (activeAccount && activeDisplay) {
             activeDisplay.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 15px;">
-                    <img alt="" src="${activeAccount.head_url}" style="width: 64px; height: 64px; border-radius: 8px; image-rendering: pixelated;">
-                    <div style="flex: 1;">
-                        <p style="margin: 0; color: var(--text-primary); font-weight: bold; font-size: 18px;">${activeAccount.username}</p>
-                        <p style="margin: 5px 0 0 0; color: var(--text-secondary); font-size: 12px;">
-                            ${activeAccount.is_microsoft ? '<i class="bi bi-shield-lock"></i> Microsoft Account' : '<i class="bi bi-person"></i> Offline Account'}
-                        </p>
-                    </div>
-                    <button class="btn btn-secondary" onclick="logoutAccount('${activeAccount.uuid}')" style="padding: 8px 15px; font-size: 12px;">
-                        Abmelden
-                    </button>
+                <img alt="" src="${escapeAttr(activeAccount.head_url)}" class="settings-account-head">
+                <div class="settings-account-info">
+                    <strong>${escapeHtml(activeAccount.username)}</strong>
+                    <span>${accountType(activeAccount)}</span>
                 </div>
+                <button type="button" class="btn btn-secondary settings-btn-small" onclick="logoutAccount('${escapeAttr(activeAccount.uuid)}')">
+                    <i class="bi bi-box-arrow-right"></i> Abmelden
+                </button>
             `;
         } else if (activeDisplay) {
             activeDisplay.innerHTML = `
-                <div style="text-align: center; color: var(--text-secondary); padding: 20px;">
-                    <div style="font-size: 32px; margin-bottom: 10px;"><i class="bi bi-person"></i></div>
-                    <p>Kein Account angemeldet</p>
-                    <p style="font-size: 12px;">Melde dich mit Microsoft an oder erstelle einen Offline-Account</p>
+                <div class="settings-empty">
+                    <i class="bi bi-person-circle"></i>
+                    <span>Kein Account angemeldet – melde dich mit Microsoft an oder lege einen Offline-Account an.</span>
                 </div>
             `;
         }
 
-        // Liste aller Accounts
-        if (accounts.length > 1) {
-            const otherAccounts = accounts.filter(a => !a.is_active);
-            list.innerHTML = `
-                <h4 style="color: var(--text-secondary); margin: 0 0 10px 0; font-size: 14px;">Weitere Accounts</h4>
-                ${otherAccounts.map(acc => `
-                    <div style="display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--bg-dark); border-radius: 8px; margin-bottom: 8px;">
-                        <img alt="" src="${acc.head_url}" style="width: 32px; height: 32px; border-radius: 4px; image-rendering: pixelated;">
-                        <span style="flex: 1; color: var(--text-primary);">${acc.username}</span>
-                        <span style="color: var(--text-secondary); font-size: 11px;">${acc.is_microsoft ? '<i class="bi bi-shield-lock"></i>' : '<i class="bi bi-person"></i>'}</span>
-                        <button class="btn btn-secondary" onclick="switchAccount('${acc.uuid}')" style="padding: 5px 10px; font-size: 11px;">
-                            Wechseln
-                        </button>
-                        <button class="btn btn-secondary" onclick="logoutAccount('${acc.uuid}')" style="padding: 5px 10px; font-size: 11px; color: #f44336;">
-                            <i class="bi bi-x"></i>
-                        </button>
-                    </div>
-                `).join('')}
-            `;
-        } else {
-            list.innerHTML = '';
-        }
+        // Weitere Accounts
+        const otherAccounts = accounts.filter(a => !a.is_active);
+        list.innerHTML = otherAccounts.length ? `
+            <div class="settings-card">
+                <div class="settings-card-head"><div><h3>Weitere Accounts</h3></div></div>
+                <div class="settings-list">
+                    ${otherAccounts.map(acc => `
+                        <div class="settings-list-item">
+                            <img alt="" src="${escapeAttr(acc.head_url)}" class="settings-list-head">
+                            <div class="settings-list-text">
+                                <strong>${escapeHtml(acc.username)}</strong>
+                                <span>${accountType(acc)}</span>
+                            </div>
+                            <button type="button" class="btn btn-secondary settings-btn-small" onclick="switchAccount('${escapeAttr(acc.uuid)}')">Wechseln</button>
+                            <button type="button" class="settings-icon-btn danger" onclick="logoutAccount('${escapeAttr(acc.uuid)}')" title="Account entfernen" aria-label="Account entfernen">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>` : '';
     } catch (error) {
         debugLog('Failed to update accounts list: ' + error, 'error');
     }
@@ -12920,12 +12917,15 @@ const FRIENDS_COLLAPSED_KEY = 'friendsPanelCollapsed';
 
 async function initFriends() {
     document.querySelectorAll('[data-friends-panel]').forEach(buildFriendsPanelSkeleton);
-    setFriendsPanelCollapsed(localStorage.getItem(FRIENDS_COLLAPSED_KEY) === '1', { save: false });
+    // Sofort den zuletzt bekannten Zustand zeigen (ohne Animation), dann den gespeicherten
+    setFriendsPanelCollapsed(getUiPref(FRIENDS_COLLAPSED_KEY) === '1', { save: false, animate: false });
+    await loadUiState();
+    setFriendsPanelCollapsed(getUiPref(FRIENDS_COLLAPSED_KEY) === '1', { save: false, animate: false });
 
-    // In den Einstellungen abgeschaltet (Datenschutz) → keine Verbindungen, nur Hinweis
+    // In den Einstellungen abgeschaltet → keine Verbindungen, nur Hinweis
     if (!(await getPrivacySettings()).friends_enabled) {
         document.querySelectorAll('[data-friends-list]').forEach(list => {
-            list.innerHTML = '<div class="friends-empty"><i class="bi bi-shield-lock"></i> Das Freunde-System ist in den Einstellungen unter „Datenschutz“ abgeschaltet.</div>';
+            list.innerHTML = '<div class="friends-empty"><i class="bi bi-shield-lock"></i> Das Freunde-System ist in den Einstellungen unter „Freunde &amp; Geräte“ abgeschaltet.</div>';
         });
         return;
     }
@@ -12956,6 +12956,7 @@ async function refreshFriends() {
         friendsUi.ready = false;
     }
     renderFriendsPanels();
+    renderSettingsDevices();
     if (friendsUi.chatFriendId) loadChatMessages();
     refreshOpenShareTab();
 }
@@ -13018,9 +13019,13 @@ function buildFriendsPanelSkeleton(panel) {
 }
 
 /** Ein-/Ausklappen gilt für alle Seiten mit Freunde-Kasten. */
-function setFriendsPanelCollapsed(collapsed, { save = true } = {}) {
-    document.querySelectorAll('[data-friends-panel]').forEach(panel => panel.classList.toggle('collapsed', collapsed));
-    if (save) localStorage.setItem(FRIENDS_COLLAPSED_KEY, collapsed ? '1' : '0');
+function setFriendsPanelCollapsed(collapsed, { save = true, animate = true } = {}) {
+    document.querySelectorAll('[data-friends-panel]').forEach(panel => {
+        if (!animate) panel.classList.add('no-anim');
+        panel.classList.toggle('collapsed', collapsed);
+        if (!animate) requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.remove('no-anim')));
+    });
+    if (save) setUiPref(FRIENDS_COLLAPSED_KEY, collapsed ? '1' : '0');
 }
 
 /** Freundescode → Anfrage senden; Einladungslink → Vorschau der geteilten Instanz. */
@@ -14056,6 +14061,8 @@ function renderLauncherUpdate() {
     // Gelber Punkt am Settings-Symbol
     document.querySelector('.nav-item[data-page="settings"]')
         ?.classList.toggle('has-update', isLauncherUpdateAvailable());
+    document.querySelector('.settings-tab[data-settings-tab="about"]')
+        ?.classList.toggle('has-update', isLauncherUpdateAvailable());
 
     const card = document.getElementById('launcher-update-card');
     if (!card) return;
@@ -14098,13 +14105,13 @@ function renderLauncherUpdate() {
 
     card.innerHTML = `
         <div class="launcher-update-head">
-            <h3><i class="bi bi-cloud-arrow-down"></i> Launcher-Updates</h3>
+            <h3>Launcher-Updates</h3>
             <span class="share-muted">${current}</span>
         </div>
         ${body}`;
 }
 
-/** Automatische Prüfung nur, wenn sie in den Datenschutz-Einstellungen erlaubt ist. */
+/** Automatische Prüfung nur, wenn sie in den Einstellungen erlaubt ist. */
 async function autoCheckLauncherUpdate() {
     if ((await getPrivacySettings()).auto_update_check) checkLauncherUpdate();
 }
@@ -14160,3 +14167,127 @@ async function initPrivacySettings() {
         });
     }
 }
+
+// ============================================================================
+// Einstellungen: Kategorien, Sprache, eigene Geräte
+// ============================================================================
+
+const SETTINGS_TAB_KEY = 'settingsTab';
+
+function showSettingsTab(name, { save = true } = {}) {
+    const tabs = document.querySelectorAll('.settings-tab');
+    if (![...tabs].some(tab => tab.dataset.settingsTab === name)) name = 'account';
+    tabs.forEach(tab => {
+        const active = tab.dataset.settingsTab === name;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    document.querySelectorAll('.settings-panel').forEach(panel => {
+        panel.classList.toggle('active', panel.dataset.settingsPanel === name);
+    });
+    document.querySelector('.settings-panels')?.scrollTo({ top: 0 });
+    if (save) setUiPref(SETTINGS_TAB_KEY, name);
+}
+
+/** Sprache sofort übernehmen (lädt die Oberfläche neu). */
+async function changeLanguage(lang) {
+    if (!lang || lang === currentLanguage) return;
+    localStorage.setItem('language', lang);
+    // Erst in die Datei schreiben, dann neu laden – sonst kann die Auswahl verloren gehen
+    await invoke('set_ui_state', { key: 'language', value: lang }).catch(() => {});
+    window.location.reload();
+}
+
+/** Sprache aus der Datei übernehmen, falls der localStorage der WebView sie verloren hat. */
+function restoreSavedLanguage() {
+    const saved = uiState.values?.language;
+    if (!saved || saved === currentLanguage || !TRANSLATIONS[saved]) return;
+    currentLanguage = saved;
+    localStorage.setItem('language', saved);
+    applyTranslations();
+    const select = document.getElementById('settings-language');
+    if (select) select.value = saved;
+}
+
+function renderSettingsDevices() {
+    const list = document.getElementById('settings-devices-list');
+    if (!list) return;
+    const findButton = document.getElementById('settings-find-devices');
+    if (!friendsUi.ready) {
+        list.innerHTML = '<div class="settings-empty"><i class="bi bi-plug"></i><span>Das Freunde-System ist nicht aktiv.</span></div>';
+        if (findButton) findButton.disabled = true;
+        return;
+    }
+    if (findButton) findButton.disabled = false;
+    const devices = friendsUi.state?.devices || [];
+    if (!devices.length) {
+        list.innerHTML = '<div class="settings-empty"><i class="bi bi-laptop"></i><span>Noch keine weiteren Geräte gefunden. Starte den Launcher auf deinem anderen PC mit demselben Microsoft-Account.</span></div>';
+        return;
+    }
+    list.innerHTML = devices.map(device => {
+        const synced = device.last_sync
+            ? 'Zuletzt abgeglichen: ' + new Date(device.last_sync).toLocaleString()
+            : 'Noch nicht abgeglichen';
+        return `
+            <div class="settings-list-item">
+                <span class="settings-device-icon ${device.online ? 'online' : ''}"><i class="bi bi-pc-display"></i></span>
+                <div class="settings-list-text">
+                    <strong>${escapeHtml(device.name)}</strong>
+                    <span>${device.online ? 'Online' : 'Offline'} · ${escapeHtml(synced)}</span>
+                </div>
+                <button type="button" class="settings-icon-btn danger" data-unlink-device="${escapeAttr(device.id)}"
+                        title="Gerät trennen" aria-label="Gerät trennen"><i class="bi bi-x-lg"></i></button>
+            </div>`;
+    }).join('');
+}
+
+async function unlinkDevice(id) {
+    const device = (friendsUi.state?.devices || []).find(d => d.id === id);
+    const confirmed = await showConfirmModal({
+        title: 'Gerät trennen',
+        message: 'Möchtest du ',
+        highlight: device?.name || 'dieses Gerät',
+        suffix: ' trennen?',
+        details: 'Die Freundesliste wird dann nicht mehr abgeglichen und das Gerät nicht automatisch wieder verbunden.',
+        confirmText: 'Trennen',
+        cancelText: 'Abbrechen',
+        icon: 'bi-x-circle',
+        danger: true
+    });
+    if (!confirmed) return;
+    try {
+        await invoke('friends_unlink_device', { id });
+        showToast('Gerät getrennt', 'success', 2500);
+        refreshFriends();
+    } catch (error) {
+        showToast(String(error), 'error', 4000);
+    }
+}
+
+async function findOwnDevices(button) {
+    button.disabled = true;
+    try {
+        await invoke('friends_find_devices');
+        showToast('Suche abgeschlossen – gefundene Geräte erscheinen gleich in der Liste', 'success', 3500);
+        setTimeout(refreshFriends, 3000);
+    } catch (error) {
+        showToast(String(error), 'error', 4500);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    document.querySelectorAll('.settings-tab').forEach(tab => {
+        tab.addEventListener('click', () => showSettingsTab(tab.dataset.settingsTab));
+    });
+    document.getElementById('settings-devices-list')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-unlink-device]');
+        if (button) unlinkDevice(button.dataset.unlinkDevice);
+    });
+    const findButton = document.getElementById('settings-find-devices');
+    findButton?.addEventListener('click', () => findOwnDevices(findButton));
+    renderSettingsDevices();
+    await loadUiState();
+    showSettingsTab(getUiPref(SETTINGS_TAB_KEY, 'account'), { save: false });
+});
