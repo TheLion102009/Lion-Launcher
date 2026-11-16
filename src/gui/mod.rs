@@ -387,6 +387,10 @@ pub async fn repair_profile(profile_id: String) -> Result<(), String> {
         crate::types::version::ModLoader::Vanilla => {
             // Nichts zu löschen
         }
+        crate::types::version::ModLoader::Horizon => {
+            // Vorbereitete Ressourcen verwerfen: der nächste Start bereitet sie neu vor
+            crate::core::horizon::forget_prepared_resources();
+        }
     }
 
     tracing::info!("Profile repair completed. Next launch will re-download everything.");
@@ -502,6 +506,10 @@ pub async fn get_installed_mods(profile_id: String) -> Result<Vec<InstalledMod>,
     let profile = profiles
         .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
+
+    if profile.loader.loader == crate::types::version::ModLoader::Horizon {
+        return Ok(installed_horizon_mods(&profile.game_dir));
+    }
 
     let mods_dir = profile.game_dir.join("mods");
 
@@ -631,6 +639,44 @@ pub async fn get_installed_mods(profile_id: String) -> Result<Vec<InstalledMod>,
     Ok(installed_mods)
 }
 
+/// Content-Mods eines Horizon-Profils (`horizon-mods/<id>.hmod`, an/aus in `horizon-mods.txt`).
+fn installed_horizon_mods(game_dir: &std::path::Path) -> Vec<InstalledMod> {
+    let text = |meta: &Option<serde_json::Value>, key: &str| {
+        meta.as_ref()
+            .and_then(|m| m[key].as_str().map(String::from))
+    };
+    let mut mods: Vec<InstalledMod> = crate::core::horizon::registry::installed_mods(game_dir)
+        .into_iter()
+        .map(|m| InstalledMod {
+            name: text(&m.metadata, "mod_name").or_else(|| Some(m.id.clone())),
+            version: text(&m.metadata, "version"),
+            icon_url: text(&m.metadata, "icon_url"),
+            version_id: text(&m.metadata, "version_id"),
+            disabled: !m.enabled,
+            has_update: false,
+            latest_version: None,
+            mod_id: Some(m.id),
+            filename: m.file_name,
+        })
+        .collect();
+    mods.sort_by_key(|m| m.name.clone().unwrap_or_default().to_lowercase());
+    mods
+}
+
+/// Lädt ein Profil und sagt, ob es ein Horizon-Profil ist.
+async fn load_profile_for_content(
+    profile_id: &str,
+) -> Result<crate::types::profile::Profile, String> {
+    crate::core::profiles::ProfileManager::new()
+        .map_err(|e| e.to_string())?
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?
+        .get_profile(profile_id)
+        .cloned()
+        .ok_or_else(|| "Profile not found".to_string())
+}
+
 /// Extrahiert Mod-Name, Version und mögliche Mod-ID aus dem Dateinamen
 fn extract_mod_info(clean_name: &str) -> (Option<String>, Option<String>, Option<String>) {
     // Bekannte Muster:
@@ -692,6 +738,16 @@ fn extract_mod_info(clean_name: &str) -> (Option<String>, Option<String>, Option
 pub async fn toggle_mod(profile_id: String, filename: String, enable: bool) -> Result<(), String> {
     use crate::core::profiles::ProfileManager;
 
+    let content_profile = load_profile_for_content(&profile_id).await?;
+    if content_profile.loader.loader == crate::types::version::ModLoader::Horizon {
+        // Horizon schaltet Mods in horizon-mods.txt, die Datei bleibt liegen
+        return crate::core::horizon::registry::set_mod_enabled(
+            &content_profile.game_dir,
+            crate::core::horizon::registry::mod_id_of(&filename),
+            enable,
+        );
+    }
+
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
     let profiles = profile_manager
         .load_profiles()
@@ -734,6 +790,14 @@ pub async fn toggle_mod(profile_id: String, filename: String, enable: bool) -> R
 #[tauri::command]
 pub async fn delete_mod(profile_id: String, filename: String) -> Result<(), String> {
     use crate::core::profiles::ProfileManager;
+
+    let content_profile = load_profile_for_content(&profile_id).await?;
+    if content_profile.loader.loader == crate::types::version::ModLoader::Horizon {
+        if filename.contains(['/', '\\']) || filename.contains("..") {
+            return Err(format!("Ungültiger Dateiname: {filename}"));
+        }
+        return crate::core::horizon::registry::delete_mod(&content_profile.game_dir, &filename);
+    }
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
     let profiles = profile_manager

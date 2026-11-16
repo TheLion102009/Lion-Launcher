@@ -353,6 +353,18 @@ struct VersionManifest {
 struct VersionEntry {
     id: String,
     url: String,
+    #[serde(default)]
+    sha1: Option<String>,
+}
+
+/// Die Original-Dateien einer Minecraft-Version im Layout des offiziellen Launchers.
+pub struct VanillaFiles {
+    pub version_json: PathBuf,
+    pub client_jar: PathBuf,
+    pub libraries_dir: PathBuf,
+    pub assets_dir: PathBuf,
+    /// Download des Server-JARs aus der Version-JSON: (URL, SHA-1)
+    pub server_jar: Option<(String, String)>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -576,6 +588,14 @@ impl MinecraftLauncher {
         // Warnungs-Puffer leeren (Überrest aus vorherigem Start)
         take_launch_warnings();
 
+        // Horizon ist kein Java-Minecraft: eigener Start über die Launch-API
+        if profile.loader.loader == crate::types::version::ModLoader::Horizon {
+            crate::core::horizon::launch(profile, username, uuid, access_token, get_extra_launch_args())
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+            return Ok(take_launch_warnings());
+        }
+
         let version = &profile.minecraft_version;
         let game_dir = Path::new(&profile.game_dir);
         let loader = &profile.loader.loader;
@@ -748,6 +768,14 @@ impl MinecraftLauncher {
     pub async fn prepare_profile(&self, profile: &Profile) -> Result<Vec<String>> {
         take_launch_warnings();
 
+        if profile.loader.loader == crate::types::version::ModLoader::Horizon {
+            crate::core::horizon::prepare(profile)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+            send_launch_progress("Download abgeschlossen - bereit zum Start.", 100);
+            return Ok(take_launch_warnings());
+        }
+
         let version = &profile.minecraft_version;
         let game_dir = Path::new(&profile.game_dir);
         let loader = &profile.loader.loader;
@@ -869,7 +897,8 @@ impl MinecraftLauncher {
                 )
                 .await?;
             }
-            crate::types::version::ModLoader::Vanilla => {
+            crate::types::version::ModLoader::Vanilla
+            | crate::types::version::ModLoader::Horizon => {
                 // Keine zusätzlichen Loader-Dateien notwendig.
             }
         }
@@ -2717,6 +2746,80 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
         } else {
             maven.to_string()
         }
+    }
+
+    /// Lädt Version-JSON (unverändert, wie von Mojang), Client-JAR, Libraries und Assets einer
+    /// Version – z.B. als Ausgangsmaterial für Horizon, das daraus seine Ressourcen baut.
+    pub async fn ensure_vanilla_files(&self, version: &str) -> Result<VanillaFiles> {
+        let manifest: VersionManifest = reqwest::get(MOJANG_MANIFEST_URL).await?.json().await?;
+        let entry = manifest
+            .versions
+            .iter()
+            .find(|v| v.id == version)
+            .ok_or_else(|| anyhow::anyhow!("Version not found: {}", version))?;
+
+        let version_dir = defaults::versions_dir().join(version);
+        tokio::fs::create_dir_all(&version_dir).await?;
+        // Exakt Mojangs Bytes speichern: Horizon prüft die Datei gegen feste Prüfsummen
+        let version_json = version_dir.join(format!("{}.json", version));
+        self.download_manager
+            .download_with_hash(&entry.url, &version_json, entry.sha1.as_deref())
+            .await?;
+        let raw = tokio::fs::read_to_string(&version_json).await?;
+        let info: VersionInfo = serde_json::from_str(&raw)?;
+        let value: serde_json::Value = serde_json::from_str(&raw)?;
+
+        let client_jar = version_dir.join(format!("{}.jar", version));
+        if !client_jar.exists() {
+            send_launch_progress("Lade Minecraft Client-JAR...", 12);
+            self.download_manager
+                .download_with_hash(
+                    &info.downloads.client.url,
+                    &client_jar,
+                    Some(&info.downloads.client.sha1),
+                )
+                .await?;
+        }
+
+        send_launch_progress("Lade Libraries...", 18);
+        let libraries_dir = defaults::libraries_dir();
+        tokio::fs::create_dir_all(&libraries_dir).await?;
+        // Natives werden hier nicht gebraucht, nur die JARs
+        let scratch = defaults::launcher_dir().join("tmp").join("natives-scratch");
+        tokio::fs::create_dir_all(&scratch).await?;
+        self.download_libraries(&info, &libraries_dir, &scratch).await?;
+        tokio::fs::remove_dir_all(&scratch).await.ok();
+
+        send_launch_progress(
+            "Lade Assets (Sounds, Texturen)... Das kann beim ersten Mal 1-2 Min. dauern.",
+            24,
+        );
+        let assets_dir = defaults::assets_dir();
+        self.download_assets(&info.assetIndex, &assets_dir).await?;
+
+        let server = &value["downloads"]["server"];
+        let server_jar = match (server["url"].as_str(), server["sha1"].as_str()) {
+            (Some(url), Some(sha1)) => Some((url.to_string(), sha1.to_string())),
+            _ => None,
+        };
+
+        Ok(VanillaFiles {
+            version_json,
+            client_jar,
+            libraries_dir,
+            assets_dir,
+            server_jar,
+        })
+    }
+
+    /// Lädt eine Datei mit SHA-1-Prüfung (z.B. das Server-JAR für Horizon).
+    pub async fn download_verified(&self, url: &str, dest: &Path, sha1: &str) -> Result<()> {
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        self.download_manager
+            .download_with_hash(url, dest, Some(sha1))
+            .await
     }
 
     async fn get_version_info(&self, version: &str) -> Result<VersionInfo> {

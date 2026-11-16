@@ -438,6 +438,9 @@ pub async fn check_mod_updates(
     filenames: Option<Vec<String>>,
 ) -> Result<ModUpdateCheck, String> {
     let profile = load_profile(&profile_id).await?;
+    if profile.loader.loader == crate::types::version::ModLoader::Horizon {
+        return horizon_mod_updates(&profile, filenames.unwrap_or_default()).await;
+    }
     let minecraft_version = profile.minecraft_version.clone();
     let loader = profile.loader.loader.as_str().to_string();
     let loaders = compatible_loaders(&loader);
@@ -562,7 +565,54 @@ pub async fn update_mod(
 ) -> Result<String, String> {
     validate_mod_filename(&filename)?;
     let profile = load_profile(&profile_id).await?;
+    if profile.loader.loader == crate::types::version::ModLoader::Horizon {
+        // Neue Version installieren; der An/Aus-Zustand bleibt erhalten
+        let id = crate::core::horizon::registry::mod_id_of(&filename).to_string();
+        let enabled = crate::core::horizon::registry::is_mod_enabled(&profile.game_dir, &id);
+        let file = crate::core::horizon::registry::install(&profile.game_dir, &id, Some(&version_id)).await?;
+        crate::core::horizon::registry::set_mod_enabled(&profile.game_dir, &id, enabled)?;
+        return Ok(file);
+    }
     replace_mod_file(&profile.game_dir, &filename, &version_id).await
+}
+
+/// Updates der Content-Mods eines Horizon-Profils aus Horizons Verzeichnis.
+async fn horizon_mod_updates(
+    profile: &crate::types::profile::Profile,
+    filenames: Vec<String>,
+) -> Result<ModUpdateCheck, String> {
+    let updates = crate::core::horizon::registry::mod_updates(&profile.game_dir, &filenames).await?;
+    let results = updates
+        .into_iter()
+        .map(|u| {
+            let status = match (&u.current, &u.latest) {
+                (_, None) if u.project_id.is_none() => "unknown",
+                (_, None) => "incompatible",
+                (Some(current), Some(latest)) if current == latest => "up_to_date",
+                (None, Some(_)) => "unknown",
+                _ => "update",
+            };
+            ModUpdateStatus {
+                filename: u.file_name,
+                status,
+                project_id: u.project_id,
+                mod_name: u.name,
+                icon_url: u.icon_url,
+                current_version: u.current,
+                current_game_versions: vec![profile.minecraft_version.clone()],
+                current_loaders: vec!["horizon".to_string()],
+                current_compatible: status != "incompatible",
+                latest_version_id: u.latest.clone(),
+                latest_version: u.latest,
+                latest_game_versions: vec![profile.minecraft_version.clone()],
+            }
+        })
+        .collect();
+    Ok(ModUpdateCheck {
+        minecraft_version: profile.minecraft_version.clone(),
+        loader: "horizon".to_string(),
+        results,
+    })
 }
 
 async fn replace_mod_file(

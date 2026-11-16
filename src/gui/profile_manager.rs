@@ -23,14 +23,7 @@ pub async fn create_profile(
 ) -> Result<ProfileList, String> {
     let manager = ProfileManager::new().map_err(|e| e.to_string())?;
 
-    let mod_loader = match loader.as_str() {
-        "vanilla" => ModLoader::Vanilla,
-        "fabric" => ModLoader::Fabric,
-        "forge" => ModLoader::Forge,
-        "neoforge" => ModLoader::NeoForge,
-        "quilt" => ModLoader::Quilt,
-        _ => return Err("Invalid mod loader".to_string()),
-    };
+    let mod_loader = ModLoader::from_name(&loader).ok_or("Invalid mod loader")?;
 
     let profile = Profile::new(name, minecraft_version, mod_loader, loader_version);
     manager
@@ -70,14 +63,7 @@ pub async fn update_profile(
     }
 
     if let Some(loader) = updates.get("loader").and_then(|v| v.as_str()) {
-        use crate::types::version::ModLoader;
-        profile.loader.loader = match loader {
-            "fabric" => ModLoader::Fabric,
-            "forge" => ModLoader::Forge,
-            "neoforge" => ModLoader::NeoForge,
-            "quilt" => ModLoader::Quilt,
-            _ => ModLoader::Vanilla,
-        };
+        profile.loader.loader = ModLoader::from_name(loader).unwrap_or(ModLoader::Vanilla);
     }
 
     if let Some(loader_version) = updates.get("loader_version").and_then(|v| v.as_str()) {

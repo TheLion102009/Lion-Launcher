@@ -27,6 +27,8 @@ pub enum ModLoader {
     Forge,
     NeoForge,
     Quilt,
+    /// Horizon: Minecraft Java Edition in Rust nachgebaut (eigenes Mod-System, keine Java-Mods)
+    Horizon,
 }
 
 impl ModLoader {
@@ -37,11 +39,24 @@ impl ModLoader {
             ModLoader::Forge => "forge",
             ModLoader::NeoForge => "neoforge",
             ModLoader::Quilt => "quilt",
+            ModLoader::Horizon => "horizon",
         }
     }
 
     pub fn supports_mods(&self) -> bool {
         !matches!(self, ModLoader::Vanilla)
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "vanilla" => Some(ModLoader::Vanilla),
+            "fabric" => Some(ModLoader::Fabric),
+            "forge" => Some(ModLoader::Forge),
+            "neoforge" => Some(ModLoader::NeoForge),
+            "quilt" => Some(ModLoader::Quilt),
+            "horizon" => Some(ModLoader::Horizon),
+            _ => None,
+        }
     }
 }
 

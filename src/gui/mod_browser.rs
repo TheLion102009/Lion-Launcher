@@ -71,6 +71,99 @@ async fn write_installed_content_metadata(
         .map_err(|e| e.to_string())
 }
 
+// ==================== HORIZON ====================
+
+use crate::core::horizon::registry::ContentKind as HorizonKind;
+
+fn is_horizon(loader: Option<&str>) -> bool {
+    loader == Some("horizon")
+}
+
+async fn horizon_search(
+    kind: HorizonKind,
+    query: &str,
+    categories: Option<Vec<String>>,
+    sort_by: Option<String>,
+    offset: Option<u32>,
+    limit: Option<u32>,
+) -> Result<Vec<ModInfo>, String> {
+    crate::core::horizon::registry::search(
+        kind,
+        query,
+        &categories.unwrap_or_default(),
+        sort_by.as_deref(),
+        offset.unwrap_or(0) as usize,
+        limit.unwrap_or(20) as usize,
+    )
+    .await
+}
+
+/// Installiert einen Resource-/Shader-Pack aus Horizons Verzeichnis, falls das Profil Horizon ist.
+async fn install_horizon_pack(
+    profile_id: &str,
+    pack_id: &str,
+    version_id: Option<&str>,
+) -> Result<bool, String> {
+    let profiles = crate::core::profiles::ProfileManager::new()
+        .map_err(|e| e.to_string())?
+        .load_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
+    let profile = profiles
+        .get_profile(profile_id)
+        .ok_or_else(|| "Profile not found".to_string())?;
+    if profile.loader.loader != crate::types::version::ModLoader::Horizon {
+        return Ok(false);
+    }
+    crate::core::horizon::registry::install(&profile.game_dir, pack_id, version_id).await?;
+    Ok(true)
+}
+
+/// Kategorien aus Horizons Verzeichnis, im Format der Modrinth-Kategorien.
+#[tauri::command]
+pub async fn get_horizon_categories(project_type: String) -> Result<Vec<ModrinthCategory>, String> {
+    let kind = match project_type.as_str() {
+        "resourcepack" => HorizonKind::ResourcePack,
+        "shader" => HorizonKind::ShaderPack,
+        _ => HorizonKind::Mod,
+    };
+    Ok(crate::core::horizon::registry::categories(kind)
+        .await?
+        .into_iter()
+        .map(|name| ModrinthCategory {
+            icon: String::new(),
+            name,
+            project_type: project_type.clone(),
+            header: "categories".to_string(),
+        })
+        .collect())
+}
+
+#[derive(serde::Serialize)]
+pub struct HorizonInfo {
+    /// Minecraft-Version, die Horizon nachbaut
+    pub minecraft: String,
+    /// Neuester veröffentlichter Build (None = GitHub nicht erreichbar)
+    pub latest: Option<String>,
+    /// Installierter Build
+    pub installed: Option<String>,
+    /// Gibt es Horizon für dieses System?
+    pub supported: bool,
+}
+
+#[tauri::command]
+pub async fn get_horizon_info() -> Result<HorizonInfo, String> {
+    use crate::core::horizon::build;
+    let installed = build::installed_builds().into_iter().next();
+    let latest = build::latest().await.ok().map(|b| b.name);
+    Ok(HorizonInfo {
+        minecraft: crate::core::horizon::registry::build_content().await.minecraft,
+        latest,
+        installed: installed.as_deref().map(build::display_name),
+        supported: build::platform_asset().is_some(),
+    })
+}
+
 // ==================== CATEGORIES ====================
 
 #[tauri::command]
@@ -92,6 +185,17 @@ pub async fn search_mods(
     offset: Option<u32>,
     limit: Option<u32>,
 ) -> Result<Vec<ModInfo>, String> {
+    if is_horizon(loader.as_deref()) {
+        return horizon_search(
+            HorizonKind::Mod,
+            &query,
+            categories,
+            sort_by,
+            offset,
+            limit,
+        )
+        .await;
+    }
     let search_query = ModSearchQuery {
         query,
         game_version,
@@ -118,11 +222,8 @@ pub async fn search_mods(
 pub async fn get_mod_versions(mod_id: String, source: String) -> Result<Vec<ModVersion>, String> {
     let manager = ModManager::new(None).map_err(|e| e.to_string())?;
 
-    let mod_source = match source.as_str() {
-        "modrinth" => crate::types::mod_info::ModSource::Modrinth,
-        "curseforge" => crate::types::mod_info::ModSource::CurseForge,
-        _ => return Err("Invalid source".to_string()),
-    };
+    let mod_source =
+        crate::types::mod_info::ModSource::from_name(&source).ok_or("Invalid source")?;
 
     manager
         .get_mod_versions_raw(&mod_id, mod_source)
@@ -136,6 +237,7 @@ pub async fn get_mod_info(mod_id: String, source: String) -> Result<ModInfo, Str
 
     match source.as_str() {
         "modrinth" => client.get_mod(&mod_id).await.map_err(|e| e.to_string()),
+        "horizon" => crate::core::horizon::registry::project_info(&mod_id).await,
         "curseforge" => Err("CurseForge not yet implemented".to_string()),
         _ => Err("Invalid source".to_string()),
     }
@@ -160,6 +262,16 @@ pub async fn install_mod(
         .get_profile_mut(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
+    if profile.loader.loader == crate::types::version::ModLoader::Horizon {
+        crate::core::horizon::registry::install(&profile.game_dir, &mod_id, version_id.as_deref())
+            .await?;
+        profile.add_mod(mod_id);
+        return profile_manager
+            .save_profiles(&profiles)
+            .await
+            .map_err(|e| e.to_string());
+    }
+
     let mods_dir = profile.game_dir.join("mods");
 
     // Stelle sicher dass der mods-Ordner existiert
@@ -178,11 +290,11 @@ pub async fn install_mod(
         mods_dir
     );
 
-    let mod_source = match source.as_str() {
-        "modrinth" => crate::types::mod_info::ModSource::Modrinth,
-        "curseforge" => crate::types::mod_info::ModSource::CurseForge,
-        _ => return Err("Invalid source".to_string()),
-    };
+    let mod_source =
+        crate::types::mod_info::ModSource::from_name(&source).ok_or("Invalid source")?;
+    if mod_source == crate::types::mod_info::ModSource::Horizon {
+        return Err("Horizon-Mods laufen nur in Horizon-Profilen".to_string());
+    }
 
     let manager = ModManager::new(None).map_err(|e| e.to_string())?;
 
@@ -421,7 +533,19 @@ pub async fn search_resourcepacks(
     sort_by: Option<String>,
     offset: Option<u32>,
     limit: Option<u32>,
+    loader: Option<String>,
 ) -> Result<Vec<ModInfo>, String> {
+    if is_horizon(loader.as_deref()) {
+        return horizon_search(
+            HorizonKind::ResourcePack,
+            &query,
+            categories,
+            sort_by,
+            offset,
+            limit,
+        )
+        .await;
+    }
     // Modrinth API: Resource Packs haben project_type=resourcepack
     let client = crate::core::http::HTTP_CLIENT.clone();
     let url = "https://api.modrinth.com/v2/search";
@@ -526,6 +650,10 @@ pub async fn install_resourcepack(
     version_id: Option<String>,
 ) -> Result<(), String> {
     use crate::core::profiles::ProfileManager;
+
+    if install_horizon_pack(&profile_id, &pack_id, version_id.as_deref()).await? {
+        return Ok(());
+    }
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
     let profiles = profile_manager
@@ -660,7 +788,19 @@ pub async fn search_shaderpacks(
     sort_by: Option<String>,
     offset: Option<u32>,
     limit: Option<u32>,
+    loader: Option<String>,
 ) -> Result<Vec<ModInfo>, String> {
+    if is_horizon(loader.as_deref()) {
+        return horizon_search(
+            HorizonKind::ShaderPack,
+            &query,
+            categories,
+            sort_by,
+            offset,
+            limit,
+        )
+        .await;
+    }
     let client = crate::core::http::HTTP_CLIENT.clone();
     let url = "https://api.modrinth.com/v2/search";
 
@@ -764,6 +904,10 @@ pub async fn install_shaderpack(
     version_id: Option<String>,
 ) -> Result<(), String> {
     use crate::core::profiles::ProfileManager;
+
+    if install_horizon_pack(&profile_id, &pack_id, version_id.as_deref()).await? {
+        return Ok(());
+    }
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
     let profiles = profile_manager
@@ -1273,6 +1417,10 @@ pub async fn search_modpacks(
     offset: Option<u32>,
     limit: Option<u32>,
 ) -> Result<Vec<ModInfo>, String> {
+    // Horizon-Modpacks (.hpack) bietet Lion Launcher (noch) nicht an
+    if is_horizon(loader.as_deref()) {
+        return Ok(Vec::new());
+    }
     let client = crate::core::http::HTTP_CLIENT.clone();
     let url = "https://api.modrinth.com/v2/search";
 

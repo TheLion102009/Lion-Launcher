@@ -186,6 +186,7 @@
                                         <option value="forge">Forge</option>
                                         <option value="neoforge">NeoForge</option>
                                         <option value="quilt">Quilt</option>
+                                        <option value="horizon">Horizon</option>
                                     </select>
                                 </div>
                             </div>
@@ -590,11 +591,13 @@
                     <option value="vanilla">vanilla</option>
                     <option value="fabric" selected>fabric</option>
                     <option value="quilt">quilt</option>
-                    <option value="forge" data-i18n-opt="forge_experimental">Forge ⚠️ (Experimental)</option>
+                    <option value="forge">forge</option>
                     <option value="neoforge">neoforge</option>
+                    <option value="horizon">horizon (Pre-Alpha)</option>
                 </select>
-                <div id="loader-warning" style="display: none; background: rgba(255, 152, 0, 0.1); border: 1px solid #ff9800; border-radius: 6px; padding: 10px; margin-top: 10px; font-size: 12px; color: #ff9800;">
-                    ⚠️ <span id="loader-warning-text"></span>
+                <div id="loader-warning" class="loader-warning hidden">
+                    <i class="bi bi-exclamation-triangle-fill"></i>
+                    <span id="loader-warning-text"></span>
                 </div>
             </div>
             <div class="form-group">

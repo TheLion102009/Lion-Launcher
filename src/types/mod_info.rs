@@ -59,6 +59,19 @@ pub struct GalleryImage {
 pub enum ModSource {
     Modrinth,
     CurseForge,
+    /// Horizons eigenes Inhalte-Verzeichnis
+    Horizon,
+}
+
+impl ModSource {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "modrinth" => Some(ModSource::Modrinth),
+            "curseforge" => Some(ModSource::CurseForge),
+            "horizon" => Some(ModSource::Horizon),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

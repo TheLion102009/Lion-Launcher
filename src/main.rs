@@ -76,6 +76,8 @@ fn main() {
             gui::friends::devices::friends_find_devices,
             gui::settings::get_ui_state,
             gui::settings::set_ui_state,
+            gui::get_horizon_categories,
+            gui::get_horizon_info,
             // Geteilte Instanzen
             gui::friends::share::share_status,
             gui::friends::share::share_create,

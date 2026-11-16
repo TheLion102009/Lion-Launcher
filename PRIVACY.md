@@ -11,6 +11,7 @@ Er verbindet sich nur mit den unten genannten Diensten.
 | Modrinth (api.modrinth.com, cdn.modrinth.com) | Mods, Resource Packs, Shader suchen und herunterladen; exakte Versionen beim Teilen bestimmen | Suchbegriffe, Projekt-IDs, Prüfsummen (SHA-1) installierter Dateien |
 | Mojang / Fabric / Quilt / Forge / NeoForge | Minecraft und Mod-Loader herunterladen | Angefragte Versionen |
 | mc-heads.net | Spielerköpfe/Skins anzeigen | Minecraft-Name bzw. UUID |
+| Horizon (GitHub: `api.github.com`, `github.com/horizon-rust`, `horizon-rust.github.io`) | Nur bei Horizon-Profilen: neuesten Horizon-Build und Horizon-Mods/Resource Packs/Shader laden | Angefragte Dateien; die Minecraft-Dateien (inkl. Server-JAR) kommen wie bei Vanilla direkt von Mojang |
 | Freunde (direkt, Ende-zu-Ende-verschlüsselt) | Freunde, Chat, geteilte Instanzen | Dein Minecraft-Name und deine UUID, Chat-Nachrichten, Inhalte geteilter Instanzen – nur an Freunde, die du selbst hinzugefügt hast |
 
 ## Automatische Verbindungen (abschaltbar)

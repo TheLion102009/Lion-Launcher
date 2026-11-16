@@ -42,6 +42,8 @@ libc = "0.2.180"
 rfd = "0.15"
 iroh = "1.4"
 iroh-dns = "1.4"
+# Signaturen der Horizon-Mods (Minisign)
+minisign-verify = "0.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

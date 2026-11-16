@@ -139,7 +139,6 @@ const TRANSLATIONS = {
         open_folder: 'Open Folder',
         play_btn: 'Play',
         stop_btn: 'Stop',
-        forge_experimental: 'Forge ⚠️ (Experimental)',
         loading_mods: 'Loading mods...',
     },
 
@@ -255,7 +254,6 @@ const TRANSLATIONS = {
         open_folder: 'Ordner öffnen',
         play_btn: 'Spielen',
         stop_btn: 'Stoppen',
-        forge_experimental: 'Forge ⚠️ (Experimentell)',
         loading_mods: 'Mods werden geladen...',
     },
 
@@ -371,7 +369,6 @@ const TRANSLATIONS = {
         open_folder: '打开文件夹',
         play_btn: '开始游戏',
         stop_btn: '停止',
-        forge_experimental: 'Forge ⚠️ (实验性)',
         loading_mods: '正在加载 Mods...',
     },
 
@@ -487,7 +484,6 @@ const TRANSLATIONS = {
         open_folder: 'フォルダを開く',
         play_btn: 'プレイ',
         stop_btn: '停止',
-        forge_experimental: 'Forge ⚠️ (実験的)',
         loading_mods: 'Mods を読み込み中...',
     },
 
@@ -603,7 +599,6 @@ const TRANSLATIONS = {
         open_folder: 'Открыть папку',
         play_btn: 'Играть',
         stop_btn: 'Стоп',
-        forge_experimental: 'Forge ⚠️ (Экспериментально)',
         loading_mods: 'Загрузка Mods...',
     },
 
@@ -719,7 +714,6 @@ const TRANSLATIONS = {
         open_folder: 'Ouvrir le dossier',
         play_btn: 'Jouer',
         stop_btn: 'Arrêter',
-        forge_experimental: 'Forge ⚠️ (Expérimental)',
         loading_mods: 'Chargement des Mods...',
     },
 
@@ -835,7 +829,6 @@ const TRANSLATIONS = {
         open_folder: 'Abrir carpeta',
         play_btn: 'Jugar',
         stop_btn: 'Detener',
-        forge_experimental: 'Forge ⚠️ (Experimental)',
         loading_mods: 'Cargando Mods...',
     },
 
@@ -951,7 +944,6 @@ const TRANSLATIONS = {
         open_folder: 'Abrir pasta',
         play_btn: 'Jogar',
         stop_btn: 'Parar',
-        forge_experimental: 'Forge ⚠️ (Experimental)',
         loading_mods: 'Carregando Mods...',
     },
 
@@ -1067,7 +1059,6 @@ const TRANSLATIONS = {
         open_folder: '폴더 열기',
         play_btn: '플레이',
         stop_btn: '중지',
-        forge_experimental: 'Forge ⚠️ (실험적)',
         loading_mods: 'Mods 불러오는 중...',
     },
 
@@ -1183,7 +1174,6 @@ const TRANSLATIONS = {
         open_folder: 'Otwórz folder',
         play_btn: 'Graj',
         stop_btn: 'Zatrzymaj',
-        forge_experimental: 'Forge ⚠️ (Eksperymentalne)',
         loading_mods: 'Ładowanie Modów...',
     },
 };

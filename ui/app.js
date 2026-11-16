@@ -1038,8 +1038,8 @@ function applyProfileFilters(profile) {
         debugLog('Set version filter to: ' + profile.minecraft_version, 'info');
     }
 
-    // Set mod loader filter ONLY for mods/modpacks
-    if (currentContentType === 'mods' || currentContentType === 'modpacks') {
+    // Loader-Filter für Mods/Modpacks – bei Horizon für alle Inhaltsarten (eigene Quelle)
+    if (currentContentType === 'mods' || currentContentType === 'modpacks' || profile.loader.loader === 'horizon') {
         const loaderName = profile.loader.loader;
         if (loaderName && loaderName !== 'vanilla') {
             // Set the loader dropdown
@@ -2043,6 +2043,7 @@ async function openProfileSettings(profileId) {
                             <option value="forge" ${profile.loader.loader === 'forge' ? 'selected' : ''}>Forge</option>
                             <option value="neoforge" ${profile.loader.loader === 'neoforge' ? 'selected' : ''}>NeoForge</option>
                             <option value="quilt" ${profile.loader.loader === 'quilt' ? 'selected' : ''}>Quilt</option>
+                            <option value="horizon" ${profile.loader.loader === 'horizon' ? 'selected' : ''}>Horizon (Pre-Alpha)</option>
                         </select>
                         <select id="edit-profile-loader-version"
                                 style="flex: 1; padding: 10px; background: var(--bg-light); border: none; border-radius: 6px; color: var(--text-primary); font-size: 14px;">
@@ -4915,7 +4916,10 @@ function applyProfileBrowserFilters(type) {
     if (!currentProfile || serverBrowserContext) return;
     const loader = currentProfile.loader?.loader;
     selectedFilters.version = currentProfile.minecraft_version || '';
-    selectedFilters.loader = (type === 'mods' || type === 'modpacks') && loader && loader !== 'vanilla' ? loader : '';
+    // Horizon hat für alle Inhaltsarten eine eigene Quelle
+    selectedFilters.loader = loader === 'horizon' || ((type === 'mods' || type === 'modpacks') && loader && loader !== 'vanilla')
+        ? loader
+        : '';
 
     const versionSelect = document.getElementById('filter-version');
     if (versionSelect) versionSelect.value = selectedFilters.version;
@@ -7871,6 +7875,10 @@ async function updateEditLoaderVersions() {
         versionSelect.disabled = true;
         return;
     }
+    if (loader === 'horizon') {
+        await fillHorizonVersionSelect(versionSelect);
+        return;
+    }
 
     versionSelect.disabled = false;
     versionSelect.innerHTML = '<option value="">Lade...</option>';
@@ -7949,7 +7957,7 @@ function setupModals() {
         lionImportInput.addEventListener('change', handleLionImportInputChange);
     }
 
-    // Hilfsfunktion: Warnung nur für Quilt 0.26.1.x anzeigen
+    // Hinweise unter der Loader-Auswahl: Horizon (Pre-Alpha) und Quilt 0.26.1.x
     function checkQuilt261Warning() {
         const loader = loaderSelect ? loaderSelect.value : '';
         const loaderVersionEl = document.getElementById('profile-loader-version');
@@ -7966,25 +7974,21 @@ function setupModals() {
         const warningText = document.getElementById('loader-warning-text');
         if (!loaderWarning) return;
 
-        if (loader === 'quilt' && selectedVersion.startsWith('0.26.1')) {
+        if (loader === 'horizon') {
+            if (warningText) warningText.textContent = HORIZON_PREALPHA_WARNING;
+            loaderWarning.classList.remove('hidden');
+        } else if (loader === 'quilt' && selectedVersion.startsWith('0.26.1')) {
             if (warningText) warningText.textContent = 'Quilt 0.26.1 ist experimentell und startet möglicherweise nicht zuverlässig. Für stabile Ergebnisse empfehlen wir Fabric oder eine ältere Quilt-Version.';
-            loaderWarning.style.display = 'block';
-        } else if (loader !== 'forge' && loader !== 'neoforge') {
-            loaderWarning.style.display = 'none';
+            loaderWarning.classList.remove('hidden');
+        } else {
+            loaderWarning.classList.add('hidden');
         }
     }
 
-    // Zeige Warnung bei Forge/NeoForge Auswahl UND aktualisiere Versionen
+    // Loader gewechselt: Hinweise und verfügbare Versionen aktualisieren
     if (loaderSelect && loaderWarning) {
-        loaderSelect.addEventListener('change', async (e) => {
-            const loader = e.target.value;
-            const warningText = document.getElementById('loader-warning-text');
-            if (loader === 'forge' || loader === 'neoforge') {
-                if (warningText) warningText.textContent = 'Forge/NeoForge support is experimental. For best results, use Fabric.';
-                loaderWarning.style.display = 'block';
-            } else {
-                loaderWarning.style.display = 'none';
-            }
+        loaderSelect.addEventListener('change', async () => {
+            checkQuilt261Warning();
 
             // WICHTIG: Aktualisiere die verfügbaren Versionen basierend auf dem Loader!
             await updateVersionSelects();
@@ -8102,9 +8106,43 @@ async function getNeoforgeSupportedMcVersions() {
     return neoforgeSupportedMcVersions;
 }
 
+// ==================== Horizon ====================
+
+const HORIZON_PREALPHA_WARNING = 'Achtung: Horizon ist in der Pre-Alpha. Es ist ein Nachbau von Minecraft in Rust – '
+    + 'Fehler und fehlende Funktionen sind normal. Du brauchst einen Microsoft-Account, der Minecraft: Java Edition besitzt. '
+    + 'Fabric-, Forge- und andere Java-Mods laufen nicht, nur Horizons eigene Mods, Resource Packs und Shader.';
+
+let horizonInfoCache = null;
+
+/** Minecraft-Version, die Horizon nachbaut, und der neueste Build (gecached). */
+async function getHorizonInfo() {
+    if (horizonInfoCache) return horizonInfoCache;
+    try {
+        horizonInfoCache = await invoke('get_horizon_info');
+    } catch (error) {
+        debugLog('Horizon info failed: ' + error, 'error');
+        return { minecraft: '26.3', latest: null, installed: null, supported: true };
+    }
+    return horizonInfoCache;
+}
+
+/** Horizon hat keine wählbaren Versionen: es läuft immer der neueste Nightly. */
+async function fillHorizonVersionSelect(select) {
+    const info = await getHorizonInfo();
+    const label = info.latest || info.installed;
+    select.innerHTML = `<option value="latest">Neuester Nightly${label ? ' (' + escapeHtml(label) + ')' : ''}</option>`;
+    select.value = 'latest';
+    select.disabled = true;
+}
+
 /// Hilfsfunktion: Filtert Versionen basierend auf dem Loader
 async function filterVersionsByLoader(versions, loader) {
     if (loader === 'vanilla') return versions;
+    if (loader === 'horizon') {
+        const { minecraft } = await getHorizonInfo();
+        const match = allMinecraftVersions.find(v => v.id === minecraft);
+        return [match || { id: minecraft, version_type: 'Release' }];
+    }
 
     let supported;
     if (loader === 'forge') {
@@ -8213,6 +8251,10 @@ async function updateCreateLoaderVersions() {
     if (loader === 'vanilla') {
         versionSelect.innerHTML = '<option value="">-</option>';
         versionSelect.disabled = true;
+        return;
+    }
+    if (loader === 'horizon') {
+        await fillHorizonVersionSelect(versionSelect);
         return;
     }
 
@@ -8476,8 +8518,14 @@ function setupSearch() {
     const loaderFilter = document.getElementById('filter-loader');
     if (loaderFilter) {
         loaderFilter.addEventListener('change', (e) => {
+            const wasHorizon = isHorizonBrowser();
             selectedFilters.loader = e.target.value;
-            searchMods(searchInput.value);
+            if (wasHorizon !== isHorizonBrowser()) {
+                // Andere Quelle → andere Kategorien
+                selectedFilters.categories = [];
+                loadModrinthCategories();
+            }
+            triggerContentSearch();
         });
     }
 
@@ -8591,18 +8639,22 @@ async function loadModrinthCategories() {
     categoriesContainer.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px; padding: 10px;">Loading categories...</div>';
 
     try {
-        // Lade Kategorien über Backend (kein CORS-Problem!) + Cache
-        let allCategories = modrinthCategoriesCache.get('all');
-        if (!allCategories) {
-            allCategories = await invoke('get_modrinth_categories');
-            modrinthCategoriesCache.set('all', allCategories || []);
-        }
-
         // Filtern nach Content-Type
         const projectType = currentContentType === 'mods' ? 'mod' :
             currentContentType === 'modpacks' ? 'modpack' :
                 currentContentType === 'resourcepacks' ? 'resourcepack' :
                     currentContentType === 'shaderpacks' ? 'shader' : 'mod';
+
+        // Kategorien über Backend (kein CORS-Problem!) + Cache; Horizon hat eigene
+        const horizon = isHorizonBrowser();
+        const cacheKey = horizon ? 'horizon:' + projectType : 'all';
+        let allCategories = modrinthCategoriesCache.get(cacheKey);
+        if (!allCategories) {
+            allCategories = horizon
+                ? await invoke('get_horizon_categories', { projectType })
+                : await invoke('get_modrinth_categories');
+            modrinthCategoriesCache.set(cacheKey, allCategories || []);
+        }
 
         const categories = allCategories.filter(cat => cat.project_type === projectType);
 
@@ -8739,6 +8791,16 @@ async function loadModrinthCategories() {
     }
 }
 
+/** Der Content Browser durchsucht Horizons Verzeichnis statt Modrinth. */
+function isHorizonBrowser() {
+    return selectedFilters.loader === 'horizon';
+}
+
+/** Loader-Parameter für Pack-Suchen (nur Horizon hat eine eigene Quelle). */
+function packSearchLoader() {
+    return isHorizonBrowser() ? 'horizon' : null;
+}
+
 // Helper-Funktion um Suche mit aktuellen Filtern zu triggern
 function triggerContentSearch() {
     const searchInput = document.getElementById('mod-search');
@@ -8838,6 +8900,7 @@ async function loadPopularResourcePacks(page = 0) {
     try {
         const packs = await invoke('search_resourcepacks', {
             query: '',
+            loader: packSearchLoader(),
             gameVersion: selectedFilters.version || null,
             categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
             sortBy: 'downloads',
@@ -8886,6 +8949,7 @@ async function searchResourcePacks(query, page = 0) {
     try {
         const packs = await invoke('search_resourcepacks', {
             query,
+            loader: packSearchLoader(),
             gameVersion: selectedFilters.version || null,
             categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
             sortBy: selectedFilters.sort || 'downloads',
@@ -9020,6 +9084,7 @@ async function loadPopularShaderPacks(page = 0) {
     try {
         const packs = await invoke('search_shaderpacks', {
             query: '',
+            loader: packSearchLoader(),
             gameVersion: selectedFilters.version || null,
             categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
             sortBy: 'downloads',
@@ -9068,6 +9133,7 @@ async function searchShaderPacks(query, page = 0) {
     try {
         const packs = await invoke('search_shaderpacks', {
             query,
+            loader: packSearchLoader(),
             gameVersion: selectedFilters.version || null,
             categories: selectedFilters.categories.length > 0 ? selectedFilters.categories : null,
             sortBy: selectedFilters.sort || 'downloads',

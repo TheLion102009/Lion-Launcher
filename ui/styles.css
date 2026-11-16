@@ -3442,3 +3442,22 @@ select.settings-input option {
     border-color: var(--gold);
     transform: none;
 }
+
+/* Hinweis unter der Loader-Auswahl (Horizon Pre-Alpha, Quilt 0.26.1) */
+.loader-warning {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: rgba(255, 152, 0, 0.1);
+    border: 1px solid #ff9800;
+    border-radius: 8px;
+    color: #ff9800;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.loader-warning.hidden {
+    display: none;
+}

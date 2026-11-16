@@ -47,6 +47,7 @@ fn parse_loader(loader: &str) -> Result<ModLoader, String> {
         "forge" => Ok(ModLoader::Forge),
         "neoforge" => Ok(ModLoader::NeoForge),
         "quilt" => Ok(ModLoader::Quilt),
+        "horizon" => Ok(ModLoader::Horizon),
         other => Err(format!("Unbekannter Mod-Loader: {}", other)),
     }
 }

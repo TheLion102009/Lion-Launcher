@@ -86,6 +86,13 @@ impl LoaderManager {
                     })
                     .collect())
             }
+            // Horizon hat keine wählbaren Versionen: es läuft immer der neueste Nightly-Build
+            ModLoader::Horizon => Ok(vec![LoaderVersionInfo {
+                id: "horizon-latest".to_string(),
+                version: "latest".to_string(),
+                stable: false,
+                loader_type: ModLoader::Horizon,
+            }]),
         }
     }
 
@@ -133,6 +140,7 @@ impl LoaderManager {
                 let versions = self.quilt.get_game_versions().await?;
                 Ok(versions.into_iter().map(|v| v.version).collect())
             }
+            ModLoader::Horizon => Ok(vec![crate::core::horizon::MINECRAFT_VERSION.to_string()]),
         }
     }
 

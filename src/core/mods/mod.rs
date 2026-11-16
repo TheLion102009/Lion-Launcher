@@ -55,6 +55,11 @@ impl ModManager {
                 // CurseForge version fetching would go here
                 Ok(Vec::new())
             }
+            crate::types::mod_info::ModSource::Horizon => {
+                crate::core::horizon::registry::project_versions(&mod_info.id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))
+            }
         }
     }
 
@@ -66,6 +71,11 @@ impl ModManager {
         match source {
             crate::types::mod_info::ModSource::Modrinth => self.modrinth.get_versions(mod_id).await,
             crate::types::mod_info::ModSource::CurseForge => Ok(Vec::new()),
+            crate::types::mod_info::ModSource::Horizon => {
+                crate::core::horizon::registry::project_versions(mod_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))
+            }
         }
     }
 
@@ -113,7 +123,8 @@ impl ModManager {
             crate::types::mod_info::ModSource::Modrinth => {
                 self.modrinth.get_versions(mod_id).await?
             }
-            crate::types::mod_info::ModSource::CurseForge => Vec::new(),
+            crate::types::mod_info::ModSource::CurseForge
+            | crate::types::mod_info::ModSource::Horizon => Vec::new(),
         };
 
         if let Some(version) = versions.iter().find(|v| v.id == version_id) {
