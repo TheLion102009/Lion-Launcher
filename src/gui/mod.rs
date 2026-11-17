@@ -648,7 +648,9 @@ fn installed_horizon_mods(game_dir: &std::path::Path) -> Vec<InstalledMod> {
     let mut mods: Vec<InstalledMod> = crate::core::horizon::registry::installed_mods(game_dir)
         .into_iter()
         .map(|m| InstalledMod {
-            name: text(&m.metadata, "mod_name").or_else(|| Some(m.id.clone())),
+            name: text(&m.metadata, "mod_name")
+                .or_else(|| Some(m.id.clone()))
+                .map(|name| if m.native { format!("{name} (nativ)") } else { name }),
             version: text(&m.metadata, "version"),
             icon_url: text(&m.metadata, "icon_url"),
             version_id: text(&m.metadata, "version_id"),

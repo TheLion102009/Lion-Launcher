@@ -12,6 +12,7 @@ Er verbindet sich nur mit den unten genannten Diensten.
 | Mojang / Fabric / Quilt / Forge / NeoForge | Minecraft und Mod-Loader herunterladen | Angefragte Versionen |
 | mc-heads.net | Spielerköpfe/Skins anzeigen | Minecraft-Name bzw. UUID |
 | Horizon (GitHub: `api.github.com`, `github.com/horizon-rust`, `horizon-rust.github.io`) | Nur bei Horizon-Profilen: neuesten Horizon-Build und Horizon-Mods/Resource Packs/Shader laden | Angefragte Dateien; die Minecraft-Dateien (inkl. Server-JAR) kommen wie bei Vanilla direkt von Mojang |
+| Native Horizon-Mods (nur nach deiner Zustimmung) | Die Werkzeuge des Horizon-Launchers bauen die Mods auf deinem PC: sie laden den festgelegten Rust-Compiler und Horizons Quellcode/SDK (GitHub, rust-lang.org) | Angefragte Dateien |
 | Freunde (direkt, Ende-zu-Ende-verschlüsselt) | Freunde, Chat, geteilte Instanzen | Dein Minecraft-Name und deine UUID, Chat-Nachrichten, Inhalte geteilter Instanzen – nur an Freunde, die du selbst hinzugefügt hast |
 
 ## Automatische Verbindungen (abschaltbar)

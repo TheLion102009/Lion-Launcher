@@ -277,9 +277,28 @@ fn sha256_file(path: &Path) -> Result<String, String> {
 /// Startet die neue Version bzw. den Installer und beendet den Launcher.
 fn launch_update(app: &AppHandle, file: &Path) -> Result<(), String> {
     if cfg!(target_os = "windows") {
-        // NSIS-Installer im Passiv-Modus (Fortschritt ohne Rückfragen), danach Launcher neu starten
-        std::process::Command::new(file)
-            .args(["/P", "/R"])
+        // NSIS-Installer im Passiv-Modus (Fortschritt ohne Rückfragen), danach Launcher neu starten.
+        // Erst starten, wenn dieser Prozess beendet ist: solange er läuft, sperrt Windows die
+        // Lion-Launcher.exe und der Installer kann sie nicht ersetzen (das Update bliebe wirkungslos).
+        use crate::utils::process::HideConsoleWindow;
+        let script = format!(
+            "Wait-Process -Id {} -Timeout 120 -ErrorAction SilentlyContinue; \
+             Start-Sleep -Milliseconds 700; \
+             Start-Process -FilePath '{}' -ArgumentList '/P','/R'",
+            std::process::id(),
+            // PowerShell-String in einfachen Anführungszeichen: ' wird verdoppelt
+            file.display().to_string().replace('\'', "''")
+        );
+        std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                &script,
+            ])
+            .hide_console_window()
             .spawn()
             .map_err(|e| format!("Installer konnte nicht gestartet werden: {e}"))?;
     } else if let Some(appimage) = std::env::var_os("APPIMAGE").map(PathBuf::from) {

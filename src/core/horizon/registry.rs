@@ -1,9 +1,9 @@
 //! Horizons Inhalte-Verzeichnis (`horizon-rust/horizon-mods`, `index.json` Schema 1).
 //!
 //! Angeboten wird nur, was der installierte Build lädt (`content` aus `--launch-api`):
-//! Content-Mods (`.hmod`) mit passender Mod-API und nur der Fähigkeit `registries`, Resource
-//! Packs und Shader Packs. Native Mods müssten in Horizon hineinkompiliert werden – das macht
-//! nur der Horizon-Launcher, daher werden sie (wie in `content.md` vorgesehen) nicht angeboten.
+//! Content-Mods (`.hmod`) mit passender Mod-API und nur der Fähigkeit `registries`, native
+//! Mods (`.hnmod`, Rust-Quellcode – beim Start kompiliert, siehe [`super::native`]),
+//! Resource Packs und Shader Packs.
 //!
 //! Vor der Installation wird jede Datei geprüft (`mod-index.md`, „Before a file is installed“):
 //! Herkunft, Größe, SHA-256, Minisign-Signatur des Autors (falls er einen Schlüssel hat),
@@ -25,6 +25,8 @@ const INDEX_MAX_AGE: Duration = Duration::from_secs(10 * 60);
 const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 /// Ordner und Schalter-Datei der Content-Mods im Spielordner.
 pub const MODS_DIR: &str = "horizon-mods";
+/// Ordner der nativen Mods (Rust-Quellcode, beim Start kompiliert).
+pub const NATIVE_DIR: &str = "horizon-native-mods";
 const MODS_SWITCHES: &str = "horizon-mods.txt";
 
 static INDEX: Mutex<Option<(Instant, Arc<Index>)>> = Mutex::new(None);
@@ -85,7 +87,21 @@ pub struct Version {
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub game: Option<String>,
+    /// Native Mods: Anzahl der Hook-Punkte, die der Build mindestens bieten muss
+    #[serde(default)]
+    pub hooks: Option<u64>,
     pub file: VersionFile,
+}
+
+impl Version {
+    /// Native Mods: Horizon-Commit, auf den die Version festgelegt ist (`native-1/<horizon>/<mixins>`).
+    fn native_commit(&self) -> Option<&str> {
+        self.api
+            .as_deref()?
+            .strip_prefix("native-1/")?
+            .split('/')
+            .next()
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -118,7 +134,7 @@ pub enum ContentKind {
 impl ContentKind {
     fn matches(self, kind: &str) -> bool {
         match self {
-            ContentKind::Mod => kind == "mod",
+            ContentKind::Mod => kind == "mod" || kind == "native-mod",
             ContentKind::ResourcePack => kind == "resourcepack",
             ContentKind::ShaderPack => kind == "shader" || kind == "shaderpack",
         }
@@ -148,6 +164,10 @@ pub struct BuildContent {
     pub minecraft: String,
     pub mod_api: Vec<String>,
     pub shader_api: Vec<String>,
+    /// Hook-Punkte für native Mods
+    pub native_hooks: Option<u64>,
+    /// Kurzer Commit des Builds (aus seiner ID, z.B. `9f42064`)
+    pub commit: Option<String>,
 }
 
 impl Default for BuildContent {
@@ -157,6 +177,8 @@ impl Default for BuildContent {
             minecraft: super::MINECRAFT_VERSION.to_string(),
             mod_api: vec!["0.2".into(), "0.3".into()],
             shader_api: vec!["0.1".into()],
+            native_hooks: None,
+            commit: None,
         }
     }
 }
@@ -176,6 +198,8 @@ pub async fn build_content() -> BuildContent {
                 },
                 mod_api: api.content_list("mod", "api"),
                 shader_api: api.content_list("shader", "api"),
+                native_hooks: api.content["native_mod"]["hooks"].as_u64(),
+                commit: id.rsplit('-').next().map(String::from),
             }
         }
         Err(_) => BuildContent::default(),
@@ -268,8 +292,36 @@ fn version_runs(project: &Project, version: &Version, content: &BuildContent) ->
         }
         "shader" => content.shader_api.iter().any(|a| a == api),
         "resourcepack" | "shaderpack" => true,
+        // Ob eine Version für einen anderen Build passt, prüft der Bau selbst; vorher lässt sich
+        // nur ausschließen, was mehr Hook-Punkte braucht, als der Build hat
+        "native-mod" => {
+            version.native_commit().is_some()
+                && match (version.hooks, content.native_hooks) {
+                    (Some(needed), Some(offered)) => needed <= offered,
+                    _ => true,
+                }
+        }
         _ => false,
     }
+}
+
+/// Native Mods: zuerst die Version, die genau für diesen Build gemacht ist.
+fn preferred_version<'a>(versions: &[&'a Version], content: &BuildContent) -> Option<&'a Version> {
+    let exact = content.commit.as_deref().and_then(|commit| {
+        versions
+            .iter()
+            .find(|v| v.native_commit().is_some_and(|c| c.starts_with(commit)))
+    });
+    exact.or(versions.first()).copied()
+}
+
+/// Kategorien eines Projekts; native Mods tragen zusätzlich `native` (zum Filtern und als Hinweis).
+fn project_categories(project: &Project) -> Vec<String> {
+    let mut categories = project.categories.clone();
+    if project.kind == "native-mod" {
+        categories.push("native".into());
+    }
+    categories
 }
 
 /// Lauffähige Versionen eines Projekts, neueste zuerst (wie im Index).
@@ -302,7 +354,7 @@ fn to_mod_info(project: &Project, versions: &[&Version]) -> ModInfo {
         author: project.authors.join(", "),
         downloads: project.downloads,
         followers: project.stars,
-        categories: project.categories.clone(),
+        categories: project_categories(project),
         source: ModSource::Horizon,
         versions: versions.iter().map(|v| v.version.clone()).collect(),
         game_versions: versions
@@ -384,7 +436,10 @@ pub async fn search(
         .projects
         .iter()
         .filter(|p| kind.matches(&p.kind))
-        .filter(|p| categories.iter().all(|c| p.categories.contains(c)))
+        .filter(|p| {
+            let own = project_categories(p);
+            categories.iter().all(|c| own.contains(c))
+        })
         // Ganz zurückgezogene Projekte (Eintrag ohne Prüfsumme)
         .filter(|p| index.is_revoked(&p.id, "").is_none())
         .filter_map(|p| {
@@ -463,7 +518,7 @@ pub async fn categories(kind: ContentKind) -> Result<Vec<String>, String> {
         .projects
         .iter()
         .filter(|p| kind.matches(&p.kind))
-        .flat_map(|p| p.categories.iter().cloned())
+        .flat_map(project_categories)
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
@@ -491,6 +546,7 @@ fn allowed_url(url: &str) -> bool {
 fn allowed_file_name(name: &str, kind: &str) -> bool {
     let extension = match kind {
         "mod" => ".hmod",
+        "native-mod" => ".hnmod",
         "shader" => ".hshader",
         "resourcepack" | "shaderpack" => ".zip",
         _ => return false,
@@ -515,6 +571,28 @@ fn manifest_value(manifest: &str, key: &str) -> Option<String> {
             let (k, v) = line.split_once('=')?;
             (k.trim() == key).then(|| v.trim().trim_matches('"').to_string())
         })
+}
+
+/// Natives Paket: `horizon-native.json` muss die ID des Eintrags tragen.
+fn check_native_manifest(bytes: &[u8], id: &str) -> Result<(), String> {
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .map_err(|_| "Die Mod-Datei ist kein gültiges Paket".to_string())?;
+    let mut text = String::new();
+    std::io::Read::read_to_string(
+        &mut zip
+            .by_name("horizon-native.json")
+            .map_err(|_| "Dem nativen Mod fehlt horizon-native.json".to_string())?,
+        &mut text,
+    )
+    .map_err(|e| e.to_string())?;
+    let manifest: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    match manifest["id"].as_str() {
+        Some(found) if found == id => Ok(()),
+        found => Err(format!(
+            "Die Mod-Datei passt nicht zum Eintrag (ID {:?} statt {id})",
+            found.unwrap_or_default()
+        )),
+    }
 }
 
 fn check_mod_manifest(bytes: &[u8], id: &str) -> Result<(), String> {
@@ -588,28 +666,49 @@ async fn download_checked(
             "Die Signatur des Autors ist ungültig – Installation abgebrochen".to_string()
         })?;
     }
-    if project.kind == "mod" {
-        check_mod_manifest(&bytes, &project.id)?;
+    match project.kind.as_str() {
+        "mod" => check_mod_manifest(&bytes, &project.id)?,
+        "native-mod" => check_native_manifest(&bytes, &project.id)?,
+        _ => {}
     }
     Ok(bytes.to_vec())
 }
 
 fn content_kind_of(project: &Project) -> Option<ContentKind> {
     match project.kind.as_str() {
-        "mod" => Some(ContentKind::Mod),
+        "mod" | "native-mod" => Some(ContentKind::Mod),
         "resourcepack" => Some(ContentKind::ResourcePack),
         "shader" | "shaderpack" => Some(ContentKind::ShaderPack),
         _ => None,
     }
 }
 
-/// Dateiname im Spielordner: Mods heißen wie ihre ID (`horizon-mods/<id>.hmod`).
+/// Dateiname im Spielordner: Mods heißen wie ihre ID (`horizon-mods/<id>.hmod`,
+/// `horizon-native-mods/<id>.hnmod` – wie im Horizon-Launcher).
 fn target_file_name(project: &Project, version: &Version) -> String {
-    if project.kind == "mod" {
-        format!("{}.hmod", project.id)
-    } else {
-        version.file.name.clone()
+    match project.kind.as_str() {
+        "mod" => format!("{}.hmod", project.id),
+        "native-mod" => format!("{}.hnmod", project.id),
+        _ => version.file.name.clone(),
     }
+}
+
+/// Ordner einer Inhaltsdatei im Spielordner.
+fn folder_for(kind: ContentKind, file_name: &str) -> &'static str {
+    if kind == ContentKind::Mod && file_name.ends_with(".hnmod") {
+        NATIVE_DIR
+    } else {
+        kind.folder()
+    }
+}
+
+/// Ist das Projekt ein nativer Mod (Rust-Quellcode, läuft ohne Sandbox)?
+pub async fn is_native(project_id: &str) -> bool {
+    index()
+        .await
+        .ok()
+        .and_then(|index| index.project(project_id).map(|p| p.kind == "native-mod"))
+        .unwrap_or(false)
 }
 
 /// Installiert ein Projekt (bestimmte Version oder die neueste lauffähige) in ein Profil.
@@ -628,24 +727,24 @@ pub async fn install(
     let versions = runnable_versions(&index, project, &content);
     let chosen = match version {
         Some(wanted) => versions.iter().find(|v| v.version == wanted).copied(),
-        None => versions.first().copied(),
+        None => preferred_version(&versions, &content),
     }
     .ok_or("Keine Version läuft auf dem installierten Horizon-Build")?;
 
     let bytes = download_checked(&index, project, chosen).await?;
-    let folder = game_dir.join(kind.folder());
+    let file_name = target_file_name(project, chosen);
+    let folder = game_dir.join(folder_for(kind, &file_name));
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
 
     // Ältere Version desselben Projekts entfernen
     if let Some(old) = installed_file_of(game_dir, kind, &project.id) {
-        let old_path = folder.join(&old);
+        let old_path = game_dir.join(folder_for(kind, &old)).join(&old);
         if old_path.is_file() {
             std::fs::remove_file(&old_path).ok();
         }
         std::fs::remove_file(metadata_path(game_dir, kind, &old)).ok();
     }
 
-    let file_name = target_file_name(project, chosen);
     let target = folder.join(&file_name);
     let part = folder.join(format!(".{file_name}.part"));
     std::fs::write(&part, &bytes).map_err(|e| e.to_string())?;
@@ -662,7 +761,7 @@ pub async fn install(
 fn metadata_path(game_dir: &Path, kind: ContentKind, file_name: &str) -> PathBuf {
     let base = match kind {
         // Wie bei Java-Mods: `foo.hmod` → `modinfos/foo.json`
-        ContentKind::Mod => file_name.trim_end_matches(".hmod").to_string(),
+        ContentKind::Mod => mod_id_of(file_name).to_string(),
         _ => file_name.to_string(),
     };
     game_dir
@@ -695,6 +794,7 @@ fn write_metadata(
             "version_id": version.version,
             "source": "horizon",
             "filename": file_name,
+            "native": project.kind == "native-mod",
         }),
         _ => serde_json::json!({
             "project_id": project.id,
@@ -765,28 +865,45 @@ fn remove_switch(game_dir: &Path, id: &str) {
     std::fs::write(game_dir.join(MODS_SWITCHES), lines.join("\n") + "\n").ok();
 }
 
-/// Mod-ID einer Datei in `horizon-mods/` (Dateiname ohne `.hmod`).
+/// Mod-ID einer Datei in `horizon-mods/` oder `horizon-native-mods/` (Name ohne Endung).
 pub fn mod_id_of(file_name: &str) -> &str {
-    file_name.trim_end_matches(".hmod")
+    file_name
+        .strip_suffix(".hnmod")
+        .unwrap_or_else(|| file_name.trim_end_matches(".hmod"))
 }
 
 pub struct InstalledMod {
     pub file_name: String,
     pub id: String,
     pub enabled: bool,
+    /// Nativer Mod (wird beim Start kompiliert)
+    pub native: bool,
     pub metadata: Option<serde_json::Value>,
 }
 
+fn mod_files(dir: &Path, extension: &str) -> Vec<String> {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().is_file())
+                .filter_map(|e| e.file_name().to_str().map(String::from))
+                .filter(|name| name.ends_with(extension) && !name.starts_with('.'))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn installed_mods(game_dir: &Path) -> Vec<InstalledMod> {
-    let Ok(entries) = std::fs::read_dir(game_dir.join(MODS_DIR)) else {
-        return Vec::new();
-    };
-    let mut mods: Vec<InstalledMod> = entries
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_file())
-        .filter_map(|e| e.file_name().to_str().map(String::from))
-        .filter(|name| name.ends_with(".hmod") && !name.starts_with('.'))
-        .map(|file_name| {
+    let content = mod_files(&game_dir.join(MODS_DIR), ".hmod")
+        .into_iter()
+        .map(|f| (f, false));
+    let native = mod_files(&game_dir.join(NATIVE_DIR), ".hnmod")
+        .into_iter()
+        .map(|f| (f, true));
+    let mut mods: Vec<InstalledMod> = content
+        .chain(native)
+        .map(|(file_name, native)| {
             let id = mod_id_of(&file_name).to_string();
             let metadata =
                 std::fs::read_to_string(metadata_path(game_dir, ContentKind::Mod, &file_name))
@@ -796,6 +913,7 @@ pub fn installed_mods(game_dir: &Path) -> Vec<InstalledMod> {
                 enabled: is_mod_enabled(game_dir, &id),
                 file_name,
                 id,
+                native,
                 metadata,
             }
         })
@@ -804,8 +922,21 @@ pub fn installed_mods(game_dir: &Path) -> Vec<InstalledMod> {
     mods
 }
 
+/// Eingeschaltete native Mods (Dateien in `horizon-native-mods/`).
+pub fn enabled_native_mods(game_dir: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = installed_mods(game_dir)
+        .into_iter()
+        .filter(|m| m.native && m.enabled)
+        .map(|m| game_dir.join(NATIVE_DIR).join(m.file_name))
+        .collect();
+    files.sort();
+    files
+}
+
 pub fn delete_mod(game_dir: &Path, file_name: &str) -> Result<(), String> {
-    let path = game_dir.join(MODS_DIR).join(file_name);
+    let path = game_dir
+        .join(folder_for(ContentKind::Mod, file_name))
+        .join(file_name);
     if !path.is_file() {
         return Err(format!("Mod-Datei nicht gefunden: {file_name}"));
     }
@@ -832,14 +963,15 @@ pub async fn mod_updates(game_dir: &Path, files: &[String]) -> Result<Vec<ModUpd
         .into_iter()
         .filter(|m| files.is_empty() || files.contains(&m.file_name))
         .map(|m| {
-            let project = index.project(&m.id).filter(|p| p.kind == "mod");
+            let project = index
+                .project(&m.id)
+                .filter(|p| p.kind == "mod" || p.kind == "native-mod");
             let current = m
                 .metadata
                 .as_ref()
                 .and_then(|meta| meta["version"].as_str().map(String::from));
             let latest = project.and_then(|p| {
-                runnable_versions(&index, p, &content)
-                    .first()
+                preferred_version(&runnable_versions(&index, p, &content), &content)
                     .map(|v| v.version.clone())
             });
             ModUpdate {
@@ -895,7 +1027,16 @@ mod tests {
         let capable = project("mod", vec![version("0.2", &["registries", "chat"], "aa")]);
         assert!(!version_runs(&capable, &capable.versions[0], &content));
         let native = project("native-mod", vec![version("native-1/a/b", &[], "aa")]);
-        assert!(!version_runs(&native, &native.versions[0], &content));
+        assert!(version_runs(&native, &native.versions[0], &content));
+        let hungry = Version {
+            hooks: Some(999),
+            ..version("native-1/a/b", &[], "aa")
+        };
+        let limited = BuildContent {
+            native_hooks: Some(415),
+            ..BuildContent::default()
+        };
+        assert!(!version_runs(&native, &hungry, &limited));
         let shader = project("shader", vec![version("0.1", &[], "aa")]);
         assert!(version_runs(&shader, &shader.versions[0], &content));
     }
@@ -931,6 +1072,33 @@ mod tests {
         assert!(!allowed_file_name("../x.hmod", "mod"));
         assert!(!allowed_file_name("x.zip", "mod"));
         assert!(allowed_file_name("pack.zip", "resourcepack"));
+    }
+
+    #[test]
+    fn prefers_native_version_for_this_build() {
+        let other = version("native-1/aaaaaaa1111/m", &[], "a");
+        let exact = version("native-1/9f42064c11/m", &[], "b");
+        let versions = vec![&other, &exact];
+        let content = BuildContent {
+            commit: Some("9f42064".into()),
+            ..BuildContent::default()
+        };
+        assert_eq!(
+            preferred_version(&versions, &content).unwrap().file.sha256,
+            "b"
+        );
+        assert_eq!(
+            preferred_version(&versions, &BuildContent::default())
+                .unwrap()
+                .file
+                .sha256,
+            "a"
+        );
+        assert_eq!(
+            mod_id_of("wayfarer_stones_native.hnmod"),
+            "wayfarer_stones_native"
+        );
+        assert_eq!(mod_id_of("coords_hud.hmod"), "coords_hud");
     }
 
     #[test]

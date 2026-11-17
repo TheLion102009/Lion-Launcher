@@ -78,6 +78,7 @@ fn main() {
             gui::settings::set_ui_state,
             gui::get_horizon_categories,
             gui::get_horizon_info,
+            gui::set_horizon_native_trust,
             // Geteilte Instanzen
             gui::friends::share::share_status,
             gui::friends::share::share_create,

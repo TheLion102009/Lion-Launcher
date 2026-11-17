@@ -8135,6 +8135,32 @@ async function fillHorizonVersionSelect(select) {
     select.disabled = true;
 }
 
+/**
+ * Mod installieren; native Horizon-Mods (Rust-Code ohne Sandbox) brauchen einmal die
+ * Zustimmung des Spielers – danach wird die Installation wiederholt.
+ */
+async function installModChecked(args) {
+    try {
+        return await invoke('install_mod', args);
+    } catch (error) {
+        if (!String(error).includes('NATIVE_TRUST_REQUIRED')) throw error;
+        const allowed = await showConfirmModal({
+            title: 'Native Horizon-Mods erlauben',
+            message: 'Native Mods sind ',
+            highlight: 'Rust-Programme ohne Sandbox',
+            suffix: ' – sie laufen mit vollen Rechten auf deinem PC.',
+            details: 'Installiere nur Mods, deren Autoren du vertraust. Beim nächsten Start werden sie zusammen mit Horizon kompiliert; der erste Bau lädt Rust und dauert 20–30 Minuten.',
+            confirmText: 'Erlauben',
+            cancelText: 'Abbrechen',
+            icon: 'bi-shield-exclamation',
+            danger: false
+        });
+        if (!allowed) throw new Error('Installation abgebrochen');
+        await invoke('set_horizon_native_trust', { trusted: true });
+        return await invoke('install_mod', args);
+    }
+}
+
 /// Hilfsfunktion: Filtert Versionen basierend auf dem Loader
 async function filterVersionsByLoader(versions, loader) {
     if (loader === 'vanilla') return versions;
@@ -9800,7 +9826,7 @@ async function installMod(modId, source) {
 
     try {
         // Installiere Mod - Backend findet automatisch die passende Version für das Profil
-        await invoke('install_mod', {
+        await installModChecked({
             profileId: profile.id,
             modId: modId,
             versionId: null,  // Backend findet passende Version für MC-Version + Loader
@@ -12027,7 +12053,7 @@ async function installProjectFromDetails(projectId, versionId = null, button = n
         } else if (kind === 'shaderpacks') {
             await invoke('install_shaderpack', { profileId: profile.id, packId: projectId, versionId });
         } else {
-            await invoke('install_mod', { profileId: profile.id, modId: projectId, versionId, source });
+            await installModChecked({ profileId: profile.id, modId: projectId, versionId, source });
         }
 
         // "Installiert"-Status überall aktualisieren (Content Browser, Profil-Listen)
@@ -12931,7 +12957,7 @@ async function installModVersion(modId, versionId, button = null) {
         return sanitizeHtml(markdownToHtml(source));
     }
 
-    const api = { markdownToHtml, sanitizeHtml, renderMarkdown };    global.LionMarkdown = api;
+    global.LionMarkdown = { markdownToHtml, sanitizeHtml, renderMarkdown };
 })(typeof window !== 'undefined' ? window : globalThis);
 
 // ============================================================================

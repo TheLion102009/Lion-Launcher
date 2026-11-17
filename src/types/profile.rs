@@ -71,6 +71,10 @@ impl Profile {
 pub struct ProfileList {
     pub profiles: Vec<Profile>,
     pub active_profile: Option<String>,
+    /// Profile, die diese Version nicht lesen kann (z.B. ein neuerer Loader nach einem
+    /// Downgrade). Sie werden unverändert wieder gespeichert, damit nichts verloren geht.
+    #[serde(skip)]
+    pub unsupported: Vec<serde_json::Value>,
 }
 
 impl ProfileList {
@@ -78,6 +82,7 @@ impl ProfileList {
         Self {
             profiles: Vec::new(),
             active_profile: None,
+            unsupported: Vec::new(),
         }
     }
 

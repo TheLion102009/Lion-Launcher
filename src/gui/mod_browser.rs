@@ -139,6 +139,12 @@ pub async fn get_horizon_categories(project_type: String) -> Result<Vec<Modrinth
         .collect())
 }
 
+/// Zustimmung zu nativen Horizon-Mods (laufen ohne Sandbox mit vollen Rechten).
+#[tauri::command]
+pub fn set_horizon_native_trust(trusted: bool) -> Result<(), String> {
+    crate::core::horizon::native::set_trusted(trusted)
+}
+
 #[derive(serde::Serialize)]
 pub struct HorizonInfo {
     /// Minecraft-Version, die Horizon nachbaut
@@ -149,6 +155,8 @@ pub struct HorizonInfo {
     pub installed: Option<String>,
     /// Gibt es Horizon für dieses System?
     pub supported: bool,
+    /// Native Mods erlaubt
+    pub native_trusted: bool,
 }
 
 #[tauri::command]
@@ -161,6 +169,7 @@ pub async fn get_horizon_info() -> Result<HorizonInfo, String> {
         latest,
         installed: installed.as_deref().map(build::display_name),
         supported: build::platform_asset().is_some(),
+        native_trusted: crate::core::horizon::native::is_trusted(),
     })
 }
 
@@ -263,6 +272,11 @@ pub async fn install_mod(
         .ok_or_else(|| "Profile not found".to_string())?;
 
     if profile.loader.loader == crate::types::version::ModLoader::Horizon {
+        if !crate::core::horizon::native::is_trusted()
+            && crate::core::horizon::registry::is_native(&mod_id).await
+        {
+            return Err(crate::core::horizon::native::TRUST_REQUIRED.to_string());
+        }
         crate::core::horizon::registry::install(&profile.game_dir, &mod_id, version_id.as_deref())
             .await?;
         profile.add_mod(mod_id);

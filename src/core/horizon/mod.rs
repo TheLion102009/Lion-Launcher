@@ -15,6 +15,7 @@
 //! Inhalte (Mods, Resource Packs, Shader) kommen aus Horizons eigenem Verzeichnis ([`registry`]).
 
 pub mod build;
+pub mod native;
 pub mod registry;
 
 use crate::core::minecraft::{
@@ -64,6 +65,7 @@ async fn latest_cached() -> Result<build::LatestBuild, String> {
 
 /// Neuesten Build sicherstellen; ohne Internet (oder bei einem Fehler) den zuletzt installierten.
 async fn current_build() -> Result<String, String> {
+    build::migrate_legacy_layout();
     let progress = |status: String, percent: u8| send_launch_progress(status, percent);
     let fallback = build::installed_builds().into_iter().next();
     match latest_cached().await {
@@ -323,8 +325,14 @@ pub async fn launch(
     let ready = prepare(profile).await?;
     let game_dir = &profile.game_dir;
 
+    // Native Mods: eigenes Spielprogramm, auf diesem Build kompiliert (nutzt dessen Ressourcen)
+    let program = match native::ensure_build(game_dir, &ready.build_id).await? {
+        Some(native) => native,
+        None => build::client_binary(&ready.build_id),
+    };
+
     send_launch_progress("Starte Horizon...", 97);
-    let mut command = Command::new(build::client_binary(&ready.build_id));
+    let mut command = Command::new(&program);
     let mut push = |option: &str, value: Option<&std::ffi::OsStr>| {
         if ready.client.supports(option) {
             command.arg(option);
@@ -405,7 +413,9 @@ pub async fn launch(
 
 /// Verwirft alle vorbereiteten Ressourcen (Profil reparieren).
 pub fn forget_prepared_resources() {
-    std::fs::remove_dir_all(build::horizon_dir().join("resources")).ok();
+    for id in build::installed_builds() {
+        std::fs::remove_dir_all(build::resources_dir(&id)).ok();
+    }
 }
 
 #[cfg(test)]
