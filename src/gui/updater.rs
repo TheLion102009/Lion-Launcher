@@ -5,9 +5,11 @@
 //!   GitHub-Compare-API, damit nur wirklich *neuere* Builds als Update gelten.
 //! * Lokale Entwicklungs-Builds aktualisieren sich nicht.
 //!
-//! Installation: Windows startet den NSIS-Installer, Linux-AppImages werden ersetzt. Für andere
-//! Pakete (deb, rpm, dmg, ...) wird auf die Release-Seite verwiesen. Jede Datei wird vor der
-//! Installation gegen die von GitHub gemeldete SHA-256-Prüfsumme geprüft.
+//! Installation: Windows startet den NSIS-Installer. Unter Linux wird erkannt, wie der Launcher
+//! installiert ist: AppImages werden ersetzt, Pakete (pacman, deb, rpm) über `pkexec` mit dem
+//! grafischen Passwortdialog installiert. Für andere Formate (Flatpak, Snap, dmg) wird auf die
+//! Release-Seite bzw. Paketverwaltung verwiesen. Jede Datei wird vor der Installation gegen die
+//! von GitHub gemeldete SHA-256-Prüfsumme geprüft.
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -149,21 +151,123 @@ async fn nightly_is_newer(remote_sha: &str) -> bool {
     }
 }
 
+/// Wie der Launcher unter Linux installiert ist.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum LinuxInstall {
+    AppImage,
+    Pacman,
+    Deb,
+    Rpm,
+}
+
+fn command_succeeds(program: &str, args: &[&str]) -> bool {
+    std::process::Command::new(program)
+        .args(args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Erkennt die Installationsart über das Paket, dem die laufende Datei gehört.
+fn detect_linux_install() -> Option<LinuxInstall> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    if std::env::var_os("APPIMAGE").is_some() {
+        return Some(LinuxInstall::AppImage);
+    }
+    // Flatpak/Snap aktualisieren sich über ihre eigene Paketverwaltung
+    if std::env::var_os("FLATPAK_ID").is_some() || std::env::var_os("SNAP").is_some() {
+        return None;
+    }
+    let exe = std::env::current_exe().ok()?;
+    let exe = exe.to_str()?;
+    if command_succeeds("pacman", &["-Qqo", exe]) {
+        Some(LinuxInstall::Pacman)
+    } else if command_succeeds("dpkg", &["-S", exe]) {
+        Some(LinuxInstall::Deb)
+    } else if command_succeeds("rpm", &["-qf", exe]) {
+        Some(LinuxInstall::Rpm)
+    } else {
+        None
+    }
+}
+
+static LINUX_INSTALL: once_cell::sync::Lazy<Option<LinuxInstall>> =
+    once_cell::sync::Lazy::new(detect_linux_install);
+
 /// Passende Installationsdatei für dieses System.
 fn pick_asset(assets: &[GhAsset]) -> Option<GhAsset> {
-    let find = |suffix: &str| {
-        assets
-            .iter()
-            .find(|a| a.name.to_lowercase().ends_with(suffix))
-            .cloned()
-    };
     if cfg!(target_os = "windows") {
-        return find("-setup.exe");
+        return pick_asset_for(assets, |name| name.ends_with("-setup.exe"));
     }
-    if cfg!(target_os = "linux") && std::env::var_os("APPIMAGE").is_some() {
-        return find(".appimage");
+    match *LINUX_INSTALL {
+        Some(install) => pick_linux_asset(assets, install),
+        None => None,
     }
-    None
+}
+
+fn pick_asset_for(assets: &[GhAsset], matches: impl Fn(&str) -> bool) -> Option<GhAsset> {
+    assets
+        .iter()
+        .find(|a| matches(&a.name.to_lowercase()))
+        .cloned()
+}
+
+fn pick_linux_asset(assets: &[GhAsset], install: LinuxInstall) -> Option<GhAsset> {
+    pick_asset_for(assets, |name| match install {
+        LinuxInstall::AppImage => name.ends_with(".appimage"),
+        // Das "-debug"-Paket enthält nur Debug-Symbole
+        LinuxInstall::Pacman => name.ends_with(".pkg.tar.zst") && !name.contains("-debug-"),
+        LinuxInstall::Deb => name.ends_with(".deb"),
+        LinuxInstall::Rpm => name.ends_with(".rpm"),
+    })
+}
+
+/// Installiert ein Linux-Paket mit Root-Rechten (grafische Passwortabfrage über polkit).
+async fn install_linux_package(install: LinuxInstall, file: &Path) -> Result<(), String> {
+    let file = file.display().to_string();
+    let has = |program: &str| command_succeeds("which", &[program]);
+    let args: Vec<String> = match install {
+        LinuxInstall::Pacman => vec!["pacman".into(), "-U".into(), "--noconfirm".into(), file],
+        // apt löst fehlende Abhängigkeiten auf, dpkg ist der Fallback
+        LinuxInstall::Deb if has("apt-get") => vec![
+            "apt-get".into(),
+            "install".into(),
+            "-y".into(),
+            "--allow-downgrades".into(),
+            file,
+        ],
+        LinuxInstall::Deb => vec!["dpkg".into(), "-i".into(), file],
+        LinuxInstall::Rpm if has("dnf") => {
+            vec!["dnf".into(), "install".into(), "-y".into(), file]
+        }
+        LinuxInstall::Rpm if has("zypper") => vec![
+            "zypper".into(),
+            "--non-interactive".into(),
+            "install".into(),
+            "--allow-unsigned-rpm".into(),
+            file,
+        ],
+        LinuxInstall::Rpm => vec!["rpm".into(), "-U".into(), "--replacepkgs".into(), file],
+        LinuxInstall::AppImage => return Err("AppImages werden direkt ersetzt".to_string()),
+    };
+    let output = tokio::process::Command::new("pkexec")
+        .args(&args)
+        .output()
+        .await
+        .map_err(|e| format!("pkexec konnte nicht gestartet werden: {e}"))?;
+    match output.status.code() {
+        Some(0) => Ok(()),
+        // 126: Passwortdialog abgebrochen, 127: keine Berechtigung
+        Some(126) | Some(127) => Err("Installation abgebrochen (kein Administrator-Passwort)".to_string()),
+        _ => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let detail = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("");
+            Err(format!("Paket konnte nicht installiert werden: {detail}"))
+        }
+    }
 }
 
 async fn check_for_update() -> Result<CheckResult, String> {
@@ -201,10 +305,11 @@ async fn check_for_update() -> Result<CheckResult, String> {
     }
     info.can_install = info.available && asset.is_some();
     if info.available && asset.is_none() {
-        info.hint = Some(
-            "Für dieses Paketformat bitte das Update von der Release-Seite installieren"
-                .to_string(),
-        );
+        info.hint = Some(if std::env::var_os("FLATPAK_ID").is_some() || std::env::var_os("SNAP").is_some() {
+            "Bitte über die Software-Verwaltung (Flatpak/Snap) aktualisieren".to_string()
+        } else {
+            "Für dieses Paketformat bitte das Update von der Release-Seite installieren".to_string()
+        });
     }
     Ok((info, asset))
 }
@@ -275,7 +380,7 @@ fn sha256_file(path: &Path) -> Result<String, String> {
 }
 
 /// Startet die neue Version bzw. den Installer und beendet den Launcher.
-fn launch_update(app: &AppHandle, file: &Path) -> Result<(), String> {
+async fn launch_update(app: &AppHandle, file: &Path) -> Result<(), String> {
     if cfg!(target_os = "windows") {
         // NSIS-Installer im Passiv-Modus (Fortschritt ohne Rückfragen), danach Launcher neu starten.
         // Erst starten, wenn dieser Prozess beendet ist: solange er läuft, sperrt Windows die
@@ -304,6 +409,13 @@ fn launch_update(app: &AppHandle, file: &Path) -> Result<(), String> {
     } else if let Some(appimage) = std::env::var_os("APPIMAGE").map(PathBuf::from) {
         replace_appimage(file, &appimage)?;
         std::process::Command::new(&appimage)
+            .spawn()
+            .map_err(|e| format!("Neue Version konnte nicht gestartet werden: {e}"))?;
+    } else if let Some(install) = *LINUX_INSTALL {
+        // Pfad vor der Installation merken: danach zeigt /proc/self/exe auf die gelöschte Datei
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        install_linux_package(install, file).await?;
+        std::process::Command::new(&exe)
             .spawn()
             .map_err(|e| format!("Neue Version konnte nicht gestartet werden: {e}"))?;
     } else {
@@ -373,7 +485,7 @@ pub async fn updater_install(app: AppHandle) -> Result<(), String> {
         }
     }
 
-    launch_update(&app, &file)
+    launch_update(&app, &file).await
 }
 
 #[cfg(test)]
@@ -407,9 +519,30 @@ mod tests {
         let picked = pick_asset(&assets);
         if cfg!(target_os = "windows") {
             assert_eq!(picked.unwrap().name, "Lion.Launcher_0.1.0_x64-setup.exe");
-        } else if std::env::var_os("APPIMAGE").is_none() {
-            assert!(picked.is_none());
         }
+    }
+
+    #[test]
+    fn picks_linux_package_for_install_type() {
+        let asset = |name: &str| GhAsset {
+            name: name.to_string(),
+            browser_download_url: String::new(),
+            size: 0,
+            digest: None,
+        };
+        let assets = vec![
+            asset("lion-launcher-debug-master-1-x86_64.pkg.tar.zst"),
+            asset("lion-launcher-master-1-x86_64.pkg.tar.zst"),
+            asset("Lion.Launcher-0.1.0-1.x86_64.rpm"),
+            asset("Lion.Launcher_0.1.0_amd64.AppImage"),
+            asset("Lion.Launcher_0.1.0_amd64.deb"),
+            asset("Lion.Launcher_0.1.0_x64-setup.exe"),
+        ];
+        let name = |install| pick_linux_asset(&assets, install).map(|a| a.name);
+        assert_eq!(name(LinuxInstall::Pacman).as_deref(), Some("lion-launcher-master-1-x86_64.pkg.tar.zst"));
+        assert_eq!(name(LinuxInstall::Deb).as_deref(), Some("Lion.Launcher_0.1.0_amd64.deb"));
+        assert_eq!(name(LinuxInstall::Rpm).as_deref(), Some("Lion.Launcher-0.1.0-1.x86_64.rpm"));
+        assert_eq!(name(LinuxInstall::AppImage).as_deref(), Some("Lion.Launcher_0.1.0_amd64.AppImage"));
     }
 }
 

@@ -165,8 +165,11 @@ pub async fn launch_profile(
             }
         }
 
-        // 3. RESOURCEPACKS - Kopiere/Sync den resourcepacks Ordner
-        sync_resourcepacks(&profiles.profiles, &profile_to_launch.game_dir).await;
+        // 3. RESOURCE- UND SHADER PACKS – inklusive gelöschter Packs (siehe pack_sync)
+        let all_profiles = profiles.profiles.clone();
+        tokio::task::spawn_blocking(move || crate::gui::pack_sync::sync_pack_folders(&all_profiles))
+            .await
+            .ok();
     }
 
     // Update last played
@@ -678,115 +681,3 @@ async fn find_latest_file(filename: &str, profiles: &[Profile]) -> Option<std::p
     latest_path
 }
 
-/// Synchronisiert resourcepacks von allen Profilen in das Ziel-Profil
-async fn sync_resourcepacks(profiles: &[Profile], target_game_dir: &std::path::Path) {
-    let target_resourcepacks = target_game_dir.join("resourcepacks");
-
-    // Erstelle resourcepacks Ordner falls nicht vorhanden
-    if let Err(e) = tokio::fs::create_dir_all(&target_resourcepacks).await {
-        tracing::warn!("Failed to create resourcepacks dir: {}", e);
-        return;
-    }
-
-    // Sammle alle resourcepacks von allen Profilen
-    let mut all_packs: HashMap<String, (SystemTime, std::path::PathBuf)> = HashMap::new();
-
-    for profile in profiles {
-        if !profile.settings_sync {
-            continue;
-        }
-
-        let resourcepacks_dir = profile.game_dir.join("resourcepacks");
-
-        if !resourcepacks_dir.exists() {
-            continue;
-        }
-
-        let Ok(entries) = std::fs::read_dir(&resourcepacks_dir) else {
-            continue;
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let filename = match path.file_name() {
-                Some(name) => name.to_string_lossy().to_string(),
-                None => continue,
-            };
-
-            // Hole ├änderungszeit
-            let mut time = SystemTime::UNIX_EPOCH;
-            if let Ok(metadata) = std::fs::metadata(&path) {
-                if let Ok(modified) = metadata.modified() {
-                    time = time.max(modified);
-                }
-            }
-
-            // Behalte nur die neueste Version jedes Packs
-            if let Some((existing_time, _)) = all_packs.get(&filename) {
-                if time > *existing_time {
-                    all_packs.insert(filename, (time, path));
-                }
-            } else {
-                all_packs.insert(filename, (time, path));
-            }
-        }
-    }
-
-    // Kopiere alle Packs ins Ziel-Profil
-    let mut synced_count = 0;
-    for (filename, (_, source_path)) in all_packs {
-        let target_path = target_resourcepacks.join(&filename);
-
-        // ├£berspringe wenn bereits vorhanden und gleich oder neuer
-        if target_path.exists() {
-            if let (Ok(source_meta), Ok(target_meta)) = (
-                std::fs::metadata(&source_path),
-                std::fs::metadata(&target_path),
-            ) {
-                let source_time = source_meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                let target_time = target_meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                if target_time >= source_time {
-                    continue;
-                }
-            }
-        }
-
-        // Kopiere Datei oder Ordner
-        if source_path.is_dir() {
-            if let Err(e) = copy_dir_recursive(&source_path, &target_path).await {
-                tracing::warn!("Failed to copy resourcepack dir {}: {}", filename, e);
-            } else {
-                synced_count += 1;
-            }
-        } else {
-            if let Err(e) = tokio::fs::copy(&source_path, &target_path).await {
-                tracing::warn!("Failed to copy resourcepack {}: {}", filename, e);
-            } else {
-                synced_count += 1;
-            }
-        }
-    }
-
-    if synced_count > 0 {
-        tracing::info!("Synced {} resourcepacks to profile", synced_count);
-    }
-}
-
-/// Kopiert einen Ordner rekursiv
-async fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
-    tokio::fs::create_dir_all(dst).await?;
-
-    let mut entries = tokio::fs::read_dir(src).await?;
-    while let Some(entry) = entries.next_entry().await? {
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-
-        if src_path.is_dir() {
-            Box::pin(copy_dir_recursive(&src_path, &dst_path)).await?;
-        } else {
-            tokio::fs::copy(&src_path, &dst_path).await?;
-        }
-    }
-
-    Ok(())
-}

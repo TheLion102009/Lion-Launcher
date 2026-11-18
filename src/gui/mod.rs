@@ -7,6 +7,7 @@ pub mod external_links;
 pub mod friends;
 pub mod mod_browser;
 pub mod mod_updates;
+pub mod pack_sync;
 pub mod profile_manager;
 pub mod server_backups;
 pub mod server_content;
@@ -864,6 +865,8 @@ pub async fn delete_resourcepack(profile_id: String, name: String) -> Result<(),
     }
 
     tracing::info!("Resource Pack deleted: {}", name);
+    // Gesyncte Profile: dort ebenfalls entfernen, damit es nicht wiederkommt
+    pack_sync::propagate_deletion(&profiles.profiles, profile, "resourcepacks", &name);
 
     let meta_path = installed_content_metadata_path(&profile.game_dir, "resourcepackinfos", &name);
     if meta_path.exists() {
@@ -907,6 +910,8 @@ pub async fn delete_shaderpack(profile_id: String, name: String) -> Result<(), S
     }
 
     tracing::info!("Shader Pack deleted: {}", name);
+    // Gesyncte Profile: dort ebenfalls entfernen, damit es nicht wiederkommt
+    pack_sync::propagate_deletion(&profiles.profiles, profile, "shaderpacks", &name);
 
     let meta_path = installed_content_metadata_path(&profile.game_dir, "shaderpackinfos", &name);
     if meta_path.exists() {

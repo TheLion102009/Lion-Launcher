@@ -3014,7 +3014,21 @@ function renderProfileTabContent(tabName, profile) {
                         </button>
                     </div>
                 </div>
-                
+
+                <!-- Suchleiste für installierte Resource Packs -->
+                <div style="position: relative; margin-bottom: 12px;">
+                    <i class="bi bi-search" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-secondary); font-size: 13px; pointer-events: none;"></i>
+                    <input type="text" id="installed-resourcepacks-search"
+                           placeholder="${t('search_resourcepacks_placeholder')}"
+                           oninput="filterInstalledPacks('resourcepacks', this.value)"
+                           style="width: 100%; padding: 8px 10px 8px 32px; background: var(--bg-light);
+                                  border: 1px solid var(--bg-medium); border-radius: 6px;
+                                  color: var(--text-primary); font-size: 13px; box-sizing: border-box;
+                                  outline: none; transition: border-color 0.2s;"
+                           onfocus="this.style.borderColor='var(--gold)'"
+                           onblur="this.style.borderColor='var(--bg-medium)'">
+                </div>
+
                 <div id="profile-resourcepacks-list" class="profile-scroll-box" style="display: grid; gap: 8px; height: 420px; max-height: 420px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
                     <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                         <div class="spinner" style="margin: 0 auto 15px;"></div>
@@ -3037,7 +3051,21 @@ function renderProfileTabContent(tabName, profile) {
                         </button>
                     </div>
                 </div>
-                
+
+                <!-- Suchleiste für installierte Shader Packs -->
+                <div style="position: relative; margin-bottom: 12px;">
+                    <i class="bi bi-search" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-secondary); font-size: 13px; pointer-events: none;"></i>
+                    <input type="text" id="installed-shaderpacks-search"
+                           placeholder="${t('search_shaderpacks_placeholder')}"
+                           oninput="filterInstalledPacks('shaderpacks', this.value)"
+                           style="width: 100%; padding: 8px 10px 8px 32px; background: var(--bg-light);
+                                  border: 1px solid var(--bg-medium); border-radius: 6px;
+                                  color: var(--text-primary); font-size: 13px; box-sizing: border-box;
+                                  outline: none; transition: border-color 0.2s;"
+                           onfocus="this.style.borderColor='var(--gold)'"
+                           onblur="this.style.borderColor='var(--bg-medium)'">
+                </div>
+
                 <div id="profile-shaderpacks-list" class="profile-scroll-box" style="display: grid; gap: 8px; height: 420px; max-height: 420px; overflow-y: auto; overflow-x: hidden; padding-right: 5px;">
                     <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                         <div class="spinner" style="margin: 0 auto 15px;"></div>
@@ -4775,6 +4803,55 @@ async function openShaderPacksFolder(profileId) {
 
 // ==================== RESOURCE PACKS ====================
 
+// Suche in den Resource-/Shader-Pack-Listen eines Profils (wie bei den Mods)
+/** "profileId:kind" -> Suchbegriff (für "Suche beibehalten") */
+const installedPacksSearch = new Map();
+
+function renderInstalledPackList(kind, packs, profileId) {
+    if (kind === 'resourcepacks') renderInstalledResourcePacks(packs, profileId);
+    else renderInstalledShaderPacks(packs, profileId);
+}
+
+/** Rendert die Pack-Liste gefiltert; ohne `query` wird der gemerkte Suchbegriff verwendet. */
+function showInstalledPacks(kind, profileId, packs, query = null) {
+    const key = `${profileId}:${kind}`;
+    if (query === null) query = isKeepSearchEnabled() ? (installedPacksSearch.get(key) || '') : '';
+    const input = document.getElementById(`installed-${kind}-search`);
+    if (input && input.value !== query) input.value = query;
+
+    const q = query.trim().toLowerCase();
+    if (q) installedPacksSearch.set(key, query);
+    else installedPacksSearch.delete(key);
+
+    if (!q || !packs.length) {
+        renderInstalledPackList(kind, packs, profileId);
+        return;
+    }
+    const filtered = packs.filter(pack =>
+        [pack.title, pack.name, pack.slug].some(value => String(value || '').toLowerCase().includes(q))
+    );
+    if (filtered.length === 0) {
+        const list = document.getElementById(`profile-${kind}-list`);
+        if (list) {
+            list.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                    <i class="bi bi-search" style="font-size: 32px; display: block; margin-bottom: 12px;"></i>
+                    <p>${t('no_search_results')}</p>
+                </div>
+            `;
+        }
+        return;
+    }
+    renderInstalledPackList(kind, filtered, profileId);
+}
+
+function filterInstalledPacks(kind, query) {
+    const profileId = currentProfile?.id;
+    if (!profileId) return;
+    const cache = kind === 'resourcepacks' ? profileResourcePacksCache : profileShaderPacksCache;
+    showInstalledPacks(kind, profileId, cache.get(profileId) || [], query);
+}
+
 async function loadInstalledResourcePacks(profileId, options = {}) {
     const list = document.getElementById('profile-resourcepacks-list');
     if (!list) return;
@@ -4782,7 +4859,7 @@ async function loadInstalledResourcePacks(profileId, options = {}) {
     const forceReload = !!options.force;
     const cached = profileResourcePacksCache.get(profileId);
     if (!forceReload && Array.isArray(cached)) {
-        renderInstalledResourcePacks(cached, profileId);
+        showInstalledPacks('resourcepacks', profileId, cached);
         return;
     }
 
@@ -4792,7 +4869,7 @@ async function loadInstalledResourcePacks(profileId, options = {}) {
         profileResourcePacksCache.set(profileId, normalized);
         installedResourcePackNamesProfileId = null;
         installedResourcePackNames.clear();
-        renderInstalledResourcePacks(normalized, profileId);
+        showInstalledPacks('resourcepacks', profileId, normalized);
     } catch (error) {
         debugLog('Failed to load resource packs: ' + error, 'error');
         list.innerHTML = `
@@ -4856,11 +4933,21 @@ async function refreshResourcePacks(profileId) {
     showToast('Resource Packs aktualisiert', 'success', 2000);
 }
 
+/** Gelöschte Packs verschwinden bei aktivem Sync auch in den anderen Profilen – deren Listen neu laden. */
+function invalidateSyncedProfileCaches(profileId) {
+    const source = profiles.find(p => p.id === profileId);
+    if (!source || source.settings_sync === false) return;
+    profiles
+        .filter(p => p.id !== profileId && p.settings_sync !== false)
+        .forEach(p => invalidateProfileContentCaches(p.id));
+}
+
 async function deleteResourcePack(profileId, name) {
     debugLog('Deleting resource pack: ' + name, 'info');
 
     try {
         await invoke('delete_resourcepack', { profileId, name });
+        invalidateSyncedProfileCaches(profileId);
 
         debugLog('Resource Pack deleted successfully', 'success');
         invalidateProfileContentCaches(profileId);
@@ -4936,7 +5023,7 @@ async function loadInstalledShaderPacks(profileId, options = {}) {
     const forceReload = !!options.force;
     const cached = profileShaderPacksCache.get(profileId);
     if (!forceReload && Array.isArray(cached)) {
-        renderInstalledShaderPacks(cached, profileId);
+        showInstalledPacks('shaderpacks', profileId, cached);
         return;
     }
 
@@ -4946,7 +5033,7 @@ async function loadInstalledShaderPacks(profileId, options = {}) {
         profileShaderPacksCache.set(profileId, normalized);
         installedShaderPackNamesProfileId = null;
         installedShaderPackNames.clear();
-        renderInstalledShaderPacks(normalized, profileId);
+        showInstalledPacks('shaderpacks', profileId, normalized);
     } catch (error) {
         debugLog('Failed to load shader packs: ' + error, 'error');
         list.innerHTML = `
@@ -5016,6 +5103,7 @@ async function deleteShaderPack(profileId, name) {
 
     try {
         await invoke('delete_shaderpack', { profileId, name });
+        invalidateSyncedProfileCaches(profileId);
 
         debugLog('Shader Pack deleted successfully', 'success');
         invalidateProfileContentCaches(profileId);
@@ -10065,7 +10153,10 @@ function isKeepSearchEnabled() {
 
 function setKeepSearch(enabled) {
     setUiPref('keepSearch', enabled ? 'true' : 'false');
-    if (!enabled) installedModsSearchByProfile.clear();
+    if (!enabled) {
+        installedModsSearchByProfile.clear();
+        installedPacksSearch.clear();
+    }
 }
 
 // Theme Functions
