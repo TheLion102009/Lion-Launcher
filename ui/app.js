@@ -14220,7 +14220,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // Datenschutz-Einstellungen
 // ============================================================================
 
-const DEFAULT_PRIVACY_SETTINGS = { auto_update_check: true, friends_enabled: true };
+const DEFAULT_PRIVACY_SETTINGS = { auto_update_check: true, friends_enabled: true, discord_rich_presence: true };
 
 async function getPrivacySettings() {
     try {
@@ -14241,7 +14241,8 @@ async function initPrivacySettings() {
     const settings = await getPrivacySettings();
     const toggles = [
         ['privacy-auto-update', 'auto_update_check', 'Automatische Update-Prüfung'],
-        ['privacy-friends', 'friends_enabled', 'Freunde-System']
+        ['privacy-friends', 'friends_enabled', 'Freunde-System'],
+        ['privacy-discord', 'discord_rich_presence', 'Discord-Status']
     ];
     for (const [id, key, label] of toggles) {
         const input = document.getElementById(id);
@@ -14293,6 +14294,11 @@ async function changeLanguage(lang) {
 /** Sprache aus der Datei übernehmen, falls der localStorage der WebView sie verloren hat. */
 function restoreSavedLanguage() {
     const saved = uiState.values?.language;
+    // Sprache auch für das Backend festhalten (z.B. Texte des Discord-Status)
+    if (!saved) {
+        setUiPref('language', currentLanguage);
+        return;
+    }
     if (!saved || saved === currentLanguage || !TRANSLATIONS[saved]) return;
     currentLanguage = saved;
     localStorage.setItem('language', saved);

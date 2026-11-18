@@ -151,3 +151,5 @@ in den **Einstellungen** abschaltbar. Details: [PRIVACY.md](PRIVACY.md)
 ## Lizenz
 
 [MIT](LICENSE) – Copyright (c) 2026 Thorben Hess
+
+Nutzungsbedingungen: [TERMS.md](TERMS.md)

@@ -55,6 +55,7 @@ fn main() {
 
             // Freunde & geteilte Instanzen (P2P, ohne eigenen Server)
             gui::friends::start(app.handle().clone());
+            gui::discord::start();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod components;
 pub mod content_share;
+pub mod discord;
 pub mod external_links;
 pub mod friends;
 pub mod mod_browser;
@@ -1561,6 +1562,7 @@ pub async fn launch_world(profile_id: String, world_name: String) -> Result<(), 
     drop(state); // Unlock
 
     // Starte Minecraft mit --quickPlaySingleplayer Argument
+    discord::hint_world(&profile_id, &world_name);
     let launcher = MinecraftLauncher::new().map_err(|e| e.to_string())?;
 
     launcher
@@ -1636,6 +1638,7 @@ pub async fn launch_server(profile_id: String, server_ip: String) -> Result<(), 
     drop(state); // Unlock
 
     // Starte Minecraft mit --quickPlayMultiplayer Argument
+    discord::hint_server(&profile_id, &server_ip);
     let launcher = MinecraftLauncher::new().map_err(|e| e.to_string())?;
 
     launcher

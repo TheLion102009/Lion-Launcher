@@ -21,6 +21,9 @@ pub struct PrivacySettings {
     /// P2P-Freunde-System (Online-Status, Chat, geteilte Instanzen) starten
     #[serde(default = "enabled")]
     pub friends_enabled: bool,
+    /// In Discord zeigen, welches Profil läuft, wo und seit wann (lokal über Discords IPC)
+    #[serde(default = "enabled")]
+    pub discord_rich_presence: bool,
 }
 
 fn enabled() -> bool {
@@ -32,6 +35,7 @@ impl Default for PrivacySettings {
         Self {
             auto_update_check: true,
             friends_enabled: true,
+            discord_rich_presence: true,
         }
     }
 }

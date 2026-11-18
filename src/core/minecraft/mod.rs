@@ -271,6 +271,21 @@ pub fn get_running_profile_ids() -> Vec<String> {
     map.keys().cloned().collect()
 }
 
+/// Laufende Instanzen mit der Startzeit ihres Prozesses (Sekunden seit Epoch, 0 = unbekannt).
+pub fn running_instances() -> Vec<(String, u64)> {
+    // Bereinigt beendete übernommene Instanzen
+    let ids = get_running_profile_ids();
+    let Ok(map) = running_processes().lock() else {
+        return Vec::new();
+    };
+    ids.into_iter()
+        .map(|id| {
+            let start = map.get(&id).map_or(0, |instance| instance.start_time);
+            (id, start)
+        })
+        .collect()
+}
+
 /// Beendet die laufende Minecraft-Instanz eines Profils.
 pub fn kill_running_process(profile_id: &str) -> bool {
     let pid = {

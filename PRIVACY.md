@@ -11,6 +11,7 @@ Er verbindet sich nur mit den unten genannten Diensten.
 | Modrinth (api.modrinth.com, cdn.modrinth.com) | Mods, Resource Packs, Shader suchen und herunterladen; exakte Versionen beim Teilen bestimmen | Suchbegriffe, Projekt-IDs, Prüfsummen (SHA-1) installierter Dateien |
 | Mojang / Fabric / Quilt / Forge / NeoForge | Minecraft und Mod-Loader herunterladen | Angefragte Versionen |
 | mc-heads.net | Spielerköpfe/Skins anzeigen | Minecraft-Name bzw. UUID |
+| Discord (lokal, abschaltbar unter Einstellungen → Allgemein) | Rich Presence: Status in deinem Discord-Profil | An das lokal laufende Discord: Profilname, Loader und Version, Welt- bzw. Servername, Spielbeginn, Minecraft-Name/UUID (für den Kopf). Discord zeigt das deinen Kontakten an |
 | Horizon (GitHub: `api.github.com`, `github.com/horizon-rust`, `horizon-rust.github.io`) | Nur bei Horizon-Profilen: neuesten Horizon-Build und Horizon-Mods/Resource Packs/Shader laden | Angefragte Dateien; die Minecraft-Dateien (inkl. Server-JAR) kommen wie bei Vanilla direkt von Mojang |
 | Native Horizon-Mods (nur nach deiner Zustimmung) | Die Werkzeuge des Horizon-Launchers bauen die Mods auf deinem PC: sie laden den festgelegten Rust-Compiler und Horizons Quellcode/SDK (GitHub, rust-lang.org) | Angefragte Dateien |
 | Freunde (direkt, Ende-zu-Ende-verschlüsselt) | Freunde, Chat, geteilte Instanzen | Dein Minecraft-Name und deine UUID, Chat-Nachrichten, Inhalte geteilter Instanzen – nur an Freunde, die du selbst hinzugefügt hast |
