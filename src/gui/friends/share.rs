@@ -1424,20 +1424,21 @@ pub async fn share_accept(
         ),
     };
 
-    let existing = load_state_snapshot(|state| {
+    // Ein alter Eintrag bleibt z.B. zurück, wenn der Besitzer einen entfernt hat (oder man das
+    // offline verpasst hat). Wer eine neue Einladung annimmt, tritt wieder bei – möglichst mit
+    // dem bisherigen Profil, damit Welten und Einstellungen erhalten bleiben.
+    let previous = load_state_snapshot(|state| {
         state
             .joined_shares
             .iter()
             .find(|j| j.owner_id == owner_id && j.share_id == share_id)
-            .map(|j| j.profile_id.clone())
+            .cloned()
     })
     .await?;
-    if let Some(profile_id) = existing {
-        return Err(format!(
-            "Du bist dieser Instanz bereits beigetreten (Profil {})",
-            profile_id
-        ));
-    }
+    let previous_profile = match &previous {
+        Some(joined) => content_share::load_profile(&joined.profile_id).await.ok(),
+        None => None,
+    };
 
     let owner_name = match service.send(&owner_id, &service.hello_request()).await? {
         Response::Hello { name, .. } => name,
@@ -1453,27 +1454,47 @@ pub async fn share_accept(
     )
     .await?;
 
-    // Profil im Stil des Besitzers anlegen
-    let mut profile = Profile::new(
-        manifest.name.clone(),
-        manifest.minecraft_version.clone(),
-        parse_loader(&manifest.loader)?,
-        manifest.loader_version.clone(),
-    );
-    profile.icon_path = manifest.icon.clone().map(PathBuf::from);
-    let manager = ProfileManager::new().map_err(|e| e.to_string())?;
-    manager
-        .create_profile(profile.clone())
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let result = apply_manifest(&service, &owner_id, profile.clone(), None, &manifest).await?;
+    let (profile, result) = match (previous_profile, &previous) {
+        // Wieder beitreten: vorhandenes Profil auf den aktuellen Stand des Besitzers bringen
+        (Some(profile), Some(joined)) => {
+            let result = apply_manifest(
+                &service,
+                &owner_id,
+                profile.clone(),
+                Some(&joined.manifest),
+                &manifest,
+            )
+            .await?;
+            (profile, result)
+        }
+        _ => {
+            // Profil im Stil des Besitzers anlegen
+            let mut profile = Profile::new(
+                manifest.name.clone(),
+                manifest.minecraft_version.clone(),
+                parse_loader(&manifest.loader)?,
+                manifest.loader_version.clone(),
+            );
+            profile.icon_path = manifest.icon.clone().map(PathBuf::from);
+            let manager = ProfileManager::new().map_err(|e| e.to_string())?;
+            manager
+                .create_profile(profile.clone())
+                .await
+                .map_err(|e| e.to_string())?;
+            let result =
+                apply_manifest(&service, &owner_id, profile.clone(), None, &manifest).await?;
+            (profile, result)
+        }
+    };
 
     {
         let mut state = service.state.lock().await;
         state
             .invites
             .retain(|i| !(i.owner_id == owner_id && i.share_id == share_id));
+        state
+            .joined_shares
+            .retain(|j| !(j.owner_id == owner_id && j.share_id == share_id));
         state.joined_shares.push(JoinedShare {
             share_id,
             owner_id,

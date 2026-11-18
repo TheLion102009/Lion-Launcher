@@ -1,3 +1,4 @@
+pub mod background;
 pub mod auth;
 pub mod components;
 pub mod content_share;

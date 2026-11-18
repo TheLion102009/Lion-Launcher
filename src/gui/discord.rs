@@ -16,8 +16,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Anwendung „Lion Launcher“ im Discord Developer Portal.
 const CLIENT_ID: &str = "1572598345938116618";
+/// Großes Bild der Rich Presence: das App-Icon aus `icons/icon.png`. Discord lädt externe
+/// Bilder selbst; hochgeladene Rich-Presence-Assets hat die Anwendung keine.
 const LOGO_URL: &str =
-    "https://raw.githubusercontent.com/TheLion102009/Lion-Launcher/master/ui/lionlogo.png";
+    "https://raw.githubusercontent.com/TheLion102009/Lion-Launcher/master/icons/icon.png";
 const PROJECT_URL: &str = "https://github.com/TheLion102009/Lion-Launcher";
 const TICK: Duration = Duration::from_secs(2);
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(15);

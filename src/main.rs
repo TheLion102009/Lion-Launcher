@@ -56,8 +56,11 @@ fn main() {
             // Freunde & geteilte Instanzen (P2P, ohne eigenen Server)
             gui::friends::start(app.handle().clone());
             gui::discord::start();
+            gui::background::start(app.handle().clone());
             Ok(())
         })
+        // Läuft beim Schließen noch ein Spiel, im Hintergrund weiterlaufen (Discord-Status)
+        .on_window_event(gui::background::on_window_event)
         .invoke_handler(tauri::generate_handler![
             // General
             gui::greet,
