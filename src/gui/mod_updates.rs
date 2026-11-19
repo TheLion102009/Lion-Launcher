@@ -72,6 +72,15 @@ struct Version {
     loaders: Vec<String>,
     #[serde(default)]
     files: Vec<VersionFile>,
+    #[serde(default)]
+    dependencies: Vec<VersionDependency>,
+}
+
+#[derive(Clone, Deserialize)]
+struct VersionDependency {
+    #[serde(default)]
+    project_id: Option<String>,
+    dependency_type: String,
 }
 
 impl Version {
@@ -206,10 +215,7 @@ fn save_hash_cache() {
     let _guard = HASH_CACHE_SAVE_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    let snapshot = HASH_CACHE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
+    let snapshot = HASH_CACHE.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let Ok(content) = serde_json::to_vec(&snapshot) else {
         return;
     };
@@ -569,7 +575,9 @@ pub async fn update_mod(
         // Neue Version installieren; der An/Aus-Zustand bleibt erhalten
         let id = crate::core::horizon::registry::mod_id_of(&filename).to_string();
         let enabled = crate::core::horizon::registry::is_mod_enabled(&profile.game_dir, &id);
-        let file = crate::core::horizon::registry::install(&profile.game_dir, &id, Some(&version_id)).await?;
+        let file =
+            crate::core::horizon::registry::install(&profile.game_dir, &id, Some(&version_id))
+                .await?;
         crate::core::horizon::registry::set_mod_enabled(&profile.game_dir, &id, enabled)?;
         return Ok(file);
     }
@@ -581,7 +589,8 @@ async fn horizon_mod_updates(
     profile: &crate::types::profile::Profile,
     filenames: Vec<String>,
 ) -> Result<ModUpdateCheck, String> {
-    let updates = crate::core::horizon::registry::mod_updates(&profile.game_dir, &filenames).await?;
+    let updates =
+        crate::core::horizon::registry::mod_updates(&profile.game_dir, &filenames).await?;
     let results = updates
         .into_iter()
         .map(|u| {
@@ -665,10 +674,12 @@ async fn replace_mod_file(
             format!("Download fehlgeschlagen: {}", e)
         })?;
 
-    tokio::fs::rename(&temp_path, &new_path).await.map_err(|e| {
-        let _ = std::fs::remove_file(&temp_path);
-        format!("{} konnte nicht gespeichert werden: {}", new_filename, e)
-    })?;
+    tokio::fs::rename(&temp_path, &new_path)
+        .await
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&temp_path);
+            format!("{} konnte nicht gespeichert werden: {}", new_filename, e)
+        })?;
 
     if old_path != new_path {
         if let Err(e) = tokio::fs::remove_file(&old_path).await {
@@ -732,6 +743,262 @@ async fn replace_mod_file(
     Ok(new_filename)
 }
 
+// ==================== Kompatibilität ====================
+
+/// Ein gefundenes Problem zwischen den Mods eines Profils.
+#[derive(Serialize)]
+pub struct CompatIssue {
+    /// "missing" | "disabled_dependency" | "incompatible" | "wrong_version" | "duplicate"
+    pub kind: &'static str,
+    /// Betroffene Dateien im mods-Ordner
+    pub files: Vec<String>,
+    /// Anzeigenamen der betroffenen Mods
+    pub mod_names: Vec<String>,
+    /// Beteiligtes Projekt (fehlende Abhängigkeit, Konfliktpartner, doppelte Mod)
+    pub project_id: Option<String>,
+    pub project_name: Option<String>,
+    pub icon_url: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct CompatReport {
+    pub checked: usize,
+    /// Mods, die nicht auf Modrinth sind und nicht geprüft werden können
+    pub unknown: Vec<String>,
+    pub issues: Vec<CompatIssue>,
+}
+
+/// Installierte Datei → ihre Modrinth-Version (über SHA-1, exakt).
+async fn identify_mod_files(mods_dir: &Path) -> Result<Vec<(String, Option<Version>)>, String> {
+    let files = list_mod_files(mods_dir);
+    let dir = mods_dir.to_path_buf();
+    let hashed: Vec<(String, Option<String>)> = tokio::task::spawn_blocking(move || {
+        use rayon::prelude::*;
+        files
+            .into_par_iter()
+            .map(|name| {
+                let hash = cached_sha1(&dir.join(&name));
+                (name, hash)
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(save_hash_cache);
+    let hashes: Vec<String> = hashed
+        .iter()
+        .filter_map(|(_, h)| h.clone())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let client = crate::core::http::HTTP_CLIENT.clone();
+    let current = current_versions(&client, &hashes).await?;
+    Ok(hashed
+        .into_iter()
+        .map(|(file, hash)| {
+            let version = hash.and_then(|h| current.get(&h).cloned());
+            (file, version)
+        })
+        .collect())
+}
+
+/// Projekt-IDs aller installierten Mods eines Profils (aktiv und deaktiviert).
+pub(crate) async fn installed_project_ids(profile_id: &str) -> Result<HashSet<String>, String> {
+    let profile = load_profile(profile_id).await?;
+    Ok(identify_mod_files(&profile.game_dir.join("mods"))
+        .await?
+        .into_iter()
+        .filter_map(|(_, v)| v.map(|v| v.project_id))
+        .collect())
+}
+
+type ProjectFiles = HashMap<String, Vec<String>>;
+
+/// Prüft die erkannten Dateien gegeneinander (ohne Netzwerk). Liefert die Probleme sowie die
+/// aktiven und deaktivierten Projekte.
+fn analyze_compatibility(
+    files: &[(String, Option<Version>)],
+    minecraft_version: &str,
+    loaders: &[String],
+) -> (Vec<CompatIssue>, ProjectFiles, HashMap<String, String>) {
+    let enabled = |file: &str| !file.ends_with(".disabled");
+
+    // Projekt → Dateien (aktiv / deaktiviert)
+    let mut active: HashMap<String, Vec<String>> = HashMap::new();
+    let mut inactive: HashMap<String, String> = HashMap::new();
+    for (file, version) in files {
+        if let Some(v) = version {
+            if enabled(file) {
+                active
+                    .entry(v.project_id.clone())
+                    .or_default()
+                    .push(file.clone());
+            } else {
+                inactive.insert(v.project_id.clone(), file.clone());
+            }
+        }
+    }
+
+    let mut issues: Vec<CompatIssue> = Vec::new();
+    let mut missing: HashMap<String, Vec<String>> = HashMap::new();
+    let mut conflicts: HashSet<(String, String)> = HashSet::new();
+    let issue = |kind, files: Vec<String>, project_id: Option<String>| CompatIssue {
+        kind,
+        files,
+        mod_names: Vec::new(),
+        project_id,
+        project_name: None,
+        icon_url: None,
+    };
+
+    for (file, version) in files.iter().filter(|(f, _)| enabled(f)) {
+        let Some(v) = version else { continue };
+        if !v.supports(minecraft_version, loaders) {
+            issues.push(issue(
+                "wrong_version",
+                vec![file.clone()],
+                Some(v.project_id.clone()),
+            ));
+        }
+        for dep in &v.dependencies {
+            let Some(dep_project) = dep.project_id.clone() else {
+                continue;
+            };
+            if dep_project == v.project_id {
+                continue;
+            }
+            match dep.dependency_type.as_str() {
+                "required" if !active.contains_key(&dep_project) => {
+                    if let Some(disabled) = inactive.get(&dep_project) {
+                        issues.push(issue(
+                            "disabled_dependency",
+                            vec![file.clone(), disabled.clone()],
+                            Some(dep_project),
+                        ));
+                    } else {
+                        missing.entry(dep_project).or_default().push(file.clone());
+                    }
+                }
+                "incompatible" if active.contains_key(&dep_project) => {
+                    let mut pair = [v.project_id.clone(), dep_project.clone()];
+                    pair.sort();
+                    if conflicts.insert((pair[0].clone(), pair[1].clone())) {
+                        let mut involved = vec![file.clone()];
+                        involved.extend(active[&dep_project].iter().cloned());
+                        issues.push(issue("incompatible", involved, Some(dep_project)));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    for (project, dependents) in missing {
+        issues.push(issue("missing", dependents, Some(project)));
+    }
+    for (project, list) in &active {
+        if list.len() > 1 {
+            issues.push(issue("duplicate", list.clone(), Some(project.clone())));
+        }
+    }
+
+    (issues, active, inactive)
+}
+
+/// Prüft, ob die Mods eines Profils zusammenpassen: fehlende oder deaktivierte Pflicht-
+/// Abhängigkeiten, gegenseitige Inkompatibilität, falsche Minecraft-Version/Loader und
+/// doppelt installierte Mods. Grundlage sind die Angaben der Mod-Autoren auf Modrinth.
+#[tauri::command]
+pub async fn check_mod_compatibility(profile_id: String) -> Result<CompatReport, String> {
+    let profile = load_profile(&profile_id).await?;
+    let loaders = compatible_loaders(profile.loader.loader.as_str());
+    if profile.loader.loader == crate::types::version::ModLoader::Horizon || loaders.is_empty() {
+        return Ok(CompatReport {
+            checked: 0,
+            unknown: Vec::new(),
+            issues: Vec::new(),
+        });
+    }
+    let files = identify_mod_files(&profile.game_dir.join("mods")).await?;
+    let enabled = |file: &str| !file.ends_with(".disabled");
+    let (mut issues, active, inactive) =
+        analyze_compatibility(&files, &profile.minecraft_version, &loaders);
+
+    // Namen und Icons
+    let mut ids: HashSet<String> = active.keys().cloned().collect();
+    ids.extend(inactive.keys().cloned());
+    ids.extend(issues.iter().filter_map(|i| i.project_id.clone()));
+    let client = crate::core::http::HTTP_CLIENT.clone();
+    let projects = project_infos(&client, ids).await;
+    let project_of_file: HashMap<&str, &str> = files
+        .iter()
+        .filter_map(|(f, v)| v.as_ref().map(|v| (f.as_str(), v.project_id.as_str())))
+        .collect();
+    let name_of_file = |file: &str| {
+        project_of_file
+            .get(file)
+            .and_then(|p| projects.get(*p))
+            .and_then(|p| p.title.clone())
+            .unwrap_or_else(|| file.trim_end_matches(".disabled").to_string())
+    };
+    for issue in &mut issues {
+        issue.mod_names = issue.files.iter().map(|f| name_of_file(f)).collect();
+        if let Some(info) = issue.project_id.as_ref().and_then(|p| projects.get(p)) {
+            issue.project_name = info.title.clone();
+            issue.icon_url = info.icon_url.clone();
+        }
+    }
+    // Wichtigstes zuerst
+    let rank = |kind: &str| match kind {
+        "missing" => 0,
+        "incompatible" => 1,
+        "disabled_dependency" => 2,
+        "duplicate" => 3,
+        _ => 4,
+    };
+    issues.sort_by_key(|i| rank(i.kind));
+
+    Ok(CompatReport {
+        checked: files
+            .iter()
+            .filter(|(f, v)| enabled(f) && v.is_some())
+            .count(),
+        unknown: files
+            .iter()
+            .filter(|(f, v)| enabled(f) && v.is_none())
+            .map(|(f, _)| f.clone())
+            .collect(),
+        issues,
+    })
+}
+
+/// Installiert alle fehlenden Pflicht-Abhängigkeiten (jeweils passend zu Version und Loader).
+#[tauri::command]
+pub async fn install_missing_dependencies(profile_id: String) -> Result<Vec<String>, String> {
+    let report = check_mod_compatibility(profile_id.clone()).await?;
+    let mut installed = Vec::new();
+    for issue in report.issues.iter().filter(|i| i.kind == "missing") {
+        let Some(project) = issue.project_id.clone() else {
+            continue;
+        };
+        let outcome = crate::gui::mod_browser::install_mod(
+            profile_id.clone(),
+            project.clone(),
+            None,
+            "modrinth".to_string(),
+        )
+        .await
+        .map_err(|e| {
+            format!(
+                "{} konnte nicht installiert werden: {e}",
+                issue.project_name.clone().unwrap_or(project)
+            )
+        })?;
+        installed.push(issue.project_name.clone().unwrap_or_default());
+        installed.extend(outcome.dependencies);
+    }
+    Ok(installed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -752,7 +1019,119 @@ mod tests {
                     sha1: Some(sha1.to_string()),
                 },
             }],
+            dependencies: Vec::new(),
         }
+    }
+
+    fn with_project(mut v: Version, project: &str, deps: &[(&str, &str)]) -> Version {
+        v.project_id = project.to_string();
+        v.game_versions = vec!["1.21.1".to_string()];
+        v.dependencies = deps
+            .iter()
+            .map(|(p, kind)| VersionDependency {
+                project_id: Some(p.to_string()),
+                dependency_type: kind.to_string(),
+            })
+            .collect();
+        v
+    }
+
+    #[test]
+    fn finds_missing_incompatible_disabled_and_duplicate_mods() {
+        let loaders = compatible_loaders("neoforge");
+        let files = vec![
+            // braucht "lib" (fehlt) und "api" (deaktiviert), verträgt sich nicht mit "rival"
+            (
+                "a.jar".to_string(),
+                Some(with_project(
+                    version("1", "release", &[], "1"),
+                    "a",
+                    &[
+                        ("lib", "required"),
+                        ("api", "required"),
+                        ("rival", "incompatible"),
+                    ],
+                )),
+            ),
+            (
+                "api.jar.disabled".to_string(),
+                Some(with_project(version("2", "release", &[], "2"), "api", &[])),
+            ),
+            (
+                "rival.jar".to_string(),
+                Some(with_project(
+                    version("3", "release", &[], "3"),
+                    "rival",
+                    &[],
+                )),
+            ),
+            // dieselbe Mod zweimal
+            (
+                "b-1.jar".to_string(),
+                Some(with_project(version("4", "release", &[], "4"), "b", &[])),
+            ),
+            (
+                "b-2.jar".to_string(),
+                Some(with_project(version("5", "release", &[], "5"), "b", &[])),
+            ),
+            ("unknown.jar".to_string(), None),
+        ];
+        let (issues, active, inactive) = analyze_compatibility(&files, "1.21.1", &loaders);
+        let kinds: Vec<&str> = issues.iter().map(|i| i.kind).collect();
+        assert!(kinds.contains(&"missing"));
+        assert!(kinds.contains(&"disabled_dependency"));
+        assert!(kinds.contains(&"incompatible"));
+        assert!(kinds.contains(&"duplicate"));
+        assert!(!kinds.contains(&"wrong_version"));
+        assert_eq!(active.len(), 3);
+        assert!(inactive.contains_key("api"));
+        let missing = issues.iter().find(|i| i.kind == "missing").unwrap();
+        assert_eq!(missing.project_id.as_deref(), Some("lib"));
+        assert_eq!(missing.files, vec!["a.jar".to_string()]);
+    }
+
+    /// Prüft das Profil mit den meisten Mods gegen das echte Modrinth.
+    /// `cargo test --bin Lion-Launcher live_compatibility -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "benötigt Internet und ein Profil mit Mods"]
+    async fn live_compatibility_of_largest_profile() {
+        let profiles = crate::core::profiles::ProfileManager::new()
+            .unwrap()
+            .load_profiles()
+            .await
+            .unwrap();
+        let profile = profiles
+            .profiles
+            .iter()
+            .max_by_key(|p| list_mod_files(&p.game_dir.join("mods")).len())
+            .expect("kein Profil");
+        let report = check_mod_compatibility(profile.id.clone()).await.unwrap();
+        println!(
+            "{} ({} {}): {} geprüft, {} unbekannt",
+            profile.name,
+            profile.loader.loader,
+            profile.minecraft_version,
+            report.checked,
+            report.unknown.len()
+        );
+        for issue in &report.issues {
+            println!(
+                "  {:<20} {:?} -> {:?}",
+                issue.kind, issue.mod_names, issue.project_name
+            );
+        }
+    }
+
+    #[test]
+    fn reports_mods_for_other_versions() {
+        let loaders = compatible_loaders("neoforge");
+        let files = vec![(
+            "old.jar".to_string(),
+            Some(with_project(version("1", "release", &[], "1"), "old", &[])),
+        )];
+        let (issues, _, _) = analyze_compatibility(&files, "1.20.1", &loaders);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].kind, "wrong_version");
     }
 
     #[test]
@@ -802,7 +1181,13 @@ mod tests {
     fn identical_file_in_newer_version_is_not_an_update() {
         let current = version("1.0.0", "release", &["1.21.1"], "aaa");
         let republished = version("1.0.0+1.21.1", "release", &["1.21.1"], "aaa");
-        let (status, _) = pick_update(&current, "aaa", true, Some(&republished), Some(&republished));
+        let (status, _) = pick_update(
+            &current,
+            "aaa",
+            true,
+            Some(&republished),
+            Some(&republished),
+        );
         assert_eq!(status, "up_to_date");
     }
 

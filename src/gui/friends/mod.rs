@@ -12,9 +12,11 @@
 //! (siehe [`devices`]).
 
 pub mod devices;
+pub mod play;
 mod protocol;
 pub mod share;
 mod store;
+mod tunnel;
 
 use iroh::endpoint::{presets, Connection};
 use iroh::protocol::{AcceptError, ProtocolHandler, Router};
@@ -193,6 +195,7 @@ impl FriendsService {
             .map_err(|e| e.to_string())?;
         let router = Router::builder(endpoint.clone())
             .accept(protocol::ALPN, FriendsProtocol)
+            .accept(tunnel::ALPN, tunnel::TunnelProtocol)
             .spawn();
         Ok(Arc::new(Self {
             endpoint,
@@ -406,6 +409,19 @@ impl FriendsService {
             Request::UnlinkDevice => {
                 protocol::encode_ok(&devices::handle_unlink(self, remote).await)
             }
+            Request::PlayInvite {
+                session_id,
+                kind,
+                title,
+                ..
+            } => encode_result(
+                play::on_invite(self, remote, session_id, kind, title)
+                    .await
+                    .map(|_| Response::Ok),
+            ),
+            Request::GetPlayManifest { session_id } => {
+                encode_result(play::manifest_for(self, remote, &session_id).await)
+            }
             Request::ShareInvite {
                 share_id,
                 name,
@@ -430,6 +446,7 @@ impl FriendsService {
                     read: false,
                     share_id: Some(share_id.clone()),
                     share_name: Some(name.clone()),
+                    play: None,
                 });
                 state.invites.push(ShareInvite {
                     share_id,
@@ -461,6 +478,7 @@ impl FriendsService {
                         read: false,
                         share_id: None,
                         share_name: None,
+                        play: None,
                     });
                     state.save();
                     drop(state);
@@ -858,6 +876,7 @@ pub async fn friends_send_message(friend_id: String, text: String) -> Result<Cha
         read: true,
         share_id: None,
         share_name: None,
+        play: None,
     };
     {
         let mut state = service.state.lock().await;

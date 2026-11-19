@@ -230,6 +230,12 @@ pub struct FriendsState {
     /// Getrennte Geräte – werden nicht automatisch wieder verknüpft
     #[serde(default)]
     pub blocked_devices: Vec<String>,
+    /// Welten/Server, zu denen ich Freunde eingeladen habe
+    #[serde(default)]
+    pub hosted_sessions: Vec<HostedSession>,
+    /// Angenommene Einladungen zum Zusammenspielen
+    #[serde(default)]
+    pub joined_sessions: Vec<JoinedSession>,
 }
 
 /// Chat-Nachricht mit einem Freund. Einladungen zu geteilten Instanzen erscheinen ebenfalls
@@ -254,6 +260,43 @@ pub struct ChatMessage {
     pub share_id: Option<String>,
     #[serde(default)]
     pub share_name: Option<String>,
+    /// Einladung zum Zusammenspielen (Welt oder lokaler Server)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub play: Option<PlayInviteInfo>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlayInviteInfo {
+    pub session_id: String,
+    /// Weltname bzw. Servername
+    pub title: String,
+    /// "world" | "server"
+    pub kind: String,
+}
+
+/// Eine Welt oder ein lokaler Server, zu dem ich Freunde eingeladen habe.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HostedSession {
+    pub session_id: String,
+    /// "world" | "server"
+    pub kind: String,
+    /// Profil (Welt) bzw. lokales Server-Profil
+    pub target_id: String,
+    /// Weltordner bzw. Servername
+    pub title: String,
+    #[serde(default)]
+    pub invited: Vec<String>,
+    /// Version, Loader und Mindest-Modpaket für Gäste
+    pub manifest: ShareManifest,
+}
+
+/// Eine Einladung, die ich angenommen habe (mein Profil dafür).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JoinedSession {
+    pub session_id: String,
+    pub host_id: String,
+    pub profile_id: String,
+    pub manifest: ShareManifest,
 }
 
 /// Maximale Anzahl gespeicherter Nachrichten pro Freund.

@@ -1996,13 +1996,16 @@ async function openProfileSettings(profileId) {
                 
                 <!-- Profile picture -->
                 <div style="display: flex; gap: 15px; align-items: center; background: var(--bg-light); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                    <div id="profile-icon-preview" style="width: 60px; height: 60px; background: var(--bg-medium); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 30px; overflow: hidden;">
+                    <div id="profile-icon-preview" style="width: 60px; height: 60px; background: ${profile.icon_path ? 'transparent' : 'var(--bg-medium)'}; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 30px; overflow: hidden;">
                         ${profile.icon_path ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover;" data-fallback="logo">` : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover;">`}
                     </div>
                     <div style="flex: 1;">
                         <input type="file" id="profile-icon-input" accept="image/*" onchange="previewProfileIcon(event)" style="display: none;">
-                        <button class="btn btn-secondary" onclick="document.getElementById('profile-icon-input').click()" style="padding: 6px 12px; font-size: 12px;">
-                            <i class="bi bi-camera"></i> Image
+                        <button class="btn btn-secondary" onclick="openIconEditor('${escapeAttr(profile.id)}')" style="padding: 6px 12px; font-size: 12px;">
+                            <i class="bi bi-boxes"></i> Icon-Editor
+                        </button>
+                        <button class="btn btn-secondary" onclick="document.getElementById('profile-icon-input').click()" style="padding: 6px 12px; font-size: 12px; margin-left: 5px;">
+                            <i class="bi bi-camera"></i> Bild
                         </button>
                         <button class="btn btn-secondary" onclick="clearProfileIcon()" style="padding: 6px 12px; font-size: 12px; margin-left: 5px;">
                             <i class="bi bi-x"></i>
@@ -2583,7 +2586,7 @@ function showProfileDetails(profileId, view = {}) {
 
     // Icon: if icon_path is present (data URL), show it, otherwise the app icon
     const iconHTML = profile.icon_path
-        ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: cover; border-radius: 12px;" data-fallback="logo">`
+        ? `<img src="${profile.icon_path}" alt="Profile Icon" style="width: 100%; height: 100%; object-fit: contain;" data-fallback="logo">`
         : `<img src="${LION_LOGO_URL}" alt="Lion Launcher" style="width: 100%; height: 100%; object-fit: cover; border-radius: 12px;">`;
 
     const loaderLabel = SERVER_SOFTWARE[profile.loader.loader]?.label || profile.loader.loader;
@@ -2595,7 +2598,7 @@ function showProfileDetails(profileId, view = {}) {
                         column-gap: 22px; row-gap: 16px; margin-bottom: 20px;">
                 <!-- Icon -->
                 <div style="grid-column: 1; grid-row: 1 / span 2; width: 230px; height: 230px; display: flex; align-items: center; justify-content: center;
-                            border-radius: 14px; overflow: hidden; background: var(--bg-light);">
+                            border-radius: 14px; overflow: hidden; background: ${profile.icon_path ? 'transparent' : 'var(--bg-light)'};">
                     ${iconHTML}
                 </div>
 
@@ -2949,6 +2952,9 @@ function renderProfileTabContent(tabName, profile) {
                         ${isSharedMemberProfile(profile.id) ? '' : `
                         <button id="mod-updates-btn" class="btn btn-secondary" onclick="checkForModUpdates('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
                             <i class="bi bi-search"></i> Updates
+                        </button>
+                        <button class="btn btn-secondary" onclick="openModCompatibility('${profile.id}')" style="padding: 8px 12px; font-size: 12px;" title="Prüft, ob die Mods zusammenpassen">
+                            <i class="bi bi-shield-check"></i> Kompatibilität
                         </button>`}
                         <button class="btn btn-secondary" onclick="refreshInstalledMods('${profile.id}')" style="padding: 8px 12px; font-size: 12px;">
                             <i class="bi bi-arrow-clockwise"></i>
@@ -5154,6 +5160,8 @@ async function loadWorlds(profileId) {
                 ? `<img alt="" src="${world.icon_base64}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">`
                 : `<div style="font-size: 32px;"><i class="bi bi-globe"></i></div>`;
 
+            // Horizon-Welten lassen sich (noch) nicht so teilen
+            const canInvite = (profiles.find(p => p.id === profileId)?.loader?.loader || '') !== 'horizon';
             return `
                 <div style="background: var(--bg-light); padding: 12px; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
                     <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--bg-dark); border-radius: 4px; overflow: hidden;">
@@ -5169,6 +5177,10 @@ async function loadWorlds(profileId) {
                             <span><i class="bi bi-box"></i> ${sizeStr}</span>
                         </div>
                     </div>
+                    ${canInvite ? `<button class="btn btn-secondary" onclick="openPlayInvite('world', '${escapeAttr(profileId)}', '${escapeAttr(String(world.folder_name).replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')"
+                            style="padding: 8px 12px; font-size: 12px;" title="Freunde in diese Welt einladen">
+                        <i class="bi bi-person-plus"></i> Einladen
+                    </button>` : ''}
                     <button class="btn btn-gold" onclick="launchWorld('${profileId}', '${world.folder_name}')" 
                             style="padding: 8px 16px; font-size: 12px;">
                         <i class="bi bi-play-fill"></i> Play
@@ -5668,6 +5680,9 @@ function getServerCardTemplate(server) {
             <div class="server-card-actions" onclick="event.stopPropagation()">
                 <button class="btn" data-server-toggle-btn="${safeId}" onclick="toggleServerProfile('${safeId}')">
                     <i class="bi bi-play-fill"></i> Start
+                </button>
+                <button class="btn btn-secondary" onclick="openPlayInvite('server', '${safeId}', '${escapeAttr(String(server.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')" title="Freunde auf diesen Server einladen">
+                    <i class="bi bi-person-plus"></i> Einladen
                 </button>
             </div>
         </div>
@@ -8229,7 +8244,7 @@ async function fillHorizonVersionSelect(select) {
  */
 async function installModChecked(args) {
     try {
-        return await invoke('install_mod', args);
+        return reportInstallOutcome(await invoke('install_mod', args));
     } catch (error) {
         if (!String(error).includes('NATIVE_TRUST_REQUIRED')) throw error;
         const allowed = await showConfirmModal({
@@ -8245,8 +8260,21 @@ async function installModChecked(args) {
         });
         if (!allowed) throw new Error('Installation abgebrochen');
         await invoke('set_horizon_native_trust', { trusted: true });
-        return await invoke('install_mod', args);
+        return reportInstallOutcome(await invoke('install_mod', args));
     }
+}
+
+/** Meldet automatisch mitinstallierte (oder fehlgeschlagene) Abhängigkeiten. */
+function reportInstallOutcome(outcome) {
+    const added = outcome?.dependencies || [];
+    const failed = outcome?.failed || [];
+    if (added.length) {
+        showToast(`Benötigte Mods mitinstalliert: ${added.join(', ')}`, 'success', 5000);
+    }
+    if (failed.length) {
+        showToast(`${failed.length} benötigte Mod(s) gibt es nicht für diese Version – „Kompatibilität“ zeigt Details`, 'warning', 6000);
+    }
+    return outcome;
 }
 
 /// Hilfsfunktion: Filtert Versionen basierend auf dem Loader
@@ -13444,6 +13472,24 @@ function chatMessageHtml(message) {
         ? '<i class="bi bi-clock" title="Wird zugestellt, sobald dein Freund online ist"></i>'
         : '';
 
+    if (message.play) {
+        const host = escapeAttr(message.friend_id);
+        const session = escapeAttr(message.play.session_id);
+        const isWorld = message.play.kind === 'world';
+        const actions = message.outgoing
+            ? '<span class="share-muted">Einladung gesendet</span>'
+            : `<button class="btn share-small-btn" onclick="joinPlaySession('${host}', '${session}', this)"><i class="bi bi-play-fill"></i> Beitreten</button>`;
+        return `
+            <div class="chat-message ${message.outgoing ? 'outgoing' : 'incoming'}">
+                <div class="chat-invite">
+                    <div class="chat-invite-title"><i class="bi ${isWorld ? 'bi-globe2' : 'bi-hdd-network'}"></i> ${isWorld ? 'Einladung in eine Welt' : 'Einladung auf einen Server'}</div>
+                    <div class="chat-invite-name">${escapeHtml(message.play.title || '')}</div>
+                    <div class="chat-invite-actions">${actions}</div>
+                </div>
+                <div class="chat-meta">${escapeHtml(time)} ${status}</div>
+            </div>`;
+    }
+
     if (message.share_id) {
         const owner = escapeAttr(message.friend_id);
         const share = escapeAttr(message.share_id);
@@ -14480,3 +14526,815 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadUiState();
     showSettingsTab(getUiPref(SETTINGS_TAB_KEY, 'account'), { save: false });
 });
+
+// ============================================================================
+// Icon-Editor: Profil-Icons aus 3D-Blöcken, Mob-Köpfen und Items
+// ============================================================================
+//
+// Die Texturen kommen zur Laufzeit aus dem Minecraft-Client-JAR des Spielers
+// (get_icon_textures) – der Launcher liefert keine Mojang-Grafiken mit.
+// Blöcke werden isometrisch gezeichnet: drei Seiten mit Affin-Transformation,
+// pixelgenau (ohne Glättung) und je Seite unterschiedlich schattiert.
+
+const ICON_BACKGROUNDS = [
+    { id: 'none', label: 'Ohne' },
+    { id: 'rose', label: 'Rosa', from: '#e8457c', to: '#f0786a' },
+    { id: 'red', label: 'Rot', from: '#c93636', to: '#ff6b4a' },
+    { id: 'orange', label: 'Orange', from: '#ef7a2a', to: '#ffb347' },
+    { id: 'gold', label: 'Gold', from: '#e3a01a', to: '#ffd650' },
+    { id: 'lime', label: 'Hellgrün', from: '#5cb85c', to: '#a8dc52' },
+    { id: 'green', label: 'Grün', from: '#23905a', to: '#4fd28b' },
+    { id: 'teal', label: 'Türkis', from: '#11999b', to: '#4fd1c5' },
+    { id: 'sky', label: 'Himmelblau', from: '#2b86da', to: '#5ec2ff' },
+    { id: 'indigo', label: 'Indigo', from: '#4656cf', to: '#828fff' },
+    { id: 'purple', label: 'Lila', from: '#8441a8', to: '#c46ef2' },
+    { id: 'pink', label: 'Pink', from: '#d24f99', to: '#ff90d2' },
+    { id: 'slate', label: 'Schiefer', from: '#3a4250', to: '#5f6a7d' },
+    { id: 'night', label: 'Nacht', from: '#171a26', to: '#343a52' }
+];
+
+// Blöcke: top/side bzw. left/right (Texturen unter block/), optional Färbung und Höhe
+const ICON_BLOCKS = [
+    { id: 'grass_block', name: 'Grasblock', top: 'grass_block_top', topTint: '#91bd59', side: 'grass_block_side' },
+    { id: 'crafting_table', name: 'Werkbank', top: 'crafting_table_top', left: 'crafting_table_front', right: 'crafting_table_side' },
+    { id: 'furnace', name: 'Ofen', top: 'furnace_top', left: 'furnace_front_on', right: 'furnace_side' },
+    { id: 'barrel', name: 'Fass', top: 'barrel_top', side: 'barrel_side' },
+    { id: 'bookshelf', name: 'Bücherregal', top: 'oak_planks', side: 'bookshelf' },
+    { id: 'redstone_block', name: 'Redstone-Block', all: 'redstone_block' },
+    { id: 'tnt', name: 'TNT', top: 'tnt_top', side: 'tnt_side' },
+    { id: 'diamond_block', name: 'Diamantblock', all: 'diamond_block' },
+    { id: 'gold_block', name: 'Goldblock', all: 'gold_block' },
+    { id: 'emerald_block', name: 'Smaragdblock', all: 'emerald_block' },
+    { id: 'netherite_block', name: 'Netheritblock', all: 'netherite_block' },
+    { id: 'amethyst_block', name: 'Amethystblock', all: 'amethyst_block' },
+    { id: 'lapis_block', name: 'Lapislazuliblock', all: 'lapis_block' },
+    { id: 'copper_block', name: 'Kupferblock', all: 'copper_block' },
+    { id: 'oak_log', name: 'Eichenstamm', top: 'oak_log_top', side: 'oak_log' },
+    { id: 'cherry_log', name: 'Kirschstamm', top: 'cherry_log_top', side: 'cherry_log' },
+    { id: 'cake', name: 'Kuchen', top: 'cake_top', side: 'cake_side', height: 0.5 },
+    { id: 'jack_o_lantern', name: 'Kürbislaterne', top: 'pumpkin_top', left: 'jack_o_lantern', right: 'pumpkin_side' },
+    { id: 'carved_pumpkin', name: 'Geschnitzter Kürbis', top: 'pumpkin_top', left: 'carved_pumpkin', right: 'pumpkin_side' },
+    { id: 'slime_block', name: 'Schleimblock', all: 'slime_block' },
+    { id: 'honey_block', name: 'Honigblock', top: 'honey_block_top', side: 'honey_block_side' },
+    { id: 'glowstone', name: 'Leuchtstein', all: 'glowstone' },
+    { id: 'sea_lantern', name: 'Seelaterne', all: 'sea_lantern' },
+    { id: 'shroomlight', name: 'Pilzlicht', all: 'shroomlight' },
+    { id: 'command_block', name: 'Befehlsblock', top: 'command_block_side', left: 'command_block_front', right: 'command_block_side' },
+    { id: 'observer', name: 'Beobachter', top: 'observer_top', left: 'observer_front', right: 'observer_side' },
+    { id: 'dispenser', name: 'Werfer', top: 'furnace_top', left: 'dispenser_front', right: 'furnace_side' },
+    { id: 'piston', name: 'Kolben', top: 'piston_top', side: 'piston_side' },
+    { id: 'beehive', name: 'Bienenstock', top: 'beehive_end', left: 'beehive_front_honey', right: 'beehive_side' },
+    { id: 'target', name: 'Zielblock', top: 'target_top', side: 'target_side' },
+    { id: 'jukebox', name: 'Plattenspieler', top: 'jukebox_top', side: 'jukebox_side' },
+    { id: 'note_block', name: 'Notenblock', all: 'note_block' },
+    { id: 'melon', name: 'Melone', top: 'melon_top', side: 'melon_side' },
+    { id: 'hay_block', name: 'Strohballen', top: 'hay_block_top', side: 'hay_block_side' },
+    { id: 'diamond_ore', name: 'Diamanterz', all: 'diamond_ore' },
+    { id: 'deepslate_diamond_ore', name: 'Tiefenschiefer-Diamanterz', all: 'deepslate_diamond_ore' },
+    { id: 'emerald_ore', name: 'Smaragderz', all: 'emerald_ore' },
+    { id: 'ancient_debris', name: 'Antiker Schrott', top: 'ancient_debris_top', side: 'ancient_debris_side' },
+    { id: 'obsidian', name: 'Obsidian', all: 'obsidian' },
+    { id: 'crying_obsidian', name: 'Weinender Obsidian', all: 'crying_obsidian' },
+    { id: 'respawn_anchor', name: 'Seelenanker', top: 'respawn_anchor_top', side: 'respawn_anchor_side4' },
+    { id: 'sculk', name: 'Sculk', all: 'sculk' },
+    { id: 'sculk_catalyst', name: 'Sculk-Katalysator', top: 'sculk_catalyst_top', side: 'sculk_catalyst_side' },
+    { id: 'reinforced_deepslate', name: 'Verstärkter Tiefenschiefer', top: 'reinforced_deepslate_top', side: 'reinforced_deepslate_side' },
+    { id: 'magma_block', name: 'Magmablock', all: 'magma' },
+    { id: 'prismarine', name: 'Prismarin', all: 'prismarine' },
+    { id: 'end_stone', name: 'Endstein', all: 'end_stone' },
+    { id: 'netherrack', name: 'Netherrack', all: 'netherrack' },
+    { id: 'nether_bricks', name: 'Netherziegel', all: 'nether_bricks' },
+    { id: 'mycelium', name: 'Myzel', top: 'mycelium_top', side: 'mycelium_side' },
+    { id: 'snowy_grass', name: 'Verschneiter Grasblock', top: 'snow', side: 'grass_block_snow' },
+    { id: 'enchanting_table', name: 'Zaubertisch', top: 'enchanting_table_top', side: 'enchanting_table_side', height: 0.75 },
+    { id: 'lodestone', name: 'Leitstein', top: 'lodestone_top', side: 'lodestone_side' },
+    { id: 'smithing_table', name: 'Schmiedetisch', top: 'smithing_table_top', left: 'smithing_table_front', right: 'smithing_table_side' },
+    { id: 'cobblestone', name: 'Bruchstein', all: 'cobblestone' },
+    { id: 'mossy_cobblestone', name: 'Bemooster Bruchstein', all: 'mossy_cobblestone' },
+    { id: 'bricks', name: 'Ziegel', all: 'bricks' },
+    { id: 'stone_bricks', name: 'Steinziegel', all: 'stone_bricks' },
+    { id: 'sand', name: 'Sand', all: 'sand' },
+    { id: 'blue_ice', name: 'Blaueis', all: 'blue_ice' },
+    { id: 'oak_leaves', name: 'Eichenlaub', all: 'oak_leaves', tint: '#59ae30' },
+    { id: 'spawner', name: 'Spawner', all: 'spawner' },
+    { id: 'glass', name: 'Glas', all: 'glass' }
+];
+
+// Köpfe: Kopf-Bereich der Mob-/Spieler-Textur (64 px breit), optional Überlagerung (Hut, Augen)
+const ICON_HEADS = [
+    { id: 'creeper', name: 'Creeper', tex: 'entity/creeper/creeper' },
+    { id: 'steve', name: 'Steve', tex: 'entity/player/wide/steve', hat: true },
+    { id: 'alex', name: 'Alex', tex: 'entity/player/wide/alex', hat: true },
+    { id: 'enderman', name: 'Enderman', tex: 'entity/enderman/enderman', overlay: 'entity/enderman/enderman_eyes' },
+    { id: 'blaze', name: 'Lohe', tex: 'entity/blaze/blaze' }
+];
+
+// Items: flache Sprites (item/), mit etwas Tiefe gezeichnet
+const ICON_ITEMS = [
+    'diamond_pickaxe', 'diamond_sword', 'netherite_sword', 'netherite_pickaxe', 'mace', 'bow',
+    'trident', 'fishing_rod', 'iron_axe', 'golden_apple', 'apple', 'cookie', 'cake', 'golden_carrot',
+    'ender_pearl', 'ender_eye', 'totem_of_undying', 'nether_star', 'heart_of_the_sea', 'emerald',
+    'diamond', 'amethyst_shard', 'blaze_rod', 'slime_ball', 'spyglass', 'elytra', 'lava_bucket',
+    'water_bucket', 'book', 'enchanted_book', 'firework_rocket', 'music_disc_cat', 'wind_charge'
+].map(id => ({ id, name: id.replace(/_/g, ' ') }));
+
+const ICON_RECENTS_KEY = 'iconEditorRecents';
+
+const iconEditor = {
+    textures: new Map(), // Texturpfad → HTMLImageElement
+    loading: null,
+    design: null,
+    profileId: null
+};
+
+function iconElementTextures(kind, element) {
+    if (kind === 'block') {
+        const names = [element.all, element.top, element.side, element.left, element.right].filter(Boolean);
+        return names.map(n => 'block/' + n);
+    }
+    if (kind === 'head') return [element.tex, element.overlay].filter(Boolean);
+    return ['item/' + element.id];
+}
+
+function allIconElements() {
+    return [
+        ...ICON_BLOCKS.map(element => ({ kind: 'block', element })),
+        ...ICON_HEADS.map(element => ({ kind: 'head', element })),
+        ...ICON_ITEMS.map(element => ({ kind: 'item', element }))
+    ];
+}
+
+/** Lädt alle Texturen einmal aus dem Client-JAR des Spielers. */
+function loadIconTextures() {
+    if (iconEditor.loading) return iconEditor.loading;
+    const paths = [...new Set(allIconElements().flatMap(({ kind, element }) => iconElementTextures(kind, element)))];
+    iconEditor.loading = invoke('get_icon_textures', { paths }).then(async urls => {
+        await Promise.all(Object.entries(urls || {}).map(([path, url]) => new Promise(resolve => {
+            const img = new Image();
+            img.onload = () => { iconEditor.textures.set(path, img); resolve(); };
+            img.onerror = resolve;
+            img.src = url;
+        })));
+    }).catch(error => {
+        iconEditor.loading = null;
+        throw error;
+    });
+    return iconEditor.loading;
+}
+
+/** Nur Motive, deren Texturen alle vorhanden sind (andere Versionen benennen manche um). */
+function availableIconElements() {
+    return allIconElements().filter(({ kind, element }) =>
+        iconElementTextures(kind, element).every(path => iconEditor.textures.has(path)));
+}
+
+function findIconElement(id) {
+    return allIconElements().find(e => e.element.id === id) || null;
+}
+
+// ── Zeichnen ────────────────────────────────────────────────────────────────
+
+/** Eine Seite (Ausschnitt einer Textur) als 16×16-Kachel, gefärbt und schattiert. */
+function iconFaceTile(img, rect, tint, shade) {
+    const tile = document.createElement('canvas');
+    tile.width = 16;
+    tile.height = 16;
+    const ctx = tile.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, rect[0], rect[1], rect[2], rect[3], 0, 0, 16, 16);
+    ctx.globalCompositeOperation = 'source-atop';
+    if (tint) {
+        // Graue Texturen (Gras, Laub) wie im Spiel einfärben
+        ctx.globalCompositeOperation = 'multiply';
+        ctx.fillStyle = tint;
+        ctx.fillRect(0, 0, 16, 16);
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.drawImage(img, rect[0], rect[1], rect[2], rect[3], 0, 0, 16, 16);
+        ctx.globalCompositeOperation = 'source-atop';
+    }
+    if (shade > 0) {
+        ctx.fillStyle = `rgba(0, 0, 0, ${shade})`;
+        ctx.fillRect(0, 0, 16, 16);
+    }
+    return tile;
+}
+
+/** Erstes Bild einer (evtl. animierten, senkrecht gestapelten) Blocktextur. */
+function iconFrameRect(img, heightFraction = 1) {
+    const w = img.width;
+    const h = w * heightFraction;
+    return [0, w - h, w, h];
+}
+
+/** Isometrischer Würfel: Seiten-Kacheln (oben, links, rechts), Kantenlänge `edge`. */
+function drawIsoCube(ctx, size, faces, { edge = size * 0.36, height = 1, offsetY = 0 } = {}) {
+    const a = edge * Math.cos(Math.PI / 6);
+    const b = edge / 2;
+    const h = edge * height;
+    const cx = size / 2;
+    const top = (size - (2 * b + edge)) / 2 + (edge - h) + offsetY;
+    const west = [cx - a, top + b];
+    const south = [cx, top + 2 * b];
+    const draw = (tile, matrix) => {
+        ctx.save();
+        ctx.setTransform(...matrix);
+        ctx.imageSmoothingEnabled = false;
+        // Minimal größer, damit zwischen den Seiten keine Lücken entstehen
+        ctx.drawImage(tile, -0.06, -0.06, 16.12, 16.12);
+        ctx.restore();
+    };
+    const base = ctx.getTransform();
+    const apply = (m) => {
+        // Seiten-Matrix mit der Grundtransformation (z.B. Skalierung) verknüpfen
+        const face = new DOMMatrix(m);
+        const combined = base.multiply(face);
+        return [combined.a, combined.b, combined.c, combined.d, combined.e, combined.f];
+    };
+    draw(faces.left, apply([a / 16, b / 16, 0, h / 16, west[0], west[1]]));
+    draw(faces.right, apply([a / 16, -b / 16, 0, h / 16, south[0], south[1]]));
+    draw(faces.top, apply([a / 16, -b / 16, a / 16, b / 16, west[0], west[1]]));
+    return { west, south, a, b, h, top };
+}
+
+function drawIconShadow(ctx, size) {
+    ctx.save();
+    ctx.filter = `blur(${Math.max(1, size * 0.035)}px)`;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.beginPath();
+    ctx.ellipse(size * 0.53, size * 0.8, size * 0.3, size * 0.07, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+
+function drawIconBlock(ctx, size, block) {
+    const tex = (name) => iconEditor.textures.get('block/' + name);
+    const topImg = tex(block.top || block.all);
+    const leftImg = tex(block.left || block.side || block.all);
+    const rightImg = tex(block.right || block.side || block.all);
+    const height = block.height || 1;
+    const faces = {
+        top: iconFaceTile(topImg, iconFrameRect(topImg), block.topTint || block.tint, 0),
+        left: iconFaceTile(leftImg, iconFrameRect(leftImg, height), block.tint, 0.16),
+        right: iconFaceTile(rightImg, iconFrameRect(rightImg, height), block.tint, 0.32)
+    };
+    drawIconShadow(ctx, size);
+    drawIsoCube(ctx, size, faces, { height });
+}
+
+function drawIconHead(ctx, size, head) {
+    const img = iconEditor.textures.get(head.tex);
+    const unit = img.width / 64; // Kopf-Bereiche gelten für 64 px breite Texturen
+    const region = (x, y) => [x * unit, y * unit, 8 * unit, 8 * unit];
+    const faces = (source, dx) => ({
+        top: iconFaceTile(source, region(8 + dx, 0), null, 0),
+        left: iconFaceTile(source, region(8 + dx, 8), null, 0.16),
+        right: iconFaceTile(source, region(16 + dx, 8), null, 0.32)
+    });
+    drawIconShadow(ctx, size);
+    drawIsoCube(ctx, size, faces(img, 0));
+    if (head.overlay && iconEditor.textures.has(head.overlay)) {
+        drawIsoCube(ctx, size, faces(iconEditor.textures.get(head.overlay), 0));
+    }
+    if (head.hat) {
+        // Hut-Ebene etwas größer um den Kopf
+        drawIsoCube(ctx, size, faces(img, 32), { edge: size * 0.36 * 1.12 });
+    }
+}
+
+function drawIconItem(ctx, size, item) {
+    const img = iconEditor.textures.get('item/' + item.id);
+    const rect = iconFrameRect(img);
+    const scale = Math.floor((size * 0.6) / 16) || 1;
+    const w = 16 * scale;
+    const x = Math.round((size - w) / 2);
+    const y = Math.round((size - w) / 2 - size * 0.02);
+    const silhouette = iconFaceTile(img, rect, null, 0.55);
+    const sprite = iconFaceTile(img, rect, null, 0);
+    drawIconShadow(ctx, size);
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    // Etwas Tiefe: dunkle Kopien leicht versetzt hinter dem Sprite
+    const depth = Math.max(1, Math.round(scale * 0.8));
+    for (let k = depth; k > 0; k--) ctx.drawImage(silhouette, x + k, y + k, w, w);
+    ctx.drawImage(sprite, x, y, w, w);
+    ctx.restore();
+}
+
+function drawIconBackground(ctx, size, bgId) {
+    const bg = ICON_BACKGROUNDS.find(b => b.id === bgId);
+    if (!bg || !bg.from) return;
+    const radius = size * 0.22;
+    const gradient = ctx.createLinearGradient(0, 0, size, size);
+    gradient.addColorStop(0, bg.from);
+    gradient.addColorStop(1, bg.to);
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, size, size, radius);
+    ctx.fill();
+}
+
+/** Zeichnet ein Design ({element, bg}) in eine Canvas der Größe `size` (CSS-Pixel). */
+function renderIconDesign(canvas, design, size, {
+    background = true,
+    ratio = Math.max(1, Math.round(window.devicePixelRatio || 1))
+} = {}) {
+    canvas.width = size * ratio;
+    canvas.height = size * ratio;
+    canvas.style.width = size + 'px';
+    canvas.style.height = size + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, size, size);
+    if (background) drawIconBackground(ctx, size, design.bg);
+    const found = findIconElement(design.element);
+    if (!found) return;
+    // Motiv etwas kleiner als die Fläche, wenn ein Hintergrund da ist
+    const inset = background && design.bg !== 'none' ? 0.08 : 0;
+    ctx.translate(size * inset, size * inset);
+    const inner = size * (1 - inset * 2);
+    if (found.kind === 'block') drawIconBlock(ctx, inner, found.element);
+    else if (found.kind === 'head') drawIconHead(ctx, inner, found.element);
+    else drawIconItem(ctx, inner, found.element);
+}
+
+/** PNG (Data-URL) eines Designs in fester Größe – wird als Profil-Icon gespeichert. */
+function exportIconDesign(design, size = 256) {
+    const canvas = document.createElement('canvas');
+    // Immer genau `size` Pixel, unabhängig von der Bildschirmskalierung
+    renderIconDesign(canvas, design, size, { ratio: 1 });
+    return canvas.toDataURL('image/png');
+}
+
+// ── Fenster ─────────────────────────────────────────────────────────────────
+
+function iconEditorRecents() {
+    try {
+        const list = JSON.parse(getUiPref(ICON_RECENTS_KEY, '[]'));
+        return Array.isArray(list) ? list.filter(d => d && findIconElement(d.element)) : [];
+    } catch (_e) {
+        return [];
+    }
+}
+
+function randomIconDesign() {
+    const elements = availableIconElements();
+    const backgrounds = ICON_BACKGROUNDS.filter(b => b.from);
+    const pick = list => list[Math.floor(Math.random() * list.length)];
+    return { element: pick(elements).element.id, bg: pick(backgrounds).id };
+}
+
+async function openIconEditor(profileId) {
+    closeDynamicModal('icon-editor-modal');
+    iconEditor.profileId = profileId;
+    const modal = document.createElement('div');
+    modal.id = 'icon-editor-modal';
+    modal.className = 'icon-editor-backdrop';
+    modal.innerHTML = `
+        <div class="icon-editor" role="dialog" aria-label="Icon-Editor">
+            <header class="icon-editor-head">
+                <h3>Icon-Editor</h3>
+                <button type="button" class="settings-icon-btn" data-icon-close title="Schließen" aria-label="Schließen"><i class="bi bi-x-lg"></i></button>
+            </header>
+            <div class="icon-editor-body">
+                <aside class="icon-editor-side">
+                    <div class="icon-editor-preview">
+                        <canvas data-icon-preview></canvas>
+                        <div class="icon-editor-sizes">
+                            <canvas data-icon-size="48"></canvas>
+                            <canvas data-icon-size="32"></canvas>
+                            <canvas data-icon-size="16"></canvas>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-secondary icon-editor-random" data-icon-random><i class="bi bi-shuffle"></i> Zufällig</button>
+                    <div class="icon-editor-recents-wrap">
+                        <h4>Zuletzt verwendet</h4>
+                        <div class="icon-editor-recents" data-icon-recents></div>
+                    </div>
+                </aside>
+                <div class="icon-editor-picker" data-icon-picker>
+                    <div class="settings-empty"><span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span><span>Lade Texturen aus deinem Minecraft…</span></div>
+                </div>
+            </div>
+            <footer class="icon-editor-foot">
+                <span class="icon-editor-hint"><i class="bi bi-info-circle"></i> Kombiniere Hintergrund und Motiv zu deinem Profil-Icon.</span>
+                <button type="button" class="btn btn-secondary" data-icon-close><i class="bi bi-x-lg"></i> Abbrechen</button>
+                <button type="button" class="btn" data-icon-save disabled><i class="bi bi-floppy"></i> Icon speichern</button>
+            </footer>
+        </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', event => {
+        if (event.target === modal || event.target.closest('[data-icon-close]')) closeDynamicModal('icon-editor-modal');
+    });
+
+    try {
+        await loadIconTextures();
+    } catch (error) {
+        modal.querySelector('[data-icon-picker]').innerHTML =
+            `<div class="settings-empty"><i class="bi bi-exclamation-triangle"></i><span>${escapeHtml(String(error))}</span></div>`;
+        return;
+    }
+    if (!document.getElementById('icon-editor-modal')) return;
+    if (!availableIconElements().length) {
+        modal.querySelector('[data-icon-picker]').innerHTML =
+            '<div class="settings-empty"><i class="bi bi-exclamation-triangle"></i><span>Keine Texturen gefunden.</span></div>';
+        return;
+    }
+    iconEditor.design = iconEditorRecents()[0] || { element: 'grass_block', bg: 'green' };
+    if (!findIconElement(iconEditor.design.element)) iconEditor.design = randomIconDesign();
+    buildIconPicker(modal);
+    updateIconEditor(modal);
+
+    modal.querySelector('[data-icon-random]').addEventListener('click', () => {
+        iconEditor.design = randomIconDesign();
+        updateIconEditor(modal);
+    });
+    const save = modal.querySelector('[data-icon-save]');
+    save.disabled = false;
+    save.addEventListener('click', () => saveIconDesign(modal));
+}
+
+function buildIconPicker(modal) {
+    const picker = modal.querySelector('[data-icon-picker]');
+    const available = availableIconElements();
+    const section = (title, kind) => {
+        const items = available.filter(e => e.kind === kind);
+        if (!items.length) return '';
+        return `
+            <h4>${title}</h4>
+            <div class="icon-editor-grid">
+                ${items.map(({ element }) => `
+                    <button type="button" class="icon-editor-tile" data-icon-element="${escapeAttr(element.id)}" title="${escapeAttr(element.name)}" aria-label="${escapeAttr(element.name)}">
+                        <canvas></canvas>
+                        <i class="bi bi-check-lg icon-editor-check" aria-hidden="true"></i>
+                    </button>`).join('')}
+            </div>`;
+    };
+    picker.innerHTML = `
+        <h4>Hintergrund</h4>
+        <div class="icon-editor-swatches">
+            ${ICON_BACKGROUNDS.map(bg => `
+                <button type="button" class="icon-editor-swatch ${bg.from ? '' : 'none'}" data-icon-bg="${bg.id}" title="${escapeAttr(bg.label)}" aria-label="${escapeAttr(bg.label)}"
+                        style="${bg.from ? `background: linear-gradient(135deg, ${bg.from}, ${bg.to})` : ''}"></button>`).join('')}
+        </div>
+        ${section('Blöcke', 'block')}
+        ${section('Köpfe', 'head')}
+        ${section('Items', 'item')}`;
+    picker.querySelectorAll('[data-icon-element]').forEach(tile => {
+        renderIconDesign(tile.querySelector('canvas'), { element: tile.dataset.iconElement, bg: 'none' }, 56, { background: false });
+        tile.addEventListener('click', () => {
+            iconEditor.design = { ...iconEditor.design, element: tile.dataset.iconElement };
+            updateIconEditor(modal);
+        });
+    });
+    picker.querySelectorAll('[data-icon-bg]').forEach(swatch => {
+        swatch.addEventListener('click', () => {
+            iconEditor.design = { ...iconEditor.design, bg: swatch.dataset.iconBg };
+            updateIconEditor(modal);
+        });
+    });
+}
+
+function updateIconEditor(modal) {
+    const design = iconEditor.design;
+    renderIconDesign(modal.querySelector('[data-icon-preview]'), design, 168);
+    modal.querySelectorAll('[data-icon-size]').forEach(canvas => {
+        renderIconDesign(canvas, design, Number(canvas.dataset.iconSize));
+    });
+    modal.querySelectorAll('[data-icon-element]').forEach(tile => {
+        tile.classList.toggle('active', tile.dataset.iconElement === design.element);
+    });
+    modal.querySelectorAll('[data-icon-bg]').forEach(swatch => {
+        swatch.classList.toggle('active', swatch.dataset.iconBg === design.bg);
+    });
+    const recents = modal.querySelector('[data-icon-recents]');
+    const list = iconEditorRecents();
+    recents.innerHTML = list.length
+        ? list.map((_, i) => `<button type="button" class="icon-editor-recent" data-icon-recent="${i}"><canvas></canvas></button>`).join('')
+        : '<span class="icon-editor-hint">Noch keine</span>';
+    recents.querySelectorAll('[data-icon-recent]').forEach(button => {
+        const recent = list[Number(button.dataset.iconRecent)];
+        renderIconDesign(button.querySelector('canvas'), recent, 40);
+        button.addEventListener('click', () => {
+            iconEditor.design = { ...recent };
+            updateIconEditor(modal);
+        });
+    });
+}
+
+async function saveIconDesign(modal) {
+    const design = iconEditor.design;
+    const dataUrl = exportIconDesign(design, 256);
+    const recents = [design, ...iconEditorRecents().filter(d => d.element !== design.element || d.bg !== design.bg)].slice(0, 8);
+    setUiPref(ICON_RECENTS_KEY, JSON.stringify(recents));
+
+    // Im Einstellungsfenster übernehmen und gleich speichern
+    selectedProfileIcon = dataUrl;
+    const preview = document.getElementById('profile-icon-preview');
+    if (preview) {
+        preview.style.background = 'transparent';
+        preview.innerHTML = `<img alt="" src="${dataUrl}" style="width: 100%; height: 100%; object-fit: cover;">`;
+    }
+    try {
+        const list = await invoke('update_profile', { profileId: iconEditor.profileId, updates: { icon_path: dataUrl } });
+        if (list?.profiles) {
+            profiles = list.profiles;
+            if (currentProfile?.id === iconEditor.profileId) {
+                currentProfile = profiles.find(p => p.id === iconEditor.profileId) || currentProfile;
+            }
+            renderProfiles();
+        }
+        showToast('Profil-Icon gespeichert', 'success', 2500);
+        closeDynamicModal('icon-editor-modal');
+    } catch (error) {
+        showToast('Icon konnte nicht gespeichert werden: ' + error, 'error', 4000);
+    }
+    modal.querySelector('[data-icon-save]')?.blur();
+}
+
+// ============================================================================
+// Kompatibilität der Mods eines Profils
+// ============================================================================
+
+const COMPAT_ICONS = {
+    missing: 'bi-box-arrow-in-down',
+    disabled_dependency: 'bi-toggle-off',
+    incompatible: 'bi-exclamation-octagon',
+    duplicate: 'bi-files',
+    wrong_version: 'bi-calendar-x'
+};
+
+function compatIssueText(issue, profile) {
+    const mods = issue.mod_names.map(n => `<strong>${escapeHtml(n)}</strong>`);
+    const project = `<strong>${escapeHtml(issue.project_name || issue.project_id || '?')}</strong>`;
+    switch (issue.kind) {
+        case 'missing':
+            return `${mods.join(', ')} ${mods.length > 1 ? 'brauchen' : 'braucht'} ${project} – fehlt`;
+        case 'disabled_dependency':
+            return `${mods[0]} braucht ${mods[1] || project}, das deaktiviert ist`;
+        case 'incompatible':
+            return `${mods[0]} verträgt sich laut Autor nicht mit ${mods.slice(1).join(', ') || project}`;
+        case 'duplicate':
+            return `${project} ist mehrfach installiert`;
+        case 'wrong_version':
+            return `${mods[0]} ist nicht für Minecraft ${escapeHtml(profile.minecraft_version)} mit ${escapeHtml(profile.loader.loader)} gemacht`;
+        default:
+            return mods.join(', ');
+    }
+}
+
+function compatIssueActions(issue, profileId) {
+    const id = escapeAttr(profileId);
+    const button = (label, call, danger = false) =>
+        `<button type="button" class="btn btn-secondary compat-action${danger ? ' danger' : ''}" onclick="${call}">${label}</button>`;
+    const file = i => escapeAttr(String(issue.files[i] || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+    switch (issue.kind) {
+        case 'disabled_dependency':
+            return button('Aktivieren', `compatToggle('${id}', '${file(1)}', true)`);
+        case 'incompatible':
+            return issue.files.map((f, i) =>
+                button(`${escapeHtml(issue.mod_names[i] || f)} deaktivieren`, `compatToggle('${id}', '${file(i)}', false)`)).join('');
+        case 'duplicate':
+            return issue.files.map((f, i) =>
+                button(`<i class="bi bi-trash"></i> ${escapeHtml(f)}`, `compatDelete('${id}', '${file(i)}')`, true)).join('');
+        case 'wrong_version':
+            return button('Nach Updates suchen', `closeDynamicModal('compat-modal'); checkForModUpdates('${id}')`);
+        default:
+            return '';
+    }
+}
+
+async function openModCompatibility(profileId) {
+    closeDynamicModal('compat-modal');
+    const profile = profiles.find(p => p.id === profileId);
+    if (!profile) return;
+    const modal = document.createElement('div');
+    modal.id = 'compat-modal';
+    modal.className = 'icon-editor-backdrop';
+    modal.innerHTML = `
+        <div class="compat-dialog" role="dialog" aria-label="Kompatibilität">
+            <header class="icon-editor-head">
+                <h3><i class="bi bi-shield-check"></i> Kompatibilität</h3>
+                <button type="button" class="settings-icon-btn" data-compat-close aria-label="Schließen"><i class="bi bi-x-lg"></i></button>
+            </header>
+            <div class="compat-body" data-compat-body>
+                <div class="settings-empty"><span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span><span>Prüfe die Mods mit den Angaben ihrer Autoren auf Modrinth…</span></div>
+            </div>
+            <footer class="icon-editor-foot" data-compat-foot>
+                <span class="icon-editor-hint">Grundlage sind die Abhängigkeiten, die die Mod-Autoren auf Modrinth angeben.</span>
+                <button type="button" class="btn btn-secondary" data-compat-close>Schließen</button>
+            </footer>
+        </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', event => {
+        if (event.target === modal || event.target.closest('[data-compat-close]')) closeDynamicModal('compat-modal');
+    });
+    await renderModCompatibility(profile);
+}
+
+async function renderModCompatibility(profile) {
+    const modal = document.getElementById('compat-modal');
+    if (!modal) return;
+    const body = modal.querySelector('[data-compat-body]');
+    const foot = modal.querySelector('[data-compat-foot]');
+    let report;
+    try {
+        report = await invoke('check_mod_compatibility', { profileId: profile.id });
+    } catch (error) {
+        body.innerHTML = `<div class="settings-empty"><i class="bi bi-exclamation-triangle"></i><span>${escapeHtml(String(error))}</span></div>`;
+        return;
+    }
+    const missing = report.issues.filter(i => i.kind === 'missing');
+    const unknownNote = report.unknown.length
+        ? `<p class="compat-note"><i class="bi bi-info-circle"></i> ${report.unknown.length} Mod(s) sind nicht auf Modrinth und konnten nicht geprüft werden: ${report.unknown.map(escapeHtml).join(', ')}</p>`
+        : '';
+    if (!report.issues.length) {
+        body.innerHTML = `
+            <div class="compat-ok"><i class="bi bi-check-circle-fill"></i>
+                <div><strong>Alles passt zusammen</strong><span>${report.checked} Mods geprüft – keine fehlenden Bibliotheken, keine Konflikte.</span></div>
+            </div>${unknownNote}`;
+    } else {
+        body.innerHTML = `
+            <p class="compat-summary">${report.checked} Mods geprüft, ${report.issues.length} Hinweis(e):</p>
+            <div class="compat-list">
+                ${report.issues.map(issue => `
+                    <div class="compat-item compat-${issue.kind}">
+                        ${issue.icon_url
+                            ? `<img class="compat-icon" src="${escapeAttr(issue.icon_url)}" alt="" data-fallback="icon">`
+                            : `<span class="compat-icon"><i class="bi ${COMPAT_ICONS[issue.kind] || 'bi-info-circle'}"></i></span>`}
+                        <div class="compat-text">${compatIssueText(issue, profile)}</div>
+                        <div class="compat-actions">${compatIssueActions(issue, profile.id)}</div>
+                    </div>`).join('')}
+            </div>${unknownNote}`;
+    }
+    foot.innerHTML = `
+        <span class="icon-editor-hint">Grundlage sind die Abhängigkeiten, die die Mod-Autoren auf Modrinth angeben.</span>
+        ${missing.length ? `<button type="button" class="btn" data-compat-install><i class="bi bi-download"></i> Fehlende installieren (${missing.length})</button>` : ''}
+        <button type="button" class="btn btn-secondary" data-compat-close>Schließen</button>`;
+    foot.querySelector('[data-compat-install]')?.addEventListener('click', async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        button.innerHTML = '<span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span> Installiere…';
+        try {
+            const installed = await invoke('install_missing_dependencies', { profileId: profile.id });
+            showToast(`Installiert: ${installed.filter(Boolean).join(', ')}`, 'success', 5000);
+        } catch (error) {
+            showToast(String(error), 'error', 6000);
+        }
+        compatRefresh(profile.id);
+    });
+}
+
+function compatRefresh(profileId) {
+    invalidateProfileContentCaches(profileId);
+    loadInstalledMods(profileId, { force: true });
+    const profile = profiles.find(p => p.id === profileId);
+    if (profile) renderModCompatibility(profile);
+}
+
+async function compatToggle(profileId, filename, enable) {
+    try {
+        await invoke('toggle_mod', { profileId, filename, enable });
+    } catch (error) {
+        showToast(String(error), 'error', 4000);
+    }
+    compatRefresh(profileId);
+}
+
+async function compatDelete(profileId, filename) {
+    try {
+        await invoke('delete_mod', { profileId, filename });
+    } catch (error) {
+        showToast(String(error), 'error', 4000);
+    }
+    compatRefresh(profileId);
+}
+
+// ============================================================================
+// Zusammen spielen: Freunde in Welten und auf lokale Server einladen
+// ============================================================================
+
+const playInvite = { kind: null, targetId: null, title: null, timer: null };
+
+async function openPlayInvite(kind, targetId, title) {
+    closePlayInvite();
+    Object.assign(playInvite, { kind, targetId, title });
+    const isWorld = kind === 'world';
+    const modal = document.createElement('div');
+    modal.id = 'play-invite-modal';
+    modal.className = 'icon-editor-backdrop';
+    modal.innerHTML = `
+        <div class="play-dialog" role="dialog" aria-label="Freunde einladen">
+            <header class="icon-editor-head">
+                <h3><i class="bi bi-person-plus"></i> Freunde einladen</h3>
+                <button type="button" class="settings-icon-btn" data-play-close aria-label="Schließen"><i class="bi bi-x-lg"></i></button>
+            </header>
+            <div class="play-body">
+                <div class="play-target">
+                    <i class="bi ${isWorld ? 'bi-globe2' : 'bi-hdd-network'}"></i>
+                    <div><strong>${escapeHtml(title)}</strong><span>${isWorld ? 'Einzelspieler-Welt' : 'Lokaler Server'}</span></div>
+                </div>
+                <div class="play-status" data-play-status><span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span> Prüfe…</div>
+                <h4>Freunde</h4>
+                <div class="play-friends" data-play-friends></div>
+                <p class="play-note"><i class="bi bi-info-circle"></i> Eingeladene Freunde bekommen nur die Mods, die zum Mitspielen nötig sind, und verbinden sich über einen verschlüsselten P2P-Tunnel – ohne Portfreigabe.</p>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', event => {
+        if (event.target === modal || event.target.closest('[data-play-close]')) closePlayInvite();
+    });
+    renderPlayFriends();
+    await refreshPlayStatus();
+    playInvite.timer = setInterval(refreshPlayStatus, 3000);
+}
+
+function closePlayInvite() {
+    clearInterval(playInvite.timer);
+    playInvite.timer = null;
+    closeDynamicModal('play-invite-modal');
+}
+
+async function refreshPlayStatus() {
+    const box = document.querySelector('#play-invite-modal [data-play-status]');
+    if (!box) return closePlayInvite();
+    try {
+        const status = await invoke('play_status', { kind: playInvite.kind, targetId: playInvite.targetId });
+        const start = playInvite.kind === 'world'
+            ? `<button type="button" class="btn btn-secondary share-small-btn" onclick="launchWorld('${escapeAttr(playInvite.targetId)}', '${escapeAttr(String(playInvite.title).replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')"><i class="bi bi-play-fill"></i> Welt starten</button>`
+            : `<button type="button" class="btn btn-secondary share-small-btn" onclick="toggleServerProfile('${escapeAttr(playInvite.targetId)}')"><i class="bi bi-play-fill"></i> Server starten</button>`;
+        box.className = 'play-status ' + (status.open ? 'open' : 'closed');
+        box.innerHTML = `<i class="bi ${status.open ? 'bi-check-circle-fill' : 'bi-hourglass-split'}"></i>
+            <span>${escapeHtml(status.detail)}</span>${status.running ? '' : start}`;
+    } catch (error) {
+        box.className = 'play-status closed';
+        box.innerHTML = `<i class="bi bi-exclamation-triangle"></i><span>${escapeHtml(String(error))}</span>`;
+    }
+}
+
+function renderPlayFriends() {
+    const list = document.querySelector('#play-invite-modal [data-play-friends]');
+    if (!list) return;
+    if (!friendsUi.ready) {
+        list.innerHTML = '<div class="settings-empty"><i class="bi bi-plug"></i><span>Das Freunde-System ist nicht aktiv.</span></div>';
+        return;
+    }
+    const friends = (friendsUi.state?.friends || []).filter(f => f.state === 'accepted');
+    if (!friends.length) {
+        list.innerHTML = '<div class="settings-empty"><i class="bi bi-people"></i><span>Noch keine Freunde – füge sie im Freunde-Kasten mit ihrem Code hinzu.</span></div>';
+        return;
+    }
+    list.innerHTML = friends.map(friend => `
+        <div class="play-friend ${friend.online ? '' : 'offline'}">
+            <img alt="" src="${escapeAttr(playerHeadUrl(friend.uuid, friend.name))}">
+            <div class="play-friend-text">
+                <strong>${escapeHtml(friend.name)}</strong>
+                <span>${friend.online ? 'Online' : 'Offline'}</span>
+            </div>
+            <button type="button" class="btn share-small-btn" data-play-invite="${escapeAttr(friend.id)}" ${friend.online ? '' : 'disabled title="Zum Zusammenspielen müsst ihr beide online sein"'}>
+                <i class="bi bi-send"></i> Einladen
+            </button>
+        </div>`).join('');
+    list.querySelectorAll('[data-play-invite]').forEach(button => {
+        button.addEventListener('click', async () => {
+            button.disabled = true;
+            try {
+                const message = await invoke('play_invite', {
+                    kind: playInvite.kind,
+                    targetId: playInvite.targetId,
+                    title: playInvite.title,
+                    friendId: button.dataset.playInvite
+                });
+                showToast(message, 'success', 3500);
+                button.innerHTML = '<i class="bi bi-check-lg"></i> Eingeladen';
+            } catch (error) {
+                showToast(String(error), 'error', 5000);
+                button.disabled = false;
+            }
+        });
+    });
+}
+
+/** Einladung annehmen: Profil + Mindest-Mods vorbereiten, Tunnel öffnen, Minecraft starten. */
+async function joinPlaySession(hostId, sessionId, button = null) {
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '<span class="lion-spin"><i class="bi bi-arrow-repeat"></i></span> Bereite vor…';
+    }
+    showToast('Bereite das Profil und die nötigen Mods vor…', 'info', 4000);
+    try {
+        const join = await invoke('play_join', { hostId, sessionId });
+        if (join.result?.failed?.length) {
+            showToast(`Nicht alles ließ sich installieren: ${join.result.failed.join(', ')}`, 'warning', 7000);
+        }
+        await loadProfiles();
+        await launchServer(join.profile_id, join.address);
+    } catch (error) {
+        showToast(String(error), 'error', 7000);
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '<i class="bi bi-play-fill"></i> Beitreten';
+        }
+    }
+}

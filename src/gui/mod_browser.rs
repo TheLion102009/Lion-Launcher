@@ -252,14 +252,69 @@ pub async fn get_mod_info(mod_id: String, source: String) -> Result<ModInfo, Str
     }
 }
 
+/// Ergebnis einer Mod-Installation.
+#[derive(serde::Serialize, Default)]
+pub struct InstallOutcome {
+    /// Automatisch mitinstallierte Pflicht-Abhängigkeiten (Namen)
+    pub dependencies: Vec<String>,
+    /// Abhängigkeiten, die sich nicht installieren ließen (Projekt-IDs)
+    pub failed: Vec<String>,
+}
+
+/// Installiert eine Mod und – bei Modrinth-Mods – ihre fehlenden Pflicht-Abhängigkeiten
+/// (z.B. Fabric API, Bibliotheken), jeweils passend zu Minecraft-Version und Loader.
 #[tauri::command]
 pub async fn install_mod(
     profile_id: String,
     mod_id: String,
     version_id: Option<String>, // Optional - wenn None, finden wir die passende Version
     source: String,
-) -> Result<(), String> {
+) -> Result<InstallOutcome, String> {
+    let first = install_one(&profile_id, &mod_id, version_id, &source).await?;
+    let mut outcome = InstallOutcome::default();
+    if source != "modrinth" || first.required.is_empty() {
+        return Ok(outcome);
+    }
+    let mut installed = crate::gui::mod_updates::installed_project_ids(&profile_id)
+        .await
+        .unwrap_or_default();
+    installed.insert(mod_id);
+    let mut queue = first.required;
+    let mut seen = std::collections::HashSet::new();
+    while let Some(dependency) = queue.pop() {
+        // Begrenzt, falls Angaben auf Modrinth im Kreis verweisen
+        if seen.len() >= 40 || !seen.insert(dependency.clone()) || installed.contains(&dependency) {
+            continue;
+        }
+        match install_one(&profile_id, &dependency, None, "modrinth").await {
+            Ok(done) => {
+                installed.insert(dependency);
+                outcome.dependencies.push(done.name);
+                queue.extend(done.required);
+            }
+            Err(e) => {
+                tracing::warn!("Dependency {} not installed: {}", dependency, e);
+                outcome.failed.push(dependency);
+            }
+        }
+    }
+    Ok(outcome)
+}
+
+/// Eine installierte Mod-Version: Name und ihre Pflicht-Abhängigkeiten (Projekt-IDs).
+struct InstalledOne {
+    name: String,
+    required: Vec<String>,
+}
+
+async fn install_one(
+    profile_id: &str,
+    mod_id: &str,
+    version_id: Option<String>,
+    source: &str,
+) -> Result<InstalledOne, String> {
     use crate::core::profiles::ProfileManager;
+    let (profile_id, mod_id, source) = (profile_id.to_string(), mod_id.to_string(), source.to_string());
 
     let profile_manager = ProfileManager::new().map_err(|e| e.to_string())?;
     let mut profiles = profile_manager
@@ -279,11 +334,15 @@ pub async fn install_mod(
         }
         crate::core::horizon::registry::install(&profile.game_dir, &mod_id, version_id.as_deref())
             .await?;
-        profile.add_mod(mod_id);
-        return profile_manager
+        profile.add_mod(mod_id.clone());
+        profile_manager
             .save_profiles(&profiles)
             .await
-            .map_err(|e| e.to_string());
+            .map_err(|e| e.to_string())?;
+        return Ok(InstalledOne {
+            name: mod_id,
+            required: Vec::new(),
+        });
     }
 
     let mods_dir = profile.game_dir.join("mods");
@@ -493,13 +552,24 @@ pub async fn install_mod(
 
     tracing::info!("Mod {} installed successfully to {:?}", mod_id, mods_dir);
 
+    let required = version
+        .dependencies
+        .iter()
+        .filter(|d| {
+            d.dependency_type == crate::types::mod_info::DependencyType::Required
+                && !d.mod_id.is_empty()
+        })
+        .map(|d| d.mod_id.clone())
+        .collect();
+    let name = mod_name.clone().unwrap_or_else(|| mod_id.clone());
+
     profile.add_mod(mod_id.clone());
     profile_manager
         .save_profiles(&profiles)
         .await
         .map_err(|e| e.to_string())?;
 
-    Ok(())
+    Ok(InstalledOne { name, required })
 }
 
 #[tauri::command]

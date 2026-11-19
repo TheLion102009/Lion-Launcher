@@ -83,6 +83,12 @@ fn main() {
             gui::get_horizon_categories,
             gui::get_horizon_info,
             gui::set_horizon_native_trust,
+            gui::icon_textures::get_icon_textures,
+            gui::check_mod_compatibility,
+            gui::install_missing_dependencies,
+            gui::friends::play::play_status,
+            gui::friends::play::play_invite,
+            gui::friends::play::play_join,
             // Geteilte Instanzen
             gui::friends::share::share_status,
             gui::friends::share::share_create,

@@ -40,7 +40,7 @@ fn share_link(owner_id: &str, share: &OwnedShare) -> String {
     )
 }
 
-fn parse_loader(loader: &str) -> Result<ModLoader, String> {
+pub(super) fn parse_loader(loader: &str) -> Result<ModLoader, String> {
     match loader.to_lowercase().as_str() {
         "vanilla" => Ok(ModLoader::Vanilla),
         "fabric" => Ok(ModLoader::Fabric),
@@ -142,7 +142,7 @@ async fn load_state_snapshot<T>(f: impl FnOnce(&FriendsState) -> T) -> Result<T,
 
 /// Erstellt den aktuellen Stand einer Instanz. Mit `write_blobs` werden Dateien, die der
 /// Besitzer selbst ausliefert, in den Snapshot-Speicher kopiert (beim Veröffentlichen).
-async fn build_manifest(
+pub(super) async fn build_manifest(
     profile: &Profile,
     share_id: &str,
     revision: u64,
@@ -392,7 +392,7 @@ async fn update_profile_version(
 
 /// Bringt eine Instanz vom Stand `old` (None = neu) auf den Stand `new`.
 /// Eigene Inhalte des Mitglieds bleiben unangetastet.
-async fn apply_manifest(
+pub(super) async fn apply_manifest(
     service: &FriendsService,
     owner_id: &str,
     mut profile: Profile,
@@ -719,6 +719,8 @@ pub(super) async fn handle_share_request(
                                 .blob_hashes()
                                 .any(|h| h.eq_ignore_ascii_case(&sha1))
                     })
+                    // Dateien für eingeladene Freunde (Zusammen spielen)
+                    || super::play::may_fetch(&state, remote, &share_id, &sha1)
             };
             if !allowed || !is_sha1_hex(&sha1) {
                 return protocol::encode_error("Kein Zugriff auf diese Datei");
@@ -1142,6 +1144,7 @@ pub async fn share_invite_friend(profile_id: String, friend_id: String) -> Resul
             read: true,
             share_id: Some(share_id.clone()),
             share_name: Some(name),
+            play: None,
         });
         if !delivered {
             if let Some(share) = state.owned_by_profile_mut(&profile_id) {

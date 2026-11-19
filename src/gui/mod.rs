@@ -5,6 +5,7 @@ pub mod content_share;
 pub mod discord;
 pub mod external_links;
 pub mod friends;
+pub mod icon_textures;
 pub mod mod_browser;
 pub mod mod_updates;
 pub mod pack_sync;

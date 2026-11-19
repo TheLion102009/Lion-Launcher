@@ -100,6 +100,18 @@ pub enum Request {
     },
     /// Verknüpfung eines eigenen Geräts aufheben
     UnlinkDevice,
+    /// Einladung zum Zusammenspielen in einer Welt oder auf einem lokalen Server
+    PlayInvite {
+        session_id: String,
+        kind: String,
+        title: String,
+        minecraft_version: String,
+        loader: String,
+    },
+    /// Version, Loader und Mindest-Modpaket einer Einladung
+    GetPlayManifest {
+        session_id: String,
+    },
 }
 
 /// Abgleich der Freundesliste zwischen eigenen Geräten.

@@ -361,7 +361,14 @@ pub struct MinecraftLauncher {
 
 #[derive(Debug, serde::Deserialize)]
 struct VersionManifest {
+    #[serde(default)]
+    latest: Option<LatestVersions>,
     versions: Vec<VersionEntry>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LatestVersions {
+    release: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -2825,6 +2832,24 @@ void* flite_voice_load(const char* p)                    { return (void*)0; }
             assets_dir,
             server_jar,
         })
+    }
+
+    /// Lädt nur das Client-JAR der neuesten Release-Version (z.B. für Texturen des Icon-Editors).
+    pub async fn ensure_latest_release_client(&self) -> Result<PathBuf> {
+        let manifest: VersionManifest = reqwest::get(MOJANG_MANIFEST_URL).await?.json().await?;
+        let release = manifest
+            .latest
+            .map(|l| l.release)
+            .ok_or_else(|| anyhow::anyhow!("Keine aktuelle Version im Manifest"))?;
+        let info = self.get_version_info(&release).await?;
+        let jar = defaults::versions_dir()
+            .join(&release)
+            .join(format!("{release}.jar"));
+        if !jar.exists() {
+            self.download_verified(&info.downloads.client.url, &jar, &info.downloads.client.sha1)
+                .await?;
+        }
+        Ok(jar)
     }
 
     /// Lädt eine Datei mit SHA-1-Prüfung (z.B. das Server-JAR für Horizon).
