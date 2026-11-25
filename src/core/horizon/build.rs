@@ -494,7 +494,13 @@ pub async fn ensure_cli(progress: &(dyn Fn(String, u8) + Sync)) -> Result<PathBu
             r.tag_name.starts_with("launcher@") && r.assets.iter().any(|a| a.name == asset)
         }),
         Err(e) => {
-            return existing.ok_or_else(|| format!("Horizon-Werkzeuge nicht erreichbar: {e}"))
+            return existing.ok_or_else(|| {
+                format!(
+                    "Native Mods können gerade nicht gebaut werden: Die Werkzeuge dafür kommen von Horizons \
+                     GitHub-Projekt, das nicht erreichbar ist ({e}). Schalte die nativen Mods aus, um ohne \
+                     sie zu spielen, oder versuche es später erneut."
+                )
+            })
         }
     };
     *CLI_CHECK.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now());

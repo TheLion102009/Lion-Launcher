@@ -193,10 +193,15 @@ pub async fn open_profile_folder(
         .get_profile(&profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
-    let path = if let Some(sub) = subfolder {
-        profile.game_dir.join(sub)
-    } else {
-        profile.game_dir.clone()
+    let path = match subfolder.as_deref() {
+        // Horizon-Mods liegen nicht in mods/
+        Some("mods") if profile.loader.loader == crate::types::version::ModLoader::Horizon => {
+            profile
+                .game_dir
+                .join(crate::core::horizon::registry::MODS_DIR)
+        }
+        Some(sub) => profile.game_dir.join(sub),
+        None => profile.game_dir.clone(),
     };
 
     // Erstelle Ordner falls nicht vorhanden

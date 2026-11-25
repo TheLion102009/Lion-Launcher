@@ -222,6 +222,17 @@ fn parse_index(bytes: &[u8]) -> Result<Index, String> {
     Ok(index)
 }
 
+/// Fehlermeldung, wenn Horizons Server (GitHub) nicht antworten.
+fn unreachable_message(error: &reqwest::Error) -> String {
+    match error.status() {
+        Some(status) if status.as_u16() == 404 => {
+            "Horizons Mod-Verzeichnis ist gerade nicht erreichbar (GitHub meldet 404 – das Horizon-Projekt ist dort zurzeit nicht verfügbar)".into()
+        }
+        Some(status) => format!("Horizons Mod-Verzeichnis antwortet nicht ({status})"),
+        None => format!("Horizons Mod-Verzeichnis ist nicht erreichbar: {error}"),
+    }
+}
+
 /// Index laden (höchstens alle zehn Minuten neu; offline die letzte gespeicherte Kopie).
 pub async fn index() -> Result<Arc<Index>, String> {
     if let Some((loaded, index)) = INDEX.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
@@ -245,8 +256,7 @@ pub async fn index() -> Result<Arc<Index>, String> {
             index
         }
         Err(e) => {
-            let cached = std::fs::read(index_cache_file())
-                .map_err(|_| format!("Horizon-Verzeichnis nicht erreichbar: {e}"))?;
+            let cached = std::fs::read(index_cache_file()).map_err(|_| unreachable_message(&e))?;
             parse_index(&cached)?
         }
     };
@@ -544,16 +554,17 @@ fn allowed_url(url: &str) -> bool {
 }
 
 fn allowed_file_name(name: &str, kind: &str) -> bool {
-    let extension = match kind {
-        "mod" => ".hmod",
-        "native-mod" => ".hnmod",
-        "shader" => ".hshader",
-        "resourcepack" | "shaderpack" => ".zip",
+    let extensions: &[&str] = match kind {
+        "mod" => &[".hmod"],
+        // Native Mods: früher .hnmod, inzwischen ebenfalls .hmod
+        "native-mod" => &[".hmod", ".hnmod"],
+        "shader" => &[".hshader"],
+        "resourcepack" | "shaderpack" => &[".zip"],
         _ => return false,
     };
     !name.is_empty()
         && name.len() <= 128
-        && name.ends_with(extension)
+        && extensions.iter().any(|ext| name.ends_with(ext))
         && !name.starts_with('.')
         && name
             .chars()
@@ -573,20 +584,55 @@ fn manifest_value(manifest: &str, key: &str) -> Option<String> {
         })
 }
 
-/// Natives Paket: `horizon-native.json` muss die ID des Eintrags tragen.
-fn check_native_manifest(bytes: &[u8], id: &str) -> Result<(), String> {
-    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
-        .map_err(|_| "Die Mod-Datei ist kein gültiges Paket".to_string())?;
+/// Was ein Mod-Paket über sich sagt: ID und ob es nativer Rust-Code ist.
+struct PackageInfo {
+    id: Option<String>,
+    native: bool,
+}
+
+fn read_entry<R: std::io::Read + std::io::Seek>(
+    zip: &mut zip::ZipArchive<R>,
+    name: &str,
+) -> Option<String> {
     let mut text = String::new();
-    std::io::Read::read_to_string(
-        &mut zip
-            .by_name("horizon-native.json")
-            .map_err(|_| "Dem nativen Mod fehlt horizon-native.json".to_string())?,
-        &mut text,
-    )
-    .map_err(|e| e.to_string())?;
-    let manifest: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    match manifest["id"].as_str() {
+    std::io::Read::read_to_string(&mut zip.by_name(name).ok()?, &mut text).ok()?;
+    Some(text)
+}
+
+/// Liest ein Paket: nativ ist es mit einer `[native]`-Tabelle in `horizon-mod.toml` oder im
+/// alten Format (`horizon-native.json`). WebAssembly-Mods (`[wasm]`) enthalten zwar auch ein
+/// Rust-Projekt, laufen aber fertig kompiliert direkt aus `horizon-mods/`.
+fn package_info<R: std::io::Read + std::io::Seek>(reader: R) -> Option<PackageInfo> {
+    let mut zip = zip::ZipArchive::new(reader).ok()?;
+    if let Some(text) = read_entry(&mut zip, "horizon-native.json") {
+        let manifest: serde_json::Value = serde_json::from_str(&text).ok()?;
+        return Some(PackageInfo {
+            id: manifest["id"].as_str().map(String::from),
+            native: true,
+        });
+    }
+    let manifest = read_entry(&mut zip, "horizon-mod.toml")?;
+    let native = manifest
+        .lines()
+        .any(|line| line.trim_start().starts_with("[native"));
+    Some(PackageInfo {
+        id: manifest_value(&manifest, "id"),
+        native,
+    })
+}
+
+fn package_info_of_file(path: &Path) -> Option<PackageInfo> {
+    package_info(std::fs::File::open(path).ok()?)
+}
+
+/// Natives Paket: muss nativ sein und die ID des Eintrags tragen.
+fn check_native_manifest(bytes: &[u8], id: &str) -> Result<(), String> {
+    let info = package_info(std::io::Cursor::new(bytes))
+        .ok_or_else(|| "Die Mod-Datei ist kein gültiges Paket".to_string())?;
+    if !info.native {
+        return Err("Das Paket enthält keinen nativen Mod".into());
+    }
+    match info.id {
         Some(found) if found == id => Ok(()),
         found => Err(format!(
             "Die Mod-Datei passt nicht zum Eintrag (ID {:?} statt {id})",
@@ -606,6 +652,14 @@ fn check_mod_manifest(bytes: &[u8], id: &str) -> Result<(), String> {
         &mut manifest,
     )
     .map_err(|e| e.to_string())?;
+    if manifest
+        .lines()
+        .any(|line| line.trim_start().starts_with("[native"))
+    {
+        return Err(
+            "Das Paket ist ein nativer Mod, im Verzeichnis aber als Content-Mod eingetragen".into(),
+        );
+    }
     match manifest_value(&manifest, "id") {
         Some(found) if found == id => Ok(()),
         found => Err(format!(
@@ -643,7 +697,7 @@ async fn download_checked(
         .send()
         .await
         .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("Download fehlgeschlagen: {e}"))?
+        .map_err(|e| format!("Download fehlgeschlagen: {}", unreachable_message(&e)))?
         .bytes()
         .await
         .map_err(|e| format!("Download fehlgeschlagen: {e}"))?;
@@ -684,21 +738,51 @@ fn content_kind_of(project: &Project) -> Option<ContentKind> {
 }
 
 /// Dateiname im Spielordner: Mods heißen wie ihre ID (`horizon-mods/<id>.hmod`,
-/// `horizon-native-mods/<id>.hnmod` – wie im Horizon-Launcher).
+/// native in `horizon-native-mods/<id>.hmod` – wie im Horizon-Launcher).
 fn target_file_name(project: &Project, version: &Version) -> String {
     match project.kind.as_str() {
         "mod" => format!("{}.hmod", project.id),
-        "native-mod" => format!("{}.hnmod", project.id),
+        "native-mod" if version.file.name.ends_with(".hnmod") => format!("{}.hnmod", project.id),
+        "native-mod" => format!("{}.hmod", project.id),
         _ => version.file.name.clone(),
     }
 }
 
-/// Ordner einer Inhaltsdatei im Spielordner.
-fn folder_for(kind: ContentKind, file_name: &str) -> &'static str {
-    if kind == ContentKind::Mod && file_name.ends_with(".hnmod") {
+/// Ordner für eine neue Datei: native Mods getrennt von Content-Mods.
+fn folder_for_project(kind: ContentKind, project: &Project) -> &'static str {
+    if project.kind == "native-mod" {
         NATIVE_DIR
     } else {
         kind.folder()
+    }
+}
+
+/// Ordner, in dem eine installierte Mod-Datei liegt (native zuerst).
+fn mod_folder_of(game_dir: &Path, file_name: &str) -> &'static str {
+    if game_dir.join(NATIVE_DIR).join(file_name).is_file() {
+        NATIVE_DIR
+    } else {
+        MODS_DIR
+    }
+}
+
+/// Native Mods, die (z.B. von einer älteren Version oder von Hand) in `horizon-mods/` gelandet
+/// sind, nach `horizon-native-mods/` verschieben – das Spiel lädt dort nur Content-Mods.
+pub fn move_misplaced_native_mods(game_dir: &Path) {
+    let content_dir = game_dir.join(MODS_DIR);
+    for file_name in mod_files(&content_dir, ".hmod") {
+        let path = content_dir.join(&file_name);
+        if !package_info_of_file(&path).is_some_and(|info| info.native) {
+            continue;
+        }
+        let native_dir = game_dir.join(NATIVE_DIR);
+        if std::fs::create_dir_all(&native_dir).is_ok() {
+            let target = native_dir.join(&file_name);
+            std::fs::remove_file(&target).ok();
+            if std::fs::rename(&path, &target).is_ok() {
+                tracing::info!("Moved native Horizon mod {} to {}", file_name, NATIVE_DIR);
+            }
+        }
     }
 }
 
@@ -733,12 +817,17 @@ pub async fn install(
 
     let bytes = download_checked(&index, project, chosen).await?;
     let file_name = target_file_name(project, chosen);
-    let folder = game_dir.join(folder_for(kind, &file_name));
+    let folder = game_dir.join(folder_for_project(kind, project));
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
 
     // Ältere Version desselben Projekts entfernen
     if let Some(old) = installed_file_of(game_dir, kind, &project.id) {
-        let old_path = game_dir.join(folder_for(kind, &old)).join(&old);
+        let old_folder = if kind == ContentKind::Mod {
+            mod_folder_of(game_dir, &old)
+        } else {
+            kind.folder()
+        };
+        let old_path = game_dir.join(old_folder).join(&old);
         if old_path.is_file() {
             std::fs::remove_file(&old_path).ok();
         }
@@ -895,11 +984,14 @@ fn mod_files(dir: &Path, extension: &str) -> Vec<String> {
 }
 
 pub fn installed_mods(game_dir: &Path) -> Vec<InstalledMod> {
+    move_misplaced_native_mods(game_dir);
     let content = mod_files(&game_dir.join(MODS_DIR), ".hmod")
         .into_iter()
         .map(|f| (f, false));
-    let native = mod_files(&game_dir.join(NATIVE_DIR), ".hnmod")
+    let native_dir = game_dir.join(NATIVE_DIR);
+    let native = mod_files(&native_dir, ".hmod")
         .into_iter()
+        .chain(mod_files(&native_dir, ".hnmod"))
         .map(|f| (f, true));
     let mut mods: Vec<InstalledMod> = content
         .chain(native)
@@ -935,7 +1027,7 @@ pub fn enabled_native_mods(game_dir: &Path) -> Vec<PathBuf> {
 
 pub fn delete_mod(game_dir: &Path, file_name: &str) -> Result<(), String> {
     let path = game_dir
-        .join(folder_for(ContentKind::Mod, file_name))
+        .join(mod_folder_of(game_dir, file_name))
         .join(file_name);
     if !path.is_file() {
         return Err(format!("Mod-Datei nicht gefunden: {file_name}"));
@@ -1069,6 +1161,8 @@ mod tests {
         assert!(!allowed_url("https://example.com/x.hmod"));
         assert!(!allowed_url("https://github.com/me/repo/raw/main/x.hmod"));
         assert!(allowed_file_name("x-1.0.hmod", "mod"));
+        assert!(allowed_file_name("create.hmod", "native-mod"));
+        assert!(allowed_file_name("old.hnmod", "native-mod"));
         assert!(!allowed_file_name("../x.hmod", "mod"));
         assert!(!allowed_file_name("x.zip", "mod"));
         assert!(allowed_file_name("pack.zip", "resourcepack"));
@@ -1110,6 +1204,73 @@ mod tests {
             Some("coords_hud")
         );
         assert_eq!(manifest_value(manifest, "missing"), None);
+    }
+
+    fn zip_with(files: &[(&str, &str)]) -> Vec<u8> {
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buffer);
+            for (name, content) in files {
+                zip.start_file(*name, zip::write::FileOptions::default())
+                    .unwrap();
+                std::io::Write::write_all(&mut zip, content.as_bytes()).unwrap();
+            }
+            zip.finish().unwrap();
+        }
+        buffer.into_inner()
+    }
+
+    #[test]
+    fn recognizes_native_packages_by_content() {
+        let native = zip_with(&[
+            (
+                "horizon-mod.toml",
+                "id = \"create\"\nversion = \"1.0\"\n[native]\nhorizon = \"abc\"\n",
+            ),
+            ("Cargo.toml", "[package]"),
+        ]);
+        let info = package_info(std::io::Cursor::new(&native)).unwrap();
+        assert!(info.native);
+        assert_eq!(info.id.as_deref(), Some("create"));
+        assert!(check_native_manifest(&native, "create").is_ok());
+        assert!(check_mod_manifest(&native, "create").is_err());
+
+        let content = zip_with(&[("horizon-mod.toml", "id = \"zoom\"\napi = \"0.2\"\n")]);
+        let info = package_info(std::io::Cursor::new(&content)).unwrap();
+        assert!(!info.native);
+        assert!(check_mod_manifest(&content, "zoom").is_ok());
+
+        let wasm = zip_with(&[
+            ("horizon-mod.toml", "id = \"zoom\"\napi = \"0.2\"\n[wasm]\nsha512 = \"x\"\n"),
+            ("Cargo.toml", "[package]"),
+            ("mod.wasm", "wasm"),
+        ]);
+        assert!(!package_info(std::io::Cursor::new(&wasm)).unwrap().native);
+
+        let old = zip_with(&[("horizon-native.json", r#"{"id":"wayfarer"}"#)]);
+        assert!(package_info(std::io::Cursor::new(&old)).unwrap().native);
+    }
+
+    #[test]
+    fn moves_native_mods_out_of_the_content_folder() {
+        let dir = std::env::temp_dir().join(format!("lion-horizon-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join(MODS_DIR)).unwrap();
+        std::fs::write(
+            dir.join(MODS_DIR).join("create.hmod"),
+            zip_with(&[("horizon-mod.toml", "id = \"create\"\n[native]\n")]),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(MODS_DIR).join("zoom.hmod"),
+            zip_with(&[("horizon-mod.toml", "id = \"zoom\"\n")]),
+        )
+        .unwrap();
+        let mods = installed_mods(&dir);
+        assert!(dir.join(NATIVE_DIR).join("create.hmod").is_file());
+        assert!(dir.join(MODS_DIR).join("zoom.hmod").is_file());
+        assert!(mods.iter().any(|m| m.id == "create" && m.native));
+        assert!(mods.iter().any(|m| m.id == "zoom" && !m.native));
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]

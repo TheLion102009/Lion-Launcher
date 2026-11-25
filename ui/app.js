@@ -3800,7 +3800,7 @@ async function loadInstalledMods(profileId, options = {}) {
                     <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-box"></i></div>
                     <p>${t('no_mods_installed')}</p>
                     <p style="font-size: 14px; margin-top: 10px;">
-                        Gehe zum <a href="#" onclick="navigateToPage('mods'); return false;" style="color: var(--gold);">Mod Browser</a> um Mods zu installieren
+                        Gehe zum <a href="#" onclick="openContentBrowser('${escapeAttr(profileId)}'); return false;" style="color: var(--gold);">Mod Browser</a> um Mods zu installieren
                     </p>
                 </div>
             `;
@@ -3836,7 +3836,7 @@ async function loadInstalledMods(profileId, options = {}) {
                     <div style="font-size: 48px; margin-bottom: 15px;"><i class="bi bi-box"></i></div>
                     <p>${t('no_mods_installed')}</p>
                     <p style="font-size: 14px; margin-top: 10px;">
-                        Gehe zum <a href="#" onclick="navigateToPage('mods'); return false;" style="color: var(--gold);">Mod Browser</a> um Mods zu installieren
+                        Gehe zum <a href="#" onclick="openContentBrowser('${escapeAttr(profileId)}'); return false;" style="color: var(--gold);">Mod Browser</a> um Mods zu installieren
                     </p>
                 </div>
             `;
